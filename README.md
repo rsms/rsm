@@ -1,9 +1,9 @@
-# rsm — rsms's smol machine
+# RSM — rsms's smol machine
 
 Virtual computer
 
 Project goals:
-1. learn, have fun -- simlicity
+1. learn, have fun -- simplicity
 2. substrate, a thing to make other thing on
 3. longevity -- I want to be able to run a (multimedia) program in 10+ years
 
@@ -12,9 +12,9 @@ Constraints
 - simple semantics:
   - global constants
   - vm uses registers
-  - assmebly language offers named (automatic regalloc) locals
+  - assembly language offers named (automatic regalloc) locals
     - mutable locals, parameters and variables are all treated the same
-    - simple syntax where whitespace is ignored
+    - simple syntax where white-space is ignored
 
 
 ## Building & running
@@ -22,6 +22,11 @@ Constraints
 ```
 ./build.sh -debug -w -run=out/rsm
 ```
+
+You'll need the following things to build rsm:
+- bash (or a bash-compatible shell like zsh)
+- [ninja](https://ninja-build.org) (or a ninja-compatible program like [samurai](https://github.com/michaelforney/samurai))
+- C11 compiler (like Clang or GCC) with a standard libc
 
 
 ## Example
@@ -99,7 +104,7 @@ Calling convention:
 
 [this is just at the idea stage]
 
-Simple syntax where whitespace is ignored
+Simple syntax where white-space is ignored
 
 ```
 fundef = "fun" name "(" params? ")" result? LF

@@ -1,0 +1,11 @@
+/out
+/deps
+/work
+/build.ninja
+/_*
+.DS_Store
+.ninja*
+~*
+*.o
+*.d
+*.pch

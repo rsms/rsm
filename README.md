@@ -20,7 +20,7 @@ Constraints
 ## Building & running
 
 ```
-./build.sh -debug -w -run=out/rsm
+./build.sh -debug && ./out/rsm
 ```
 
 You'll need the following things to build rsm:

@@ -57,9 +57,9 @@ if [ -n "$WATCH" ]; then
   }
   trap _exit SIGINT  # make sure we can ctrl-c in the while loop
   while true; do
-    echo -e "\x1bc"  # clear screen ("scroll to top" style)
+    printf "\x1bc"  # clear screen ("scroll to top" style)
     BUILD_OK=1
-    bash "./$(basename "$0")" "-$BUILD_MODE" "${NINJA_ARGS[@]}" "$@" || BUILD_OK=
+    ${SHELL:-bash} "./$(basename "$0")" "-$BUILD_MODE" "${NINJA_ARGS[@]}" "$@" || BUILD_OK=
     printf "\e[2m> watching files for changes...\e[m\n"
     if [ -n "$BUILD_OK" -a -n "$RUN" ]; then
       export ASAN_OPTIONS=detect_stack_use_after_return=1
@@ -240,7 +240,6 @@ echo >> build.ninja
 
 echo "default rsm" >> build.ninja
 
-echo ninja "${NINJA_ARGS[@]}" "$@"
 if [ -n "$RUN" ]; then
   ninja "${NINJA_ARGS[@]}" "$@"
   echo $RUN

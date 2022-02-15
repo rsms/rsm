@@ -181,6 +181,25 @@ void rabuf_appendf64(rabuf* s, f64 v, int ndec) {
 }
 
 
+void rabuf_appendfmtv(rabuf* s, const char* fmt, va_list ap) {
+  #ifndef R_WITH_LIBC
+    assert(!"not implemented");
+  #else
+    int n = vsnprintf(s->p, rabuf_avail(s), fmt, ap);
+    s->len += (usize)n;
+    s->p = MIN(s->p + n, s->lastp);
+  #endif
+}
+
+
+void rabuf_appendfmt(rabuf* s, const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  rabuf_appendfmtv(s, fmt, ap);
+  va_end(ap);
+}
+
+
 bool rabuf_endswith(const rabuf* s, const char* str, usize len) {
   return s->len >= len && memcmp(s->p - len, str, len) == 0;
 }

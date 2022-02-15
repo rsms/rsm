@@ -19,16 +19,18 @@ _( ptr,  64 ) \
 #define DEF_RSM_OPS(_) \
 /* name, instruction encoding, description */ \
 _( MOVE  , AB   , "R(A) = R(B) -- copy register" ) \
-_( LOADI , ABw  , "R(A) = I(B) -- load immediate" ) \
-_( LOADK , ABw  , "R(A) = K(B) -- load constant" ) \
+_( LOADI , ABi  , "R(A) = I(B) -- load immediate" ) \
+_( LOADK , ABk  , "R(A) = K(B) -- load constant" ) \
 \
-_( BREQ  , ABC  , "goto instr(R(C)) if R(A) == R(B) -- conditional branch absolute" ) \
-_( BREQI , ABCw , "goto PC±instr(Cs) if R(A) == R(B) -- conditional branch relative" ) \
-_( BRNE  , ABC  , "goto instr(R(C)) if R(A) != R(B) -- conditional branch absolute" ) \
-_( BRNEI , ABCw , "goto PC±instr(Cs) if R(A) != R(B) -- conditional branch relative" ) \
-_( RET   , A    , "return" ) \
+_( CMPEQ , ABC  , "R(A) = R(B) == R(C)" ) \
+_( BRZ   , ABC  , "goto instr(R(C)) if R(A) == 0 -- conditional branch absolute" ) \
+_( BRZI  , ABCi , "goto PC±instr(Cs) if R(A) == 0 -- conditional branch relative" ) \
+_( BRNZ  , ABC  , "goto instr(R(C)) if R(A) != 0 -- conditional branch absolute" ) \
+_( BRNZI , ABCi , "goto PC±instr(Cs) if R(A) != 0 -- conditional branch relative" ) \
+_( RET   , _    , "return" ) \
 \
 _( ADD   , ABC  , "R(A) = R(B) + R(C)" ) \
+_( SUBI  , ABCi , "R(A) = R(B) + C" ) \
 _( MUL   , ABC  , "R(A) = R(B) * R(C)" ) \
 // end DEF_RSM_OPS
 
@@ -129,8 +131,10 @@ void rabuf_appendu64(rabuf* s, u64 v, u32 base);
 void rabuf_appendf64(rabuf* s, f64 v, int ndec);
 static void rabuf_appendstr(rabuf* s, const char* cstr);
 void rabuf_appendfill(rabuf* s, char c, usize len); // like memset
-bool rabuf_endswith(const rabuf* s, const char* str, usize len);
 void rabuf_appendrepr(rabuf* s, const char* srcp, usize len);
+void rabuf_appendfmt(rabuf* s, const char* fmt, ...) ATTR_FORMAT(printf, 2, 3);
+void rabuf_appendfmtv(rabuf* s, const char* fmt, va_list);
+bool rabuf_endswith(const rabuf* s, const char* str, usize len);
 
 
 // ---------------

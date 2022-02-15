@@ -80,6 +80,36 @@
       | ( ((rinstr)aw) << POS_A ) )
 
 
+// ANSI colors: (\e[3Nm or \e[9Nm) 1 red, 2 green, 3 yellow, 4 blue, 5 magenta, 6 cyan
+#define FMT_R(s,v) rabuf_appendfmt(s, "\t\e[9%cmR%u\e[39m", '1'+((v)%6), (v))
+#define FMT_K(s,v) rabuf_appendfmt(s, "\tK%u", (v))
+#define FMT_I(s,v) rabuf_appendfmt(s, "\t0x%x", (int)(v))
+
+void fmtinstr__(rabuf* s, rinstr in) { }
+void fmtinstr_A(rabuf* s, rinstr in) { FMT_R(s,GET_A(in)); }
+void fmtinstr_AB(rabuf* s, rinstr in) { fmtinstr_A(s, in); FMT_R(s,GET_B(in)); }
+void fmtinstr_ABi(rabuf* s, rinstr in) { fmtinstr_A(s, in); FMT_I(s,GET_B(in)); }
+void fmtinstr_ABk(rabuf* s, rinstr in) { fmtinstr_A(s, in); FMT_K(s,GET_B(in)); }
+void fmtinstr_ABC(rabuf* s, rinstr in) { fmtinstr_AB(s, in); FMT_R(s,GET_C(in)); }
+void fmtinstr_ABCi(rabuf* s, rinstr in) { fmtinstr_AB(s, in); FMT_I(s,GET_C(in)); }
+void fmtinstr_ABCD(rabuf* s, rinstr in) { fmtinstr_ABC(s, in); FMT_R(s,GET_C(in)); }
+
+usize fmtprog(char* buf, usize bufcap, rinstr* ip, usize ilen) {
+  rabuf s1 = rabuf_make(buf, bufcap); rabuf* s = &s1;
+  for (usize i = 0; i < ilen; i++) {
+    rinstr in = ip[i];
+    rabuf_appendfmt(s, "%4lx  %s", i, rop_name(GET_OP(in)));
+    switch (GET_OP(in)) {
+      #define _(name, args, ...) case rop_##name: fmtinstr_##args(s, in); break;
+      DEF_RSM_OPS(_)
+      #undef _
+    }
+    rabuf_appendc(s, '\n');
+  }
+  return rabuf_terminate(s);
+}
+
+
 int main(int argc, const char** argv) {
   rmem* m = rmem_makevm(4096*1000);
 
@@ -89,27 +119,31 @@ int main(int argc, const char** argv) {
   //   b0:              //
   //     r8 = r0        // ACC = n (n is in r0, argument 0)
   //     r0 = 1         // RES (return value 0)
-  //     ifeq r8 0 end  // if n==0 goto end
+  //     brz r8 end     // if n==0 goto end
   //   b1:              // <- [b0] b1  ("[b]=implicit/fallthrough")
   //     r0 = mul r8 r0 // RES = ACC * RES
   //     r8 = sub r8 1  // ACC = ACC - 1
-  //     ifne r8 0 b1   // if n!=0 goto b1
+  //     brnz r8 b1     // if n!=0 goto b1
   //   end:             // <- b0 [b1]
   //     ret            // RES is at r0
   // u32 b0 = pc; // b0:
   ip[pc++] = MAKE_AB(rop_MOVE, 8, 0); // r8 = r0
   ip[pc++] = MAKE_AB(rop_LOADI, 0, 1); // r0 = 1
-  ip[pc++] = MAKE_ABC(rop_BREQI, 8, 0, 3); // ifeq r8 0 end -- PC+3=end (TODO patch marker)
+  ip[pc++] = MAKE_ABC(rop_BRZI, 8, 0, 3); // brz r8 end -- PC+3=end (TODO patch marker)
   u32 b1 = pc; // b1:
   ip[pc++] = MAKE_ABC(rop_MUL, 0, 0, 8); // r0 = mul r8 r0
-  ip[pc++] = MAKE_ABC(rop_MUL, 8, 0, 8); // r8 = sub r8 1
-  ip[pc] = MAKE_ABC(rop_BRNEI, 8, 0, pc-b1); // ifne r8 0 b1
+  ip[pc++] = MAKE_ABC(rop_SUBI, 8, 0, 1); // r8 = sub r8 1
+  ip[pc] = MAKE_ABC(rop_BRNZI, 8, 0, -pc-b1); // brnz r8 b1 (TODO sign)
   pc++;
   // u32 end = pc; // end:
   ip[pc++] = MAKE_A(rop_RET, 0); // ret
 
   ip = rmem_resize(m, ip, pc*sizeof(rinstr));
   dlog("function size: %lu B", pc*sizeof(rinstr));
+
+  char buf[256];
+  fmtprog(buf, sizeof(buf), ip, pc);
+  log("%s", buf);
 
   return 0;
 }

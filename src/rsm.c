@@ -65,19 +65,19 @@
 #define SET_D(i,v)  SET_ARGN(i, POS_D, SIZE_D, v)
 
 #define MAKE_ABCD(op,a,b,c,d) ( ((rinstr)op) \
-      | ( ((rinstr)a)  << POS_A ) \
-      | ( ((rinstr)b)  << POS_B ) \
-      | ( ((rinstr)c)  << POS_C ) \
-      | ( ((rinstr)d)  << POS_D ) )
+  | ( ((rinstr)a)  << POS_A ) \
+  | ( ((rinstr)b)  << POS_B ) \
+  | ( ((rinstr)c)  << POS_C ) \
+  | ( ((rinstr)d)  << POS_D ) )
 #define MAKE_ABC(op,a,b,cw) ( ((rinstr)op) \
-      | ( ((rinstr)a)  << POS_A ) \
-      | ( ((rinstr)b)  << POS_B ) \
-      | ( ((rinstr)cw) << POS_C ) )
+  | ( ((rinstr)a)  << POS_A ) \
+  | ( ((rinstr)b)  << POS_B ) \
+  | ( ((rinstr)cw) << POS_C ) )
 #define MAKE_AB(op,a,bw) ( ((rinstr)op) \
-      | ( ((rinstr)a)  << POS_A  ) \
-      | ( ((rinstr)bw) << POS_B ) )
+  | ( ((rinstr)a)  << POS_A  ) \
+  | ( ((rinstr)bw) << POS_B ) )
 #define MAKE_A(op,aw) ( ((rinstr)op) \
-      | ( ((rinstr)aw) << POS_A ) )
+  | ( ((rinstr)aw) << POS_A ) )
 
 
 // ANSI colors: (\e[3Nm or \e[9Nm) 1 red, 2 green, 3 yellow, 4 blue, 5 magenta, 6 cyan

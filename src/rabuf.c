@@ -127,7 +127,7 @@ void rabuf_appendrepr(rabuf* s, const char* srcp, usize len) {
       case '\t'...'\x0D':
       case '\\':
       case '"':
-      case '\0':
+      case '\0': {
         static const char t[] = {'t','n','v','f','r'};
         if (LIKELY( p + 1 < lastp )) {
           p[0] = '\\';
@@ -140,6 +140,7 @@ void rabuf_appendrepr(rabuf* s, const char* srcp, usize len) {
         }
         nwrite++;
         break;
+      }
       // verbatim
       default:
         *p = c;

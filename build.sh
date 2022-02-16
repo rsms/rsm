@@ -152,10 +152,6 @@ if [ -n "$CC_IS_CLANG" -a "$BUILD_MODE" = "debug" ]; then
   )
 fi
 
-# Note: -fms-extensions enables composable structs in clang & GCC
-# See https://gcc.gnu.org/onlinedocs/gcc-11.2.0/gcc/Unnamed-Fields.html
-# TODO: test with gcc; may require -fplan9-extensions
-
 cat << _END > build.ninja
 ninja_required_version = 1.3
 builddir = $OUTDIR
@@ -174,7 +170,7 @@ cflags = $
   -Wcovered-switch-default ${CFLAGS[@]}
 
 cflags_c = $
-  -std=c11 -fms-extensions -Wno-microsoft
+  -std=c11
 
 cflags_cxx = $
   -std=c++14 $

@@ -37,11 +37,12 @@ _( BRZ   , AB   , "goto instr(R(B)) if R(A) == 0 -- conditional branch absolute"
 _( BRZI  , ABs  , "goto PC±instr(Bs) if R(A) == 0 -- conditional branch relative" ) \
 _( BRNZ  , AB   , "goto instr(R(B)) if R(A) != 0 -- conditional branch absolute" ) \
 _( BRNZI , ABs  , "goto PC±instr(Bs) if R(A) != 0 -- conditional branch relative" ) \
-_( RET   , _    , "return" ) \
 \
 _( ADD   , ABC  , "R(A) = R(B) + R(C)" ) \
 _( SUBI  , ABCu , "R(A) = R(B) + C" ) \
 _( MUL   , ABC  , "R(A) = R(B) * R(C)" ) \
+\
+_( RET   , _    , "return" ) \
 // end DEF_RSM_OPS
 
 typedef u8 rop; // rop, rop_* -- opcode

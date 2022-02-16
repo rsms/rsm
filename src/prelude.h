@@ -156,9 +156,9 @@ typedef unsigned long       usize;
 #endif
 
 #if __has_attribute(noinline)
-  #define NO_INLINE __attribute__((noinline))
+  #define R_ATTR_NOINLINE __attribute__((noinline))
 #else
-  #define NO_INLINE
+  #define R_ATTR_NOINLINE
 #endif
 
 #if __has_attribute(unused)
@@ -525,7 +525,10 @@ NORETURN void _rpanic(const char* file, int line, const char* fun, const char* f
 
 // void assert(expr condition)
 #undef assert
-#if defined(DEBUG) || !defined(NDEBUG)
+#if defined(DEBUG)
+  #ifdef NDEBUG
+    #warning both DEBUG and NDEBUG defined
+  #endif
   #undef DEBUG
   #undef NDEBUG
   #undef R_SAFE

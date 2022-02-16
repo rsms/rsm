@@ -51,7 +51,7 @@ enum rop {
   #define _(name, ...) rop_##name,
   DEF_RSM_OPS(_)
   #undef _
-  rop_MAX_ = 0xff,
+  RSM_OP_COUNT,
 } END_TYPED_ENUM(rop)
 
 // rtype_*

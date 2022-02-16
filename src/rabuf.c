@@ -59,11 +59,10 @@ void rabuf_append(rabuf* s, const char* p, usize len) {
 }
 
 
-void rabuf_appendu64(rabuf* s, u64 v, u32 base) {
-  char buf[64];
+usize rstrfmtu64(char buf[64], u64 v, u32 base) {
   static const char chars[] =
     "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-  base = MIN(base, 62);
+  base = MAX(2, MIN(base, 62));
   char* p = buf;
   do {
     *p++ = chars[v % base];
@@ -72,6 +71,13 @@ void rabuf_appendu64(rabuf* s, u64 v, u32 base) {
   usize len = (usize)(uintptr)(p - buf);
   p--;
   strrevn(buf, len);
+  return len;
+}
+
+
+void rabuf_appendu64(rabuf* s, u64 v, u32 base) {
+  char buf[64];
+  usize len = rstrfmtu64(buf, v, base);
   return rabuf_append(s, buf, len);
 }
 

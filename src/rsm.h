@@ -2,6 +2,8 @@
 #include "prelude.h"
 R_ASSUME_NONNULL_BEGIN
 
+typedef u32 rinstr; // rinstr is an instruction (see rinst.h for details)
+
 // rtype_*
 #define DEF_RSM_TYPES(_) \
 /* name, bitsize */ \
@@ -16,26 +18,6 @@ _( f64,  64 ) \
 _( ptr,  64 ) \
 // end DEF_RSM_TYPES
 
-#define DEF_RSM_OPS(_) \
-/* name, instruction encoding, description */ \
-_( MOVE  , AB   , "R(A) = R(B) -- copy register" ) \
-_( LOADI , ABi  , "R(A) = I(B) -- load immediate" ) \
-_( LOADK , ABk  , "R(A) = K(B) -- load constant" ) \
-\
-_( CMPEQ , ABC  , "R(A) = R(B) == R(C)" ) \
-_( BRZ   , ABC  , "goto instr(R(C)) if R(A) == 0 -- conditional branch absolute" ) \
-_( BRZI  , ABCi , "goto PC±instr(Cs) if R(A) == 0 -- conditional branch relative" ) \
-_( BRNZ  , ABC  , "goto instr(R(C)) if R(A) != 0 -- conditional branch absolute" ) \
-_( BRNZI , ABCi , "goto PC±instr(Cs) if R(A) != 0 -- conditional branch relative" ) \
-_( RET   , _    , "return" ) \
-\
-_( ADD   , ABC  , "R(A) = R(B) + R(C)" ) \
-_( SUBI  , ABCi , "R(A) = R(B) + C" ) \
-_( MUL   , ABC  , "R(A) = R(B) * R(C)" ) \
-// end DEF_RSM_OPS
-
-#define RS_ARGS_MAX 4 // max # args of a rs_value (for its op)
-
 // rtype, rtype_* -- type code
 typedef u8 rtype;
 enum rtype {
@@ -44,17 +26,6 @@ enum rtype {
   #undef _
 } END_TYPED_ENUM(rtype)
 
-// rop, rop_* -- opcode
-typedef u8 rop;
-enum rop {
-  #define _(name, ...) rop_##name,
-  DEF_RSM_OPS(_)
-  #undef _
-  rop_MAX_ = 0xff,
-} END_TYPED_ENUM(rop)
-
-// rinstr is an instruction
-typedef u32 rinstr;
 
 // rmem is a memory allocator
 typedef struct rmem rmem;
@@ -73,9 +44,17 @@ struct rarray {
   u32    cap;
 };
 
-// {enum}_name returns the name of a symbolic constant
-const char* rop_name(rop);
+// rtype_name returns the name of a type constant
 const char* rtype_name(rtype);
+
+// fmtprog formats an array of instructions ip as "assembly" text to buf.
+// It writes at most bufcap-1 of the characters to the output buf (the bufcap'th
+// character then gets the terminating '\0'). If the return value is greater than or
+// equal to the bufcap argument, buf was too short and some of the characters were
+// discarded. The output is always null-terminated, unless size is 0.
+// Returns the number of characters that would have been printed if bufcap was
+// unlimited (not including the final `\0').
+usize fmtprog(char* buf, usize bufcap, rinstr* ip, usize ilen);
 
 // rmem
 // RMEM_MIN -- minimum amount of memory (in bytes) that rmem_init accepts
@@ -135,6 +114,7 @@ void rabuf_appendrepr(rabuf* s, const char* srcp, usize len);
 void rabuf_appendfmt(rabuf* s, const char* fmt, ...) ATTR_FORMAT(printf, 2, 3);
 void rabuf_appendfmtv(rabuf* s, const char* fmt, va_list);
 bool rabuf_endswith(const rabuf* s, const char* str, usize len);
+usize rstrfmtu64(char buf[64], u64 v, u32 base);
 
 
 // ---------------

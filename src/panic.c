@@ -1,13 +1,13 @@
 #include "rsm.h"
 
-#ifdef RX_WITH_LIBC
+#ifdef R_WITH_LIBC
   #include <stdlib.h> // free
   #include <unistd.h> // STDERR_FILENO
   #include <execinfo.h> // backtrace*
-#endif // RX_WITH_LIBC
+#endif // R_WITH_LIBC
 
 NORETURN void _rpanic(const char* file, int line, const char* fun, const char* fmt, ...) {
-  #ifdef RX_WITH_LIBC
+  #ifdef R_WITH_LIBC
     FILE* fp = stderr;
     flockfile(fp);
     fprintf(fp, "\npanic: ");

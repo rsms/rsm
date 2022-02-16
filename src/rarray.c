@@ -1,9 +1,7 @@
 #include "rsm.h"
 
-#define RXARRAY_INITCAP 4
-
 void rarray_grow(rarray* a, rmem* m) {
-  u32 newcap = RXARRAY_INITCAP;
+  u32 newcap = 4;
   usize nbytes = (usize)newcap * sizeof(void*);
 
   // double existing capacity

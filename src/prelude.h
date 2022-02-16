@@ -514,7 +514,7 @@ NORETURN void _rpanic(const char* file, int line, const char* fun, const char* f
   R_ASSUME_NONNULL_BEGIN
   #define log(format, args...) fprintf(stderr, format "\n", ##args)
 #else
-  #warning log not implemented for no-libc
+  // TODO implemented for no-libc
   #define log(format, ...) ((void)0)
 #endif
 

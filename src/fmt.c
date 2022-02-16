@@ -1,6 +1,5 @@
 // string formatting
 #include "rsm.h"
-#include "rinstr.h"
 
 // ANSI colors: (\e[3Nm or \e[9Nm) 1 red, 2 green, 3 yellow, 4 blue, 5 magenta, 6 cyan
 #define FMT_R(s,v) rabuf_appendfmt(s, "\t\e[9%cmR%u\e[39m", '1'+((v)%6), (v))

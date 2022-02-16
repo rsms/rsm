@@ -2,9 +2,9 @@
 
 void logbin(u32 v);
 void rsm_eval(u64* iregs, u32* inv, u32 inc);
+void rsm_eval2(u64* iregs, u32* inv, u32 inc);
 
 // TODO:
-// - move the rinstr.h code into rsm.h -- let's keep it simple for now
 // - build an evaluator and try it with the factorial function
 // - think about how a "program" is represented (functions + constants)
 
@@ -39,17 +39,17 @@ int main(int argc, const char** argv) {
 
   ip = rmem_resize(m, ip, pc*sizeof(rinstr));
   dlog("function size: %lu B", pc*sizeof(rinstr));
-
   // logbin(RSM_GET_Bs(RSM_MAKE_ABs(rop_BRNZI, 8, -3)));
 
   char buf[512];
   fmtprog(buf, sizeof(buf), ip, pc);
   log("%s", buf);
 
-  // dlog("call factorial(3)");
-  // u64 iregs[32];
-  // iregs[0] = 3; // arg 1
-  // rsm_eval(iregs, ip, pc);
+  dlog("call factorial(3)");
+  u64 iregs[32];
+  iregs[0] = 3; // arg 1
+  rsm_eval(iregs, ip, pc);
+  //dlog("iregs[0] %llu", iregs[0]);
 
   return 0;
 }

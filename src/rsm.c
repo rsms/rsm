@@ -52,7 +52,7 @@ int main(int argc, const char** argv) {
   log("%s", buf);
 
   // eval
-  u64 iregs[32];
+  u64 iregs[32] = {0};
   iregs[0] = 3; // arg 1
   dlog("reference factorial(%llu) => %llu", iregs[0], factorial((i64)iregs[0]));
   dlog("evaluating vm factorial(%lld)", (i64)iregs[0]);

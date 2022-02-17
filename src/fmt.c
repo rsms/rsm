@@ -21,17 +21,29 @@ void fmtinstr_ABCs(rabuf* s, rinstr in)  { fmtinstr_AB(s, in);  FMT_R(s,RSM_GET_
 void fmtinstr_ABCD(rabuf* s, rinstr in)  { fmtinstr_ABC(s, in); FMT_R(s,RSM_GET_Du(in)); }
 void fmtinstr_ABCDs(rabuf* s, rinstr in) { fmtinstr_ABC(s, in); FMT_R(s,RSM_GET_Ds(in)); }
 
-usize fmtprog(char* buf, usize bufcap, rinstr* ip, usize ilen) {
+static void fmtinstr1(rabuf* s, rinstr in) {
+  rabuf_appendstr(s, rop_name(RSM_GET_OP(in)));
+  switch (RSM_GET_OP(in)) {
+    #define _(name, args, ...) case rop_##name: fmtinstr_##args(s, in); break;
+    DEF_RSM_OPS(_)
+    #undef _
+  }
+}
+
+usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in) {
+  rabuf s = rabuf_make(buf, bufcap);
+  fmtinstr1(&s, in);
+  return rabuf_terminate(&s);
+}
+
+usize rsm_fmtprog(char* buf, usize bufcap, rinstr* ip, usize ilen) {
   rabuf s1 = rabuf_make(buf, bufcap); rabuf* s = &s1;
   for (usize i = 0; i < ilen; i++) {
+    if (i)
+      rabuf_appendc(s, '\n');
     rinstr in = ip[i];
-    rabuf_appendfmt(s, "%4lx  %s", i, rop_name(RSM_GET_OP(in)));
-    switch (RSM_GET_OP(in)) {
-      #define _(name, args, ...) case rop_##name: fmtinstr_##args(s, in); break;
-      DEF_RSM_OPS(_)
-      #undef _
-    }
-    rabuf_appendc(s, '\n');
+    rabuf_appendfmt(s, "%4lx  ", i);
+    fmtinstr1(s, in);
   }
   return rabuf_terminate(s);
 }

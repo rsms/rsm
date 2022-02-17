@@ -35,12 +35,12 @@ _( LOADK , ABk  , "R(A) = K(B) -- load constant" ) \
 \
 _( CMPEQ , ABC  , "R(A) = R(B) == R(C)" ) \
 _( BRZ   , AB   , "goto instr(R(B)) if R(A) == 0 -- conditional branch absolute" ) \
-_( BRZI  , ABs  , "goto PC±instr(Bs) if R(A) == 0 -- conditional branch relative" ) \
 _( BRNZ  , AB   , "goto instr(R(B)) if R(A) != 0 -- conditional branch absolute" ) \
+_( BRZI  , ABs  , "goto PC±instr(Bs) if R(A) == 0 -- conditional branch relative" ) \
 _( BRNZI , ABs  , "goto PC±instr(Bs) if R(A) != 0 -- conditional branch relative" ) \
 \
 _( ADD   , ABC  , "R(A) = R(B) + R(C)" ) \
-_( SUBI  , ABCu , "R(A) = R(B) + C" ) \
+_( SUBI  , ABCu , "R(A) = R(B) - C" ) \
 _( MUL   , ABC  , "R(A) = R(B) * R(C)" ) \
 \
 _( RET   , _    , "return" ) \
@@ -171,14 +171,17 @@ struct rarray {
 const char* rop_name(rop); // name of an opcode
 const char* rtype_name(rtype); // name of a type constant
 
-// fmtprog formats an array of instructions ip as "assembly" text to buf.
+// rsm_fmtprog formats an array of instructions ip as "assembly" text to buf.
 // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th
 // character then gets the terminating '\0'). If the return value is greater than or
 // equal to the bufcap argument, buf was too short and some of the characters were
 // discarded. The output is always null-terminated, unless size is 0.
 // Returns the number of characters that would have been printed if bufcap was
 // unlimited (not including the final `\0').
-usize fmtprog(char* buf, usize bufcap, rinstr* ip, usize ilen);
+usize rsm_fmtprog(char* buf, usize bufcap, rinstr* ip, usize ilen);
+usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in);
+
+void rsm_eval(u64* iregs, u32* inv, u32 inc);
 
 // rmem
 // RMEM_MIN -- minimum amount of memory (in bytes) that rmem_init accepts

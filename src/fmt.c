@@ -3,27 +3,27 @@
 #include "util.h"
 
 // ANSI colors: (\e[3Nm or \e[9Nm) 1 red, 2 green, 3 yellow, 4 blue, 5 magenta, 6 cyan
-#define FMT_R(s,v) sbuf_appendfmt(s, "\t\e[9%cmR%u\e[39m", '1'+((v)%6), (v))
-#define FMT_K(s,v) sbuf_appendfmt(s, "\tK%u", (v))
-#define FMT_U(s,v) sbuf_appendfmt(s, "\t0x%x", (v))
-#define FMT_S(s,v) sbuf_appendfmt(s, "\t%d", (int)(v))
+#define FMT_R(s,v) abuf_fmt(s, "\t\e[9%cmR%u\e[39m", '1'+((v)%6), (v))
+#define FMT_K(s,v) abuf_fmt(s, "\tK%u", (v))
+#define FMT_U(s,v) abuf_fmt(s, "\t0x%x", (v))
+#define FMT_S(s,v) abuf_fmt(s, "\t%d", (int)(v))
 
-void fmtinstr__(sbuf* s, rinstr in)     { }
-void fmtinstr_A(sbuf* s, rinstr in)     { FMT_R(s,RSM_GET_Ar(in)); }
-void fmtinstr_Au(sbuf* s, rinstr in)    { FMT_U(s,RSM_GET_Au(in)); }
-void fmtinstr_As(sbuf* s, rinstr in)    { FMT_S(s,RSM_GET_As(in)); }
-void fmtinstr_AB(sbuf* s, rinstr in)    { fmtinstr_A(s, in);   FMT_R(s,RSM_GET_Br(in)); }
-void fmtinstr_ABu(sbuf* s, rinstr in)   { fmtinstr_A(s, in);   FMT_U(s,RSM_GET_Bu(in)); }
-void fmtinstr_ABs(sbuf* s, rinstr in)   { fmtinstr_A(s, in);   FMT_S(s,RSM_GET_Bs(in)); }
-void fmtinstr_ABk(sbuf* s, rinstr in)   { fmtinstr_A(s, in);   FMT_K(s,RSM_GET_Bu(in)); }
-void fmtinstr_ABC(sbuf* s, rinstr in)   { fmtinstr_AB(s, in);  FMT_R(s,RSM_GET_Cr(in)); }
-void fmtinstr_ABCu(sbuf* s, rinstr in)  { fmtinstr_AB(s, in);  FMT_U(s,RSM_GET_Cu(in)); }
-void fmtinstr_ABCs(sbuf* s, rinstr in)  { fmtinstr_AB(s, in);  FMT_R(s,RSM_GET_Cs(in)); }
-void fmtinstr_ABCD(sbuf* s, rinstr in)  { fmtinstr_ABC(s, in); FMT_R(s,RSM_GET_Du(in)); }
-void fmtinstr_ABCDs(sbuf* s, rinstr in) { fmtinstr_ABC(s, in); FMT_R(s,RSM_GET_Ds(in)); }
+void fmtinstr__(abuf* s, rinstr in)     { }
+void fmtinstr_A(abuf* s, rinstr in)     { FMT_R(s,RSM_GET_Ar(in)); }
+void fmtinstr_Au(abuf* s, rinstr in)    { FMT_U(s,RSM_GET_Au(in)); }
+void fmtinstr_As(abuf* s, rinstr in)    { FMT_S(s,RSM_GET_As(in)); }
+void fmtinstr_AB(abuf* s, rinstr in)    { fmtinstr_A(s, in);   FMT_R(s,RSM_GET_Br(in)); }
+void fmtinstr_ABu(abuf* s, rinstr in)   { fmtinstr_A(s, in);   FMT_U(s,RSM_GET_Bu(in)); }
+void fmtinstr_ABs(abuf* s, rinstr in)   { fmtinstr_A(s, in);   FMT_S(s,RSM_GET_Bs(in)); }
+void fmtinstr_ABk(abuf* s, rinstr in)   { fmtinstr_A(s, in);   FMT_K(s,RSM_GET_Bu(in)); }
+void fmtinstr_ABC(abuf* s, rinstr in)   { fmtinstr_AB(s, in);  FMT_R(s,RSM_GET_Cr(in)); }
+void fmtinstr_ABCu(abuf* s, rinstr in)  { fmtinstr_AB(s, in);  FMT_U(s,RSM_GET_Cu(in)); }
+void fmtinstr_ABCs(abuf* s, rinstr in)  { fmtinstr_AB(s, in);  FMT_R(s,RSM_GET_Cs(in)); }
+void fmtinstr_ABCD(abuf* s, rinstr in)  { fmtinstr_ABC(s, in); FMT_R(s,RSM_GET_Du(in)); }
+void fmtinstr_ABCDs(abuf* s, rinstr in) { fmtinstr_ABC(s, in); FMT_R(s,RSM_GET_Ds(in)); }
 
-static void fmtinstr1(sbuf* s, rinstr in) {
-  sbuf_appendstr(s, rop_name(RSM_GET_OP(in)));
+static void fmtinstr1(abuf* s, rinstr in) {
+  abuf_str(s, rop_name(RSM_GET_OP(in)));
   switch (RSM_GET_OP(in)) {
     #define _(name, args, ...) case rop_##name: fmtinstr_##args(s, in); break;
     DEF_RSM_OPS(_)
@@ -32,21 +32,21 @@ static void fmtinstr1(sbuf* s, rinstr in) {
 }
 
 usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in) {
-  sbuf s = sbuf_make(buf, bufcap);
+  abuf s = abuf_make(buf, bufcap);
   fmtinstr1(&s, in);
-  return sbuf_terminate(&s);
+  return abuf_terminate(&s);
 }
 
 usize rsm_fmtprog(char* buf, usize bufcap, rinstr* ip, usize ilen) {
-  sbuf s1 = sbuf_make(buf, bufcap); sbuf* s = &s1;
+  abuf s1 = abuf_make(buf, bufcap); abuf* s = &s1;
   for (usize i = 0; i < ilen; i++) {
     if (i)
-      sbuf_appendc(s, '\n');
+      abuf_c(s, '\n');
     rinstr in = ip[i];
-    sbuf_appendfmt(s, "%4lx  ", i);
+    abuf_fmt(s, "%4lx  ", i);
     fmtinstr1(s, in);
   }
-  return sbuf_terminate(s);
+  return abuf_terminate(s);
 }
 
 

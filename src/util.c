@@ -29,11 +29,11 @@ usize stru64(char buf[64], u64 v, u32 base) {
   return len;
 }
 
-// sbuf is a string output buffer for implementing snprintf-style functions which
+// abuf is a string output buffer for implementing snprintf-style functions which
 // writes to a limited buffer and separately keeps track of the number of bytes
 // that are appended independent of the buffer's limit.
 //
-// Here is a template for use with functions that uses sbuf:
+// Here is a template for use with functions that uses abuf:
 //
 // // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th
 // // character then gets the terminating '\0'). If the return value is greater than or
@@ -42,32 +42,20 @@ usize stru64(char buf[64], u64 v, u32 base) {
 // // Returns the number of characters that would have been printed if bufcap was
 // // unlimited (not including the final `\0').
 // usize myprint(char* buf, usize bufcap, int somearg) {
-//   sbuf s = sbuf_make(buf, bufcap);
-//   // call sbuf_append functions here
-//   return sbuf_terminate(&s);
+//   abuf s = abuf_make(buf, bufcap);
+//   // call abuf_* functions here
+//   return abuf_terminate(&s);
 // }
 //
 
-void sbuf_init(sbuf* s, char* buf, usize bufsize) {
-  assert(bufsize > 0);
-  s->p = buf;
-  s->lastp = buf + bufsize - 1;
-  s->len = 0;
-}
-
-usize sbuf_terminate(sbuf* s) {
-  *s->p = 0;
-  return s->len;
-}
-
-void sbuf_appendc(sbuf* s, char c) {
+void abuf_c(abuf* s, char c) {
   *s->p = c;
   s->p = MIN(s->p + 1, s->lastp);
   s->len++;
 }
 
-void sbuf_append(sbuf* s, const char* p, usize len) {
-  usize z = MIN(len, sbuf_avail(s));
+void abuf_append(abuf* s, const char* p, usize len) {
+  usize z = MIN(len, abuf_avail(s));
   memcpy(s->p, p, z);
   s->p += z;
   if (check_add_overflow(s->len, len, &s->len))
@@ -75,17 +63,17 @@ void sbuf_append(sbuf* s, const char* p, usize len) {
 }
 
 
-void sbuf_appendu64(sbuf* s, u64 v, u32 base) {
+void abuf_u64(abuf* s, u64 v, u32 base) {
   char buf[64];
   usize len = stru64(buf, v, base);
-  return sbuf_append(s, buf, len);
+  return abuf_append(s, buf, len);
 }
 
 
-void sbuf_appendfill(sbuf* s, char c, usize len) {
+void abuf_fill(abuf* s, char c, usize len) {
   if (check_add_overflow(s->len, len, &s->len))
     s->len = USIZE_MAX;
-  usize avail = sbuf_avail(s);
+  usize avail = abuf_avail(s);
   if (avail < len)
     len = avail;
   memset(s->p, c, len);
@@ -93,7 +81,7 @@ void sbuf_appendfill(sbuf* s, char c, usize len) {
 }
 
 
-void sbuf_appendrepr(sbuf* s, const char* srcp, usize len) {
+void abuf_repr(abuf* s, const char* srcp, usize len) {
   static const char* hexchars = "0123456789abcdef";
 
   char* p = s->p;
@@ -156,13 +144,13 @@ void sbuf_appendrepr(sbuf* s, const char* srcp, usize len) {
 }
 
 
-void sbuf_appendf64(sbuf* s, f64 v, int ndec) {
+void abuf_f64(abuf* s, f64 v, int ndec) {
   #ifndef R_WITH_LIBC
-    #warning TODO implement sbuf_appendf64 for non-libc
+    #warning TODO implement abuf_f64 for non-libc
     assert(!"not implemented");
     // TODO: consider using fmt_fp (stdio/vfprintf.c) in musl
   #else
-    usize cap = sbuf_avail(s);
+    usize cap = abuf_avail(s);
     int n;
     if (ndec > -1) {
       n = snprintf(s->p, cap+1, "%.*f", ndec, v);
@@ -188,25 +176,25 @@ void sbuf_appendf64(sbuf* s, f64 v, int ndec) {
 }
 
 
-void sbuf_appendfmtv(sbuf* s, const char* fmt, va_list ap) {
+void abuf_fmtv(abuf* s, const char* fmt, va_list ap) {
   #ifndef R_WITH_LIBC
     assert(!"not implemented");
   #else
-    int n = vsnprintf(s->p, sbuf_avail(s), fmt, ap);
+    int n = vsnprintf(s->p, abuf_avail(s), fmt, ap);
     s->len += (usize)n;
     s->p = MIN(s->p + n, s->lastp);
   #endif
 }
 
 
-void sbuf_appendfmt(sbuf* s, const char* fmt, ...) {
+void abuf_fmt(abuf* s, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  sbuf_appendfmtv(s, fmt, ap);
+  abuf_fmtv(s, fmt, ap);
   va_end(ap);
 }
 
 
-bool sbuf_endswith(const sbuf* s, const char* str, usize len) {
+bool abuf_endswith(const abuf* s, const char* str, usize len) {
   return s->len >= len && memcmp(s->p - len, str, len) == 0;
 }

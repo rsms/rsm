@@ -34,14 +34,14 @@ _( LOADI , ABu  , "R(A) = I(B) -- load immediate" ) \
 _( LOADK , ABk  , "R(A) = K(B) -- load constant" ) \
 \
 _( CMPEQ , ABC  , "R(A) = R(B) == R(C)" ) \
+_( ADD   , ABC  , "R(A) = R(B) + R(C)" ) \
+_( SUBI  , ABCu , "R(A) = R(B) - C" ) \
+_( MUL   , ABC  , "R(A) = R(B) * R(C)" ) \
+\
 _( BRZ   , AB   , "goto instr(R(B)) if R(A) == 0 -- conditional branch absolute" ) \
 _( BRNZ  , AB   , "goto instr(R(B)) if R(A) != 0 -- conditional branch absolute" ) \
 _( BRZI  , ABs  , "goto PC±instr(Bs) if R(A) == 0 -- conditional branch relative" ) \
 _( BRNZI , ABs  , "goto PC±instr(Bs) if R(A) != 0 -- conditional branch relative" ) \
-\
-_( ADD   , ABC  , "R(A) = R(B) + R(C)" ) \
-_( SUBI  , ABCu , "R(A) = R(B) - C" ) \
-_( MUL   , ABC  , "R(A) = R(B) * R(C)" ) \
 \
 _( RET   , _    , "return" ) \
 // end DEF_RSM_OPS

@@ -37,13 +37,13 @@ void rsm_eval(u64* iregs, rinstr* inv, u32 incount) {
 
     case rop_MOVE:  { RA = RB; break; }
     case rop_LOADI: { RA = RSM_GET_Bu(in); break; }
-    case rop_LOADK: { break; }
-    case rop_CMPEQ: { break; }
-    case rop_BRZ:   { break; }
-    case rop_BRNZ:  { break; }
+    case rop_LOADK: { dlog("TODO"); break; }
+    case rop_BRZ:   { if (RA == 0) pc = RB; break; }
+    case rop_BRNZ:  { if (RA != 0) pc = RB; break; }
     case rop_BRZI:  { if (RA == 0) pc += RSM_GET_Bs(in); break; }
     case rop_BRNZI: { if (RA != 0) pc += RSM_GET_Bs(in); break; }
-    case rop_ADD:   { break; }
+    case rop_CMPEQ: { RA = RB == RC; break; }
+    case rop_ADD:   { RA = RB + RC; break; }
     case rop_SUBI:  { RA = RB - (u64)RSM_GET_Cu(in); break; }
     case rop_MUL:   { RA = RB * RC; break; }
     case rop_RET:   { return; }

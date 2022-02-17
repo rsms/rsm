@@ -27,7 +27,7 @@ typedef u32 rinstr;
 //   ABu  register A, immediate unsigned B
 //   ABs  register A, immediate signed B
 //   ...
-#define DEF_RSM_OPS(_) \
+#define RSM_FOREACH_OP(_) \
 /* name, instruction encoding, description */ \
 _( MOVE  , AB   , "R(A) = R(B) -- copy register" ) \
 _( LOADI , ABu  , "R(A) = I(B) -- load immediate" ) \
@@ -44,18 +44,18 @@ _( BRZI  , ABs  , "goto PC±instr(Bs) if R(A) == 0 -- conditional branch relativ
 _( BRNZI , ABs  , "goto PC±instr(Bs) if R(A) != 0 -- conditional branch relative" ) \
 \
 _( RET   , _    , "return" ) \
-// end DEF_RSM_OPS
+// end RSM_FOREACH_OP
 
 typedef u8 rop; // rop, rop_* -- opcode
 enum rop {
   #define _(name, ...) rop_##name,
-  DEF_RSM_OPS(_)
+  RSM_FOREACH_OP(_)
   #undef _
   RSM_OP_COUNT,
 } END_TYPED_ENUM(rop)
 
 // rtype_*
-#define DEF_RSM_TYPES(_) \
+#define RSM_FOREACH_TYPE(_) \
 /* name, bitsize */ \
 _( void, 0  ) \
 _( i1,   1  ) \
@@ -66,13 +66,13 @@ _( i64,  64 ) \
 _( f32,  32 ) \
 _( f64,  64 ) \
 _( ptr,  64 ) \
-// end DEF_RSM_TYPES
+// end RSM_FOREACH_TYPE
 
 // rtype, rtype_* -- type code
 typedef u8 rtype;
 enum rtype {
   #define _(name, ...) rtype_##name,
-  DEF_RSM_TYPES(_)
+  RSM_FOREACH_TYPE(_)
   #undef _
 } END_TYPED_ENUM(rtype)
 
@@ -162,6 +162,9 @@ struct rmem {
 
 const char* rop_name(rop); // name of an opcode
 const char* rtype_name(rtype); // name of a type constant
+
+// rsm_asm assembles instructions from source text src
+usize rsm_asm(rinstr* idst, usize idstcap, const char* src);
 
 // rsm_fmtprog formats an array of instructions ip as "assembly" text to buf.
 // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th

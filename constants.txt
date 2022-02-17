@@ -12,6 +12,7 @@
     1. Be fine with the 524 kB limit
     2. Use some fancy compression (like two bits for log2 alignment)
     3. Use an implicit reg instead of naming one in A; B is now 24 bits (16 MB)
+    4. Lookup table, address constant by index
 
   Packing the constant data: order ascendingly by alignment.
 
@@ -47,7 +48,7 @@
     u8 constdat[4] = {
       0x00, 0x00, 0x00, 0x01,
     };
-    u8 consttab[] = {
+    usize consttab[] = {
       0, // K0 => offset 0 in constdat
     };
 

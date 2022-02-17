@@ -26,7 +26,7 @@ static void fmtinstr1(abuf* s, rinstr in) {
   abuf_str(s, rop_name(RSM_GET_OP(in)));
   switch (RSM_GET_OP(in)) {
     #define _(name, args, ...) case rop_##name: fmtinstr_##args(s, in); break;
-    DEF_RSM_OPS(_)
+    RSM_FOREACH_OP(_)
     #undef _
   }
 }
@@ -70,7 +70,7 @@ void logbin(u32 v) {
 const char* rop_name(rop op) {
   switch (op) {
     #define _(name, ...) case rop_##name: return #name;
-    DEF_RSM_OPS(_)
+    RSM_FOREACH_OP(_)
     #undef _
   }
   return "?";
@@ -80,7 +80,7 @@ const char* rop_name(rop op) {
 const char* rtype_name(rtype t) {
   switch (t) {
     #define _(name, ...) case rtype_##name: return #name;
-    DEF_RSM_TYPES(_)
+    RSM_FOREACH_TYPE(_)
     #undef _
   }
   return "?";

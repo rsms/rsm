@@ -30,7 +30,7 @@ int main(int argc, const char** argv) {
   //     brnz r1  b1    // if n!=0 goto b1
   //   end:             // <- b0 [b1]
   //     ret            // RES is at r0
-  // u32 b0 = pc; // b0:
+  //
   ip[pc++] = RSM_MAKE_AB(rop_MOVE, 1, 0); // r1 = r0
   ip[pc++] = RSM_MAKE_AB(rop_LOADI, 0, 1); // r0 = 1
   ip[pc++] = RSM_MAKE_ABs(rop_BRZI, 1, 3); // brz r1 end -- PC+3=end (TODO patch marker)
@@ -39,7 +39,7 @@ int main(int argc, const char** argv) {
   ip[pc++] = RSM_MAKE_ABC(rop_SUBI, 1, 1, 1); // r1 = sub r1 1
   ip[pc]   = RSM_MAKE_ABs(rop_BRNZI, 1, -(pc+1-b1)); // brnz r1 b1 (TODO sign)
   pc++;
-  // u32 end = pc; // end:
+  // end:
   ip[pc++] = RSM_MAKE_A(rop_RET, 0); // ret
 
   // shrinkwrap memory allocation
@@ -58,6 +58,25 @@ int main(int argc, const char** argv) {
   dlog("evaluating vm factorial(%lld)", (i64)iregs[0]);
   rsm_eval(iregs, ip, pc);
   dlog("result: %llu", iregs[0]);
+
+  // assemble
+  rinstr* idst = rmem_allocz(m, sizeof(rinstr)*32);
+  dlog("parsing assembly source");
+  usize icount = rsm_asm(idst, 32,
+    "fun factorial (i32) i32\n"
+    "  b0:\n"
+    "    R1 = R0  // ACC = n (argument 0)\n"
+    // "    R0 = 1         // RES (return value 0)\n"
+    // "    brz R1 end     // if n==0 goto end\n"
+    // "  b1:              // <- [b0] b1\n"
+    // "    R0 = mul R1 R0 // RES = ACC * RES\n"
+    // "    R1 = sub R1 1  // ACC = ACC - 1\n"
+    // "    brnz R1  b1    // if n!=0 goto b1\n"
+    // "  end:             // <- b0 [b1]\n"
+    // "    ret            // RES is at R0\n"
+  );
+  rsm_fmtprog(buf, sizeof(buf), idst, icount);
+  log("rsm_asm =>\n%s", buf);
 
   return 0;
 }

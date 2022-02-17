@@ -1,0 +1,56 @@
+
+  Constants are immutable chunks of data bundled with a program.
+
+  A constant is loaded into a register using a LOAD instruction:
+    LOADI  R(A) = I(B)  -- load immediate constant
+    LOADK  R(A) = K(B)  -- load constant from address  ⟵ this is the tricky one
+
+  Unfortunately B is not very large when the A argument is used, only 19 bits
+  which limits the sum of constant data to 524 kB.
+
+  So how do we increase the addressable size of constant data? Ideas:
+    1. Be fine with the 524 kB limit
+    2. Use some fancy compression (like two bits for log2 alignment)
+    3. Use an implicit reg instead of naming one in A; B is now 24 bits (16 MB)
+
+  Packing the constant data: order ascendingly by alignment.
+
+  Thought playground:
+
+       ┌────────────┬───────────┬──────────┬───────────────┐
+       │ Name       │ Alignment │     K(n) │ Length×T      │
+       ├────────────┼───────────┼──────────┼───────────────┤
+       │ hello      │         1 │        0 │ 7×i8          │
+       │ world      │         1 │        7 │ 7×i8          │
+       │ idlist     │         4 │       10 │ 5×i32         │
+       │ times      │         8 │       28 │ 2×i64         │
+       │ ipv6addr   │        16 │       40 │ 2×i128        │
+       └────────────┴───────────┴──────────┴───────────────┘
+
+         0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+       ┌─────────────────────────────────────────────────
+  0000 │ h  e  l  l  o     \0 w  o  r  l  d  \n \0          hello, world
+  0010 │ 00 00 00 01 00 00 00 02 00 00 00 03 00 00 00 04    idlist…
+  0020 │ 00 00 00 05             00 00 00 00 00 00 00 01    …idlist, times…
+  0030 │ 00 00 00 00 00 00 00 02                            …times
+  0040 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 01    ipv6addr
+  0050 │
+  0060 │
+
+  Idea: constants are numbered, vm uses a lookup table:
+
+    func getnum () i32
+      const i32 x = 123  // K0
+      r0 = x
+      ret
+
+    u8 constdat[4] = {
+      0x00, 0x00, 0x00, 0x01,
+    };
+    u8 consttab[] = {
+      0, // K0 => offset 0 in constdat
+    };
+
+    LOADK R0 0  // essentially: R0 = *(i32*)&constdat[consttab[0]]
+    RET
+

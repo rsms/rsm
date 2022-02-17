@@ -1,34 +1,57 @@
 #include "rsm.h"
 
-void rsm_eval(u64* iregs, u32* inv, u32 inc) {
-  int    pc = 0; // program counter; current offset into inv
-  rinstr in;  // current instruction
-  u8     ar;      // argument Ar, which almost every instruction needs
+static void logstate(u64* nullable iregs, rinstr* inv, isize pc) {
+  #ifdef DEBUG
+  if (pc == 0) {
+    fprintf(stderr, "\e[2m");
+    for (int i = 0; i < 6; i++)
+      fprintf(stderr, "\e[9%cm  R%d\e[39m", '1'+(i%6), i);
+    fprintf(stderr, "  │  PC  INSTRUCTION\e[22m\n");
+  }
+  for (int i = 0; i < 6; i++)
+    fprintf(stderr, "\e[9%cm%4llx\e[39m", '1'+(i%6), iregs[i]);
+  char buf[128];
+  rsm_fmtinstr(buf, sizeof(buf), inv[pc]);
+  fprintf(stderr, "  │ %3ld  %s\n", pc, buf);
+  #endif
+}
+
+
+void rsm_eval(u64* iregs, rinstr* inv, u32 incount) {
+  isize  pc = 0; // program counter; current offset into inv
+  rinstr in;     // current instruction
+  u8     ar;     // argument Ar, which almost every instruction needs
+
+  #define RA iregs[ar]
+  #define RB iregs[RSM_GET_Br(in)]
+  #define RC iregs[RSM_GET_Cr(in)]
+  #define RD iregs[RSM_GET_Dr(in)]
 
   for (;;) {
+    assertf(pc < (isize)incount, "pc=%ld incount=%u", pc, incount);
+    logstate(iregs, inv, pc);
+
     in = inv[pc++];
     ar = RSM_GET_Ar(in);
-    switch (RSM_GET_OP(in)) {
+    switch ((enum rop)RSM_GET_OP(in)) {
 
-    case rop_MOVE: { // R(A) = R(B)
-      dlog("MOVE R%u = R%u (%llx)", ar, RSM_GET_Br(in), iregs[RSM_GET_Br(in)]);
-      iregs[ar] = iregs[RSM_GET_Br(in)];
-      break;
-    }
-    case rop_LOADI: {
-      dlog("LOADI R%u = %u", ar, RSM_GET_Bu(in));
-      iregs[ar] = (u64)RSM_GET_Bu(in);
-      break;
-    }
-    case rop_LOADK: { iregs[ar]=rop_LOADK; dlog("LOADK"); break; }
-    case rop_CMPEQ: { iregs[ar]=rop_CMPEQ; dlog("CMPEQ"); break; }
-    case rop_BRZ:   { iregs[ar]=rop_BRZ;   dlog("BRZ");   break; }
-    case rop_BRZI:  { iregs[ar]=rop_BRZI;  dlog("BRZI");  break; }
-    case rop_BRNZ:  { iregs[ar]=rop_BRNZ;  dlog("BRNZ");  break; }
-    case rop_BRNZI: { iregs[ar]=rop_BRNZI; dlog("BRNZI"); break; }
-    case rop_ADD:   { iregs[ar]=rop_ADD;   dlog("ADD");   break; }
-    case rop_SUBI:  { iregs[ar]=rop_SUBI;  dlog("SUBI");  break; }
-    case rop_MUL:   { iregs[ar]=rop_MUL;   dlog("MUL");   break; }
-    case rop_RET:   { iregs[ar]=rop_RET;   dlog("RET");   return; }
+    case rop_MOVE:  { RA = RB; break; }
+    case rop_LOADI: { RA = RSM_GET_Bu(in); break; }
+    case rop_LOADK: { break; }
+    case rop_CMPEQ: { break; }
+    case rop_BRZ:   { break; }
+    case rop_BRNZ:  { break; }
+    case rop_BRZI:  { if (RA == 0) pc += RSM_GET_Bs(in); break; }
+    case rop_BRNZI: { if (RA != 0) pc += RSM_GET_Bs(in); break; }
+    case rop_ADD:   { break; }
+    case rop_SUBI:  { RA = RB - (u64)RSM_GET_Cu(in); break; }
+    case rop_MUL:   { RA = RB * RC; break; }
+    case rop_RET:   { return; }
+
+    case RSM_OP_COUNT: assert(0);
   }}
+  #undef RA
+  #undef RB
+  #undef RC
+  #undef RD
 }

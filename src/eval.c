@@ -18,21 +18,19 @@ static void logstate(u64* nullable iregs, rinstr* inv, isize pc) {
 
 
 void rsm_eval(u64* iregs, rinstr* inv, u32 incount) {
-  isize  pc = 0; // program counter; current offset into inv
-  rinstr in;     // current instruction
-  u8     ar;     // argument Ar, which almost every instruction needs
-
   #define RA iregs[ar]
   #define RB iregs[RSM_GET_Br(in)]
   #define RC iregs[RSM_GET_Cr(in)]
   #define RD iregs[RSM_GET_Dr(in)]
 
+  isize pc = 0; // program counter; current instruction#
+
   for (;;) {
     assertf(pc < (isize)incount, "pc=%ld incount=%u", pc, incount);
     logstate(iregs, inv, pc);
 
-    in = inv[pc++];
-    ar = RSM_GET_Ar(in);
+    rinstr in = inv[pc++];  // current instruction
+    u8 ar = RSM_GET_Ar(in); // argument Ar, which almost every instruction needs
     switch ((enum rop)RSM_GET_OP(in)) {
 
     case rop_MOVE:  { RA = RB; break; }

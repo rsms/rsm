@@ -1,22 +1,4 @@
-// rabuf is a string output buffer for implementing snprintf-style functions which
-// writes to a limited buffer and separately keeps track of the number of bytes
-// that are appended independent of the buffer's limit.
-//
-// Here is a template for use with functions that uses rabuf:
-//
-// // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th
-// // character then gets the terminating '\0'). If the return value is greater than or
-// // equal to the bufcap argument, buf was too short and some of the characters were
-// // discarded. The output is always null-terminated, unless size is 0.
-// // Returns the number of characters that would have been printed if bufcap was
-// // unlimited (not including the final `\0').
-// usize myprint(char* buf, usize bufcap, int somearg) {
-//   rabuf s = rabuf_make(buf, bufcap);
-//   // call rabuf_append functions here
-//   return rabuf_terminate(&s);
-// }
-//
-#include "rsm.h"
+#include "util.h"
 
 #ifdef R_WITH_LIBC
   #include <stdio.h>
@@ -32,34 +14,7 @@ static char* strrevn(char* s, usize len) {
   return s;
 }
 
-void rabuf_init(rabuf* s, char* buf, usize bufsize) {
-  assert(bufsize > 0);
-  s->p = buf;
-  s->lastp = buf + bufsize - 1;
-  s->len = 0;
-}
-
-usize rabuf_terminate(rabuf* s) {
-  *s->p = 0;
-  return s->len;
-}
-
-void rabuf_appendc(rabuf* s, char c) {
-  *s->p = c;
-  s->p = MIN(s->p + 1, s->lastp);
-  s->len++;
-}
-
-void rabuf_append(rabuf* s, const char* p, usize len) {
-  usize z = MIN(len, rabuf_avail(s));
-  memcpy(s->p, p, z);
-  s->p += z;
-  if (check_add_overflow(s->len, len, &s->len))
-    s->len = USIZE_MAX;
-}
-
-
-usize rstrfmtu64(char buf[64], u64 v, u32 base) {
+usize stru64(char buf[64], u64 v, u32 base) {
   static const char chars[] =
     "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
   base = MAX(2, MIN(base, 62));
@@ -74,18 +29,63 @@ usize rstrfmtu64(char buf[64], u64 v, u32 base) {
   return len;
 }
 
+// sbuf is a string output buffer for implementing snprintf-style functions which
+// writes to a limited buffer and separately keeps track of the number of bytes
+// that are appended independent of the buffer's limit.
+//
+// Here is a template for use with functions that uses sbuf:
+//
+// // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th
+// // character then gets the terminating '\0'). If the return value is greater than or
+// // equal to the bufcap argument, buf was too short and some of the characters were
+// // discarded. The output is always null-terminated, unless size is 0.
+// // Returns the number of characters that would have been printed if bufcap was
+// // unlimited (not including the final `\0').
+// usize myprint(char* buf, usize bufcap, int somearg) {
+//   sbuf s = sbuf_make(buf, bufcap);
+//   // call sbuf_append functions here
+//   return sbuf_terminate(&s);
+// }
+//
 
-void rabuf_appendu64(rabuf* s, u64 v, u32 base) {
-  char buf[64];
-  usize len = rstrfmtu64(buf, v, base);
-  return rabuf_append(s, buf, len);
+void sbuf_init(sbuf* s, char* buf, usize bufsize) {
+  assert(bufsize > 0);
+  s->p = buf;
+  s->lastp = buf + bufsize - 1;
+  s->len = 0;
+}
+
+usize sbuf_terminate(sbuf* s) {
+  *s->p = 0;
+  return s->len;
+}
+
+void sbuf_appendc(sbuf* s, char c) {
+  *s->p = c;
+  s->p = MIN(s->p + 1, s->lastp);
+  s->len++;
+}
+
+void sbuf_append(sbuf* s, const char* p, usize len) {
+  usize z = MIN(len, sbuf_avail(s));
+  memcpy(s->p, p, z);
+  s->p += z;
+  if (check_add_overflow(s->len, len, &s->len))
+    s->len = USIZE_MAX;
 }
 
 
-void rabuf_appendfill(rabuf* s, char c, usize len) {
+void sbuf_appendu64(sbuf* s, u64 v, u32 base) {
+  char buf[64];
+  usize len = stru64(buf, v, base);
+  return sbuf_append(s, buf, len);
+}
+
+
+void sbuf_appendfill(sbuf* s, char c, usize len) {
   if (check_add_overflow(s->len, len, &s->len))
     s->len = USIZE_MAX;
-  usize avail = rabuf_avail(s);
+  usize avail = sbuf_avail(s);
   if (avail < len)
     len = avail;
   memset(s->p, c, len);
@@ -93,7 +93,7 @@ void rabuf_appendfill(rabuf* s, char c, usize len) {
 }
 
 
-void rabuf_appendrepr(rabuf* s, const char* srcp, usize len) {
+void sbuf_appendrepr(sbuf* s, const char* srcp, usize len) {
   static const char* hexchars = "0123456789abcdef";
 
   char* p = s->p;
@@ -156,13 +156,13 @@ void rabuf_appendrepr(rabuf* s, const char* srcp, usize len) {
 }
 
 
-void rabuf_appendf64(rabuf* s, f64 v, int ndec) {
+void sbuf_appendf64(sbuf* s, f64 v, int ndec) {
   #ifndef R_WITH_LIBC
-    #warning TODO implement rabuf_appendf64 for non-libc
+    #warning TODO implement sbuf_appendf64 for non-libc
     assert(!"not implemented");
     // TODO: consider using fmt_fp (stdio/vfprintf.c) in musl
   #else
-    usize cap = rabuf_avail(s);
+    usize cap = sbuf_avail(s);
     int n;
     if (ndec > -1) {
       n = snprintf(s->p, cap+1, "%.*f", ndec, v);
@@ -188,25 +188,25 @@ void rabuf_appendf64(rabuf* s, f64 v, int ndec) {
 }
 
 
-void rabuf_appendfmtv(rabuf* s, const char* fmt, va_list ap) {
+void sbuf_appendfmtv(sbuf* s, const char* fmt, va_list ap) {
   #ifndef R_WITH_LIBC
     assert(!"not implemented");
   #else
-    int n = vsnprintf(s->p, rabuf_avail(s), fmt, ap);
+    int n = vsnprintf(s->p, sbuf_avail(s), fmt, ap);
     s->len += (usize)n;
     s->p = MIN(s->p + n, s->lastp);
   #endif
 }
 
 
-void rabuf_appendfmt(rabuf* s, const char* fmt, ...) {
+void sbuf_appendfmt(sbuf* s, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  rabuf_appendfmtv(s, fmt, ap);
+  sbuf_appendfmtv(s, fmt, ap);
   va_end(ap);
 }
 
 
-bool rabuf_endswith(const rabuf* s, const char* str, usize len) {
+bool sbuf_endswith(const sbuf* s, const char* str, usize len) {
   return s->len >= len && memcmp(s->p - len, str, len) == 0;
 }

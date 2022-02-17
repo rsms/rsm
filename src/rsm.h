@@ -85,14 +85,6 @@ struct rmem {
   u32   flags;
 };
 
-// rarray is an array of pointer-sized elements
-typedef struct rarray rarray;
-struct rarray {
-  void** v;
-  u32    len;
-  u32    cap;
-};
-
 // size and position of instruction arguments
 #define RSM_SIZE_OP  8
 #define RSM_SIZE_A   5
@@ -181,6 +173,7 @@ const char* rtype_name(rtype); // name of a type constant
 usize rsm_fmtprog(char* buf, usize bufcap, rinstr* ip, usize ilen);
 usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in);
 
+// rsm_eval executes a program, starting with instruction inv[0]
 void rsm_eval(u64* iregs, u32* inv, u32 inc);
 
 // rmem
@@ -209,39 +202,5 @@ usize rmem_vmpagesize();
 // rmem_vmfree frees memory allocated with rmem_vmalloc
 bool rmem_vmfree(void* ptr, usize nbytes);
 
-
-// rabuf is a string output buffer for implementing snprintf-style functions
-typedef struct {
-  char* p;
-  char* lastp;
-  usize len;
-} rabuf;
-#define rabuf_make(p,size) ({                        \
-  usize z__ = (usize)(size);                         \
-  char* p__ = (p);                                   \
-  static char x__;                                   \
-  UNLIKELY(z__ == 0) ? (rabuf){ &x__, &x__, 0 }      \
-                     : (rabuf){ p__, p__+z__-1, 0 }; \
-})
-void rabuf_init(rabuf* s, char* buf, usize bufsize); // bufsize must be >0
-usize rabuf_terminate(rabuf* s);
-#define rabuf_avail(s) ( (usize)(uintptr)((s)->lastp - (s)->p) )
-void rabuf_appendc(rabuf* s, char c);
-void rabuf_append(rabuf* s, const char* p, usize len);
-void rabuf_appendu64(rabuf* s, u64 v, u32 base);
-void rabuf_appendf64(rabuf* s, f64 v, int ndec);
-static void rabuf_appendstr(rabuf* s, const char* cstr);
-void rabuf_appendfill(rabuf* s, char c, usize len); // like memset
-void rabuf_appendrepr(rabuf* s, const char* srcp, usize len);
-void rabuf_appendfmt(rabuf* s, const char* fmt, ...) ATTR_FORMAT(printf, 2, 3);
-void rabuf_appendfmtv(rabuf* s, const char* fmt, va_list);
-bool rabuf_endswith(const rabuf* s, const char* str, usize len);
-usize rstrfmtu64(char buf[64], u64 v, u32 base);
-
-// ---------------
-
-inline static void rabuf_appendstr(rabuf* s, const char* cstr) {
-  rabuf_append(s, cstr, strlen(cstr));
-}
 
 R_ASSUME_NONNULL_END

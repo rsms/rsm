@@ -1,28 +1,29 @@
 // string formatting
 #include "rsm.h"
+#include "util.h"
 
 // ANSI colors: (\e[3Nm or \e[9Nm) 1 red, 2 green, 3 yellow, 4 blue, 5 magenta, 6 cyan
-#define FMT_R(s,v) rabuf_appendfmt(s, "\t\e[9%cmR%u\e[39m", '1'+((v)%6), (v))
-#define FMT_K(s,v) rabuf_appendfmt(s, "\tK%u", (v))
-#define FMT_U(s,v) rabuf_appendfmt(s, "\t0x%x", (v))
-#define FMT_S(s,v) rabuf_appendfmt(s, "\t%d", (int)(v))
+#define FMT_R(s,v) sbuf_appendfmt(s, "\t\e[9%cmR%u\e[39m", '1'+((v)%6), (v))
+#define FMT_K(s,v) sbuf_appendfmt(s, "\tK%u", (v))
+#define FMT_U(s,v) sbuf_appendfmt(s, "\t0x%x", (v))
+#define FMT_S(s,v) sbuf_appendfmt(s, "\t%d", (int)(v))
 
-void fmtinstr__(rabuf* s, rinstr in)     { }
-void fmtinstr_A(rabuf* s, rinstr in)     { FMT_R(s,RSM_GET_Ar(in)); }
-void fmtinstr_Au(rabuf* s, rinstr in)    { FMT_U(s,RSM_GET_Au(in)); }
-void fmtinstr_As(rabuf* s, rinstr in)    { FMT_S(s,RSM_GET_As(in)); }
-void fmtinstr_AB(rabuf* s, rinstr in)    { fmtinstr_A(s, in);   FMT_R(s,RSM_GET_Br(in)); }
-void fmtinstr_ABu(rabuf* s, rinstr in)   { fmtinstr_A(s, in);   FMT_U(s,RSM_GET_Bu(in)); }
-void fmtinstr_ABs(rabuf* s, rinstr in)   { fmtinstr_A(s, in);   FMT_S(s,RSM_GET_Bs(in)); }
-void fmtinstr_ABk(rabuf* s, rinstr in)   { fmtinstr_A(s, in);   FMT_K(s,RSM_GET_Bu(in)); }
-void fmtinstr_ABC(rabuf* s, rinstr in)   { fmtinstr_AB(s, in);  FMT_R(s,RSM_GET_Cr(in)); }
-void fmtinstr_ABCu(rabuf* s, rinstr in)  { fmtinstr_AB(s, in);  FMT_U(s,RSM_GET_Cu(in)); }
-void fmtinstr_ABCs(rabuf* s, rinstr in)  { fmtinstr_AB(s, in);  FMT_R(s,RSM_GET_Cs(in)); }
-void fmtinstr_ABCD(rabuf* s, rinstr in)  { fmtinstr_ABC(s, in); FMT_R(s,RSM_GET_Du(in)); }
-void fmtinstr_ABCDs(rabuf* s, rinstr in) { fmtinstr_ABC(s, in); FMT_R(s,RSM_GET_Ds(in)); }
+void fmtinstr__(sbuf* s, rinstr in)     { }
+void fmtinstr_A(sbuf* s, rinstr in)     { FMT_R(s,RSM_GET_Ar(in)); }
+void fmtinstr_Au(sbuf* s, rinstr in)    { FMT_U(s,RSM_GET_Au(in)); }
+void fmtinstr_As(sbuf* s, rinstr in)    { FMT_S(s,RSM_GET_As(in)); }
+void fmtinstr_AB(sbuf* s, rinstr in)    { fmtinstr_A(s, in);   FMT_R(s,RSM_GET_Br(in)); }
+void fmtinstr_ABu(sbuf* s, rinstr in)   { fmtinstr_A(s, in);   FMT_U(s,RSM_GET_Bu(in)); }
+void fmtinstr_ABs(sbuf* s, rinstr in)   { fmtinstr_A(s, in);   FMT_S(s,RSM_GET_Bs(in)); }
+void fmtinstr_ABk(sbuf* s, rinstr in)   { fmtinstr_A(s, in);   FMT_K(s,RSM_GET_Bu(in)); }
+void fmtinstr_ABC(sbuf* s, rinstr in)   { fmtinstr_AB(s, in);  FMT_R(s,RSM_GET_Cr(in)); }
+void fmtinstr_ABCu(sbuf* s, rinstr in)  { fmtinstr_AB(s, in);  FMT_U(s,RSM_GET_Cu(in)); }
+void fmtinstr_ABCs(sbuf* s, rinstr in)  { fmtinstr_AB(s, in);  FMT_R(s,RSM_GET_Cs(in)); }
+void fmtinstr_ABCD(sbuf* s, rinstr in)  { fmtinstr_ABC(s, in); FMT_R(s,RSM_GET_Du(in)); }
+void fmtinstr_ABCDs(sbuf* s, rinstr in) { fmtinstr_ABC(s, in); FMT_R(s,RSM_GET_Ds(in)); }
 
-static void fmtinstr1(rabuf* s, rinstr in) {
-  rabuf_appendstr(s, rop_name(RSM_GET_OP(in)));
+static void fmtinstr1(sbuf* s, rinstr in) {
+  sbuf_appendstr(s, rop_name(RSM_GET_OP(in)));
   switch (RSM_GET_OP(in)) {
     #define _(name, args, ...) case rop_##name: fmtinstr_##args(s, in); break;
     DEF_RSM_OPS(_)
@@ -31,21 +32,21 @@ static void fmtinstr1(rabuf* s, rinstr in) {
 }
 
 usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in) {
-  rabuf s = rabuf_make(buf, bufcap);
+  sbuf s = sbuf_make(buf, bufcap);
   fmtinstr1(&s, in);
-  return rabuf_terminate(&s);
+  return sbuf_terminate(&s);
 }
 
 usize rsm_fmtprog(char* buf, usize bufcap, rinstr* ip, usize ilen) {
-  rabuf s1 = rabuf_make(buf, bufcap); rabuf* s = &s1;
+  sbuf s1 = sbuf_make(buf, bufcap); sbuf* s = &s1;
   for (usize i = 0; i < ilen; i++) {
     if (i)
-      rabuf_appendc(s, '\n');
+      sbuf_appendc(s, '\n');
     rinstr in = ip[i];
-    rabuf_appendfmt(s, "%4lx  ", i);
+    sbuf_appendfmt(s, "%4lx  ", i);
     fmtinstr1(s, in);
   }
-  return rabuf_terminate(s);
+  return sbuf_terminate(s);
 }
 
 
@@ -53,7 +54,7 @@ usize rsm_fmtprog(char* buf, usize bufcap, rinstr* ip, usize ilen) {
 // in binary, unsigned decimal and signed decimal.
 void logbin(u32 v) {
   char buf[32];
-  usize n = rstrfmtu64(buf, v, 2);
+  usize n = stru64(buf, v, 2);
   log("\e[2mbit   3322222222221111111111          \e[22m\n"
       "\e[2m      10987654321098765432109876543210\e[22m\n"
       "\e[2mbin   %.*s\e[22m%.*s\n"

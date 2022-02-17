@@ -546,14 +546,6 @@ NORETURN void _rpanic(const char* file, int line, const char* fun, const char* f
   #define assert(cond) \
     if (UNLIKELY(!(cond))) _assertfail("%s", #cond)
 
-  #define assertop(a,op,b) ({                                               \
-    __typeof__(a) A__ = a;                                                  \
-    __typeof__(a) B__ = b; /* intentionally typeof(a) and not b for lits */ \
-    if (UNLIKELY(!(A__ op B__)))                                            \
-      _assertfail("%s %s %s (%s %s %s)",                                    \
-        #a, #op, #b, debug_quickfmt(0,A__), #op, debug_quickfmt(1,B__));    \
-  })
-
   #define assertcstreq(cstr1, cstr2) ({                  \
     const char* cstr1__ = (cstr1);                       \
     const char* cstr2__ = (cstr2);                       \
@@ -625,33 +617,6 @@ NORETURN void _rpanic(const char* file, int line, const char* fun, const char* f
 
 // void dlog(const char* fmt, ...)
 #ifdef DEBUG
-  // debug_quickfmt formats a value x and returns a temporary string for use in printing.
-  // The buffer argument should be a number in the inclusive range [0-5], determining which
-  // temporary buffer to use and return a pointer to.
-  #define debug_quickfmt(buffer, x) debug_tmpsprintf(buffer, _Generic((x), \
-    unsigned long long: "%llu", \
-    unsigned long:      "%lu", \
-    unsigned int:       "%u", \
-    unsigned short:     "%u", \
-    long long:          "%lld", \
-    long:               "%ld", \
-    int:                "%d", \
-    short:              "%d", \
-    char:               "%c", \
-    unsigned char:      "%C", \
-    const char*:        "%s", \
-    char*:              "%s", \
-    bool:               "%d", \
-    float:              "%f", \
-    double:             "%f", \
-    void*:              "%p", \
-    const void*:        "%p", \
-    default:            "%p" \
-  ), x)
-  // debug_tmpsprintf is like sprintf but uses a static buffer.
-  // The buffer argument determines which buffer to use (constraint: buffer<6)
-  const char* debug_tmpsprintf(int buffer, const char* fmt, ...)
-    ATTR_FORMAT(printf, 2, 3);
   #ifdef R_WITH_LIBC
     R_ASSUME_NONNULL_END
     #include <unistd.h> // isatty

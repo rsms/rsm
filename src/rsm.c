@@ -1,18 +1,12 @@
 #include "rsm.h"
 
-void logbin(u32 v);
-
 // TODO:
-// - build an evaluator and try it with the factorial function
+// - assembler
+//   - source scanner & parser
+//   - ir representation (graph)
+//   - register allocation to support "locals"
+//   - codegen
 // - think about how a "program" is represented (functions + constants)
-
-// reference implementation of factorial
-u64 factorial(u64 n) {
-  if (n == 0)
-    return 1;
-  else
-    return n * factorial(n-1);
-}
 
 int main(int argc, const char** argv) {
   rmem* m = rmem_makevm(4096*1000);
@@ -54,8 +48,7 @@ int main(int argc, const char** argv) {
   // eval
   u64 iregs[32] = {0};
   iregs[0] = 3; // arg 1
-  dlog("reference factorial(%llu) => %llu", iregs[0], factorial((i64)iregs[0]));
-  dlog("evaluating vm factorial(%lld)", (i64)iregs[0]);
+  dlog("evaluating factorial(%lld)", (i64)iregs[0]);
   rsm_eval(iregs, ip, pc);
   dlog("result: %llu", iregs[0]);
 
@@ -66,6 +59,9 @@ int main(int argc, const char** argv) {
     "fun factorial (i32) i32\n"
     "  b0:\n"
     "    R1 = R0  // ACC = n (argument 0)\n"
+    "    123 -456 0xface 0b101 F31\n"
+    //   U+1F469 woman, U+1F3FE skin tone mod 5, U+200D zwj, U+1F680 rocket = astronaut
+    "    \xF0\x9F\x91\xA9\xF0\x9F\x8F\xBE\xE2\x80\x8D\xF0\x9F\x9A\x80\n"
     // "    R0 = 1         // RES (return value 0)\n"
     // "    brz R1 end     // if n==0 goto end\n"
     // "  b1:              // <- [b0] b1\n"
@@ -73,7 +69,7 @@ int main(int argc, const char** argv) {
     // "    R1 = sub R1 1  // ACC = ACC - 1\n"
     // "    brnz R1  b1    // if n!=0 goto b1\n"
     // "  end:             // <- b0 [b1]\n"
-    // "    ret            // RES is at R0\n"
+    "    ret            // RES is at R0\n"
   );
   rsm_fmtprog(buf, sizeof(buf), idst, icount);
   log("rsm_asm =>\n%s", buf);

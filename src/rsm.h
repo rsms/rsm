@@ -68,10 +68,10 @@ _( f64,  64 ) \
 _( ptr,  64 ) \
 // end RSM_FOREACH_TYPE
 
-// rtype, rtype_* -- type code
+// rtype, rt_* -- type code
 typedef u8 rtype;
 enum rtype {
-  #define _(name, ...) rtype_##name,
+  #define _(name, ...) rt_##name,
   RSM_FOREACH_TYPE(_)
   #undef _
 } END_TYPED_ENUM(rtype)

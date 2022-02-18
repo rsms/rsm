@@ -29,24 +29,23 @@ usize stru64(char buf[64], u64 v, u32 base) {
   return len;
 }
 
-// abuf is a string output buffer for implementing snprintf-style functions which
-// writes to a limited buffer and separately keeps track of the number of bytes
-// that are appended independent of the buffer's limit.
-//
-// Here is a template for use with functions that uses abuf:
-//
-// // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th
-// // character then gets the terminating '\0'). If the return value is greater than or
-// // equal to the bufcap argument, buf was too short and some of the characters were
-// // discarded. The output is always null-terminated, unless size is 0.
-// // Returns the number of characters that would have been printed if bufcap was
-// // unlimited (not including the final `\0').
-// usize myprint(char* buf, usize bufcap, int somearg) {
-//   abuf s = abuf_make(buf, bufcap);
-//   // call abuf_* functions here
-//   return abuf_terminate(&s);
-// }
-//
+// logbin is a little debug/development function which logs a number
+// in binary, unsigned decimal and signed decimal.
+void logbin(u32 v) {
+  char buf[32];
+  usize n = stru64(buf, v, 2);
+  log("\e[2mbit   3322222222221111111111          \e[22m\n"
+      "\e[2m      10987654321098765432109876543210\e[22m\n"
+      "\e[2mbin   %.*s\e[22m%.*s\n"
+      "\e[2mdec u \e[22m%u (0x%x)\n"
+      "\e[2mdec s \e[22m%d",
+      (int)(32-n), "00000000000000000000000000000000",
+      (int)n, buf,
+      v, v,
+      (int)v);
+}
+
+// --- abuf functions ---
 
 void abuf_c(abuf* s, char c) {
   *s->p = c;

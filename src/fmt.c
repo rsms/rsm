@@ -50,23 +50,6 @@ usize rsm_fmtprog(char* buf, usize bufcap, rinstr* ip, usize ilen) {
 }
 
 
-// logbin is a little debug/development function which logs a number
-// in binary, unsigned decimal and signed decimal.
-void logbin(u32 v) {
-  char buf[32];
-  usize n = stru64(buf, v, 2);
-  log("\e[2mbit   3322222222221111111111          \e[22m\n"
-      "\e[2m      10987654321098765432109876543210\e[22m\n"
-      "\e[2mbin   %.*s\e[22m%.*s\n"
-      "\e[2mdec u \e[22m%u (0x%x)\n"
-      "\e[2mdec s \e[22m%d",
-      (int)(32-n), "00000000000000000000000000000000",
-      (int)n, buf,
-      v, v,
-      (int)v);
-}
-
-
 const char* rop_name(rop op) {
   switch (op) {
     #define _(name, ...) case rop_##name: return #name;
@@ -79,7 +62,7 @@ const char* rop_name(rop op) {
 
 const char* rtype_name(rtype t) {
   switch (t) {
-    #define _(name, ...) case rtype_##name: return #name;
+    #define _(name, ...) case rt_##name: return #name;
     RSM_FOREACH_TYPE(_)
     #undef _
   }

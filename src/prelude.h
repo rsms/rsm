@@ -472,29 +472,26 @@ static inline WARN_UNUSED_RESULT usize array_size(usize a, usize b) {
 R_ASSUME_NONNULL_BEGIN
 
 // ======================================================================================
-// error
+// rerror
 
-typedef i32 error;
-enum error {
-  err_ok            =   0, // no error
-  err_invalid       =  -1, // invalid data or argument
-  err_sys_op        =  -2, // invalid syscall op or syscall op data
-  err_badfd         =  -3, // invalid file descriptor
-  err_bad_name      =  -4, // invalid or misformed name
-  err_not_found     =  -5, // resource not found
-  err_name_too_long =  -6, // name too long
-  err_canceled      =  -7, // operation canceled
-  err_not_supported =  -8, // not supported
-  err_exists        =  -9, // already exists
-  err_end           = -10, // end of resource
-  err_access        = -11, // permission denied
-  err_nomem         = -12, // cannot allocate memory
-  err_mfault        = -13, // bad memory address
-  err_overflow      = -14, // value too large
+typedef i32 rerror;
+enum rerror {
+  rerr_ok            =   0, // no error
+  rerr_invalid       =  -1, // invalid data or argument
+  rerr_sys_op        =  -2, // invalid syscall op or syscall op data
+  rerr_badfd         =  -3, // invalid file descriptor
+  rerr_bad_name      =  -4, // invalid or misformed name
+  rerr_not_found     =  -5, // resource not found
+  rerr_name_too_long =  -6, // name too long
+  rerr_canceled      =  -7, // operation canceled
+  rerr_not_supported =  -8, // not supported
+  rerr_exists        =  -9, // already exists
+  rerr_end           = -10, // end of resource
+  rerr_access        = -11, // permission denied
+  rerr_nomem         = -12, // cannot allocate memory
+  rerr_mfault        = -13, // bad memory address
+  rerr_overflow      = -14, // value too large
 };
-
-error error_from_errno(int errno);
-const char* error_str(error);
 
 // ======================================================================================
 // panic & assert
@@ -512,7 +509,7 @@ NORETURN void _rpanic(const char* file, int line, const char* fun, const char* f
   R_ASSUME_NONNULL_END
   #include <stdio.h>
   R_ASSUME_NONNULL_BEGIN
-  #define log(format, args...) fprintf(stderr, format "\n", ##args)
+  #define log(format, args...) ({ fprintf(stderr, format "\n", ##args); ((void)0); })
 #else
   // TODO implemented for no-libc
   #define log(format, ...) ((void)0)

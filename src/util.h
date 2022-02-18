@@ -3,7 +3,22 @@
 #include "prelude.h"
 R_ASSUME_NONNULL_BEGIN
 
+#define UTF8_SELF 0x80 // UTF-8 "self" byte constant
+
+// character classifiers
+#define isdigit(c)    ( ((u32)(c) - '0') < 10 )                 /* 0-9 */
+#define isalpha(c)    ( ((u32)(c) | 32) - 'a' < 26 )            /* A-Za-z */
+#define isalnum(c)    ( isdigit(c) || isalpha(c) )              /* 0-9A-Za-z */
+#define isupper(c)    ( ((u32)(c) - 'A') < 26 )                 /* A-Z */
+#define islower(c)    ( ((u32)(c) - 'a') < 26 )                 /* a-z */
+#define isprint(c)    ( ((u32)(c) - 0x20) < 0x5f )              /* SP-~ */
+#define isgraph(c)    ( ((u32)(c) - 0x21) < 0x5e )              /* !-~ */
+#define isspace(c)    ( (c) == ' ' || (u32)(c) - '\t' < 5 )     /* SP, \{tnvfr} */
+#define ishexdigit(c) ( isdigit(c) || ((u32)c | 32) - 'a' < 6 ) /* 0-9A-Fa-f */
+
 usize stru64(char buf[64], u64 v, u32 base);
+
+void logbin(u32 v);
 
 // abuf is a string append buffer for implementing snprintf-style functions which
 // writes to a limited buffer and separately keeps track of the number of bytes

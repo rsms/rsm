@@ -54,7 +54,7 @@ enum rop {
   RSM_OP_COUNT,
 } END_TYPED_ENUM(rop)
 
-// rtype_*
+// types
 #define RSM_FOREACH_TYPE(_) \
 /* name, bitsize */ \
 _( void, 0  ) \

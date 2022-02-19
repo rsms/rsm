@@ -1,0 +1,12 @@
+fundef     = "fun" name "(" params? ")" result? funbody?
+params     = param ("," param)*
+result     = param ("," param)*
+param      = name type | type
+funbody    = "{" block+ "}"
+block      = anonblock | labelblock
+anonblock  = stmt1+
+labelblock = name ":" stmt1+
+stmt1      = operation | assignment
+assignment = (reg | local) "=" (operation | arg)
+operation  = op arg*
+arg        = reg | local | literal

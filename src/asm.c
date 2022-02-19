@@ -270,6 +270,7 @@ static rtok padvance(pstate* p) { // read the next token
       p->insertsemi = false;
       return p->tok = T_SEMI;
     }
+    p->tokstart = p->inp;
     return p->tok = T_END;
   }
 

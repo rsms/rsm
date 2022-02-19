@@ -389,7 +389,7 @@ static rtok sadvance(pstate* p) { // scan the next token
   }
 }
 
-#define sadvance(p) ({ sadvance(p); logpstate(p); (p)->tok; })
+// #define sadvance(p) ({ sadvance(p); logpstate(p); (p)->tok; })
 static void logpstate(pstate* p);
 
 // --- parse
@@ -504,7 +504,8 @@ static node* prefix_name(PPARAMS) {
 
 #define prefix_type prefix_name
 
-// blockbody = (operation | assignment)*
+// blockbody = blockstmt*
+// blockstmt = operation | assignment
 static node* pblockbody(PPARAMS, node* block) {
   while (p->tok != T_RBRACE && p->tok != T_END && p->tok != T_LABEL) {
     node* cn = pstmt(PARGS);
@@ -569,6 +570,9 @@ static node* prefix_fun(PPARAMS) {
   // result
   nlist_append(&n->list, p->tok == T_LBRACE ? mknil(p) : pparams(PARGS));
 
+  if (p->tok == T_SEMI)
+    return n;
+
   // body "{" ... "}"
   expecttok(p, T_LBRACE);
   node* block0 = mknode(p); // recycle the "{" token
@@ -587,7 +591,7 @@ static node* prefix_fun(PPARAMS) {
   }
   while (p->tok == T_LABEL) {
     node* block = prefix_label(PARGS);
-    if (body->list.head && strsliceeq(&block->strslice, kBlock0Name))
+    if (body->list.head != NULL && strsliceeq(&block->strslice, kBlock0Name))
       perr(p, "block named %s must be first block", kBlock0Name);
     nlist_append(&body->list, block);
   }

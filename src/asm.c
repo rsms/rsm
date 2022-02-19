@@ -25,7 +25,7 @@ _( T_COMMA  ) /* , */ \
 _( T_IREG   ) /* Rn   */ \
 _( T_FREG   ) /* Fn   */ \
 _( T_LABEL  ) /* foo: */ \
-_( T_SYM    ) /* foo  */ \
+_( T_NAME   ) /* foo  */ \
 /* literal numbers (order matters; see snumber) */ \
 _( T_INT2   ) _( T_SINT2   ) /* 0b1111011       */ \
 _( T_INT10  ) _( T_SINT10  ) /* 123, -123       */ \
@@ -72,33 +72,37 @@ enum precedence {
 // parse state
 typedef struct pstate pstate;
 struct pstate {
-  rmem*       mem;        // memory allocator
-  const char* inp;        // source bytes cursor (source ends with 0x00)
-  const char* inend;      // source bytes end
-  const char* tokstart;   // start of current token in source
-  const char* linestart;  // source position line start pointer (for column)
-  u32         lineno;     // source position line
-  rtok        tok;        // current token
-  bool        insertsemi; // insert T_SEMI before next newline
-  bool        isneg;      // true when parsing a negative number
-  u64         ival;       // integer value for T_INT* tokens
-
-  const char* nullable errstr; // non-null when an error occured
+  rmem*       mem;         // memory allocator
+  const char* inp;         // source bytes cursor (source ends with 0x00)
+  const char* inend;       // source bytes end
+  const char* tokstart;    // start of current token in source
+  const char* linestart;   // source position line start pointer (for column)
+  u32         lineno;      // source position line
+  rtok        tok;         // current token
+  bool        insertsemi;  // insert T_SEMI before next newline
+  bool        isneg;       // true when parsing a negative number
+  u64         ival;        // integer value for T_INT* tokens
+  char        errstr[128]; // last error message (empty if no error occured)
 };
 
-typedef struct node  node;
-typedef struct nlist nlist;
+typedef struct node     node;
+typedef struct nlist    nlist;
+typedef struct strslice strslice;
 struct nlist {
   node* nullable head;
   node* nullable tail;
+};
+struct strslice {
+  const char* p;
+  usize len;
 };
 struct node {
   node* nullable next;      // list link
   rtok           t;         // type
   u32            line, col; // source postion
   union { // field used depends on value of t
-    u64 ival;
-    struct { const char* p; usize len; } strslice;
+    u64      ival;
+    strslice strslice;
   };
   nlist list;
 };
@@ -113,6 +117,27 @@ struct parselet {
   infixparselet  nullable infix;
   precedence     prec;
 };
+
+static const char* kBlock0Name = "b0"; // name of first block
+
+// istypetok returns true if t represents (or begins the description of) a type
+static bool istypetok(rtok t) {
+  switch (t) {
+    case T_I1:
+    case T_I8:
+    case T_I16:
+    case T_I32:
+    case T_I64:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static bool strsliceeqn(const strslice* s, const char* str, usize len) {
+  return s->len == len && memcmp(s->p, str, len) == 0;
+}
+#define strsliceeq(s,cstr) strsliceeqn((s), (cstr), strlen(cstr))
 
 static void nlist_append(nlist* l, node* n) {
   if (l->tail) {
@@ -144,10 +169,30 @@ static u32 pcolumn(pstate* p) { // source column of current token
   return (u32)((uintptr)p->tokstart - (uintptr)p->linestart) + 1;
 }
 
-static rtok perr(pstate* p, const char* errstr) {
-  log("input:%u:%u: error: %s", p->lineno, pcolumn(p), errstr);
-  p->errstr = errstr;
+static rtok errv(pstate* p, const char* fmt, va_list ap) {
+  abuf s = abuf_make(p->errstr, sizeof(p->errstr));
+  abuf_fmt(&s, "input:%u:%u: error: ", p->lineno, pcolumn(p));
+  abuf_fmtv(&s, fmt, ap);
+  abuf_terminate(&s);
+  dlog("%s", p->errstr);
+  return p->tok;
+}
+
+ATTR_FORMAT(printf, 2, 3)
+static rtok serr(pstate* p, const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  errv(p, fmt, ap);
+  va_end(ap);
   return p->tok = T_END;
+}
+
+ATTR_FORMAT(printf, 2, 3)
+static void perr(pstate* p, const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  errv(p, fmt, ap);
+  va_end(ap);
 }
 
 static rtok scomment(pstate* p) { // line comment "// ... <LF>"
@@ -183,13 +228,13 @@ static rtok snameunicode(pstate* p) {
       continue;
     }
     if (!utf8chomp(p))
-      return perr(p, "invalid UTF8 sequence");
+      return serr(p, "invalid UTF8 sequence");
   }
-  return p->tok = T_SYM;
+  return p->tok = T_NAME;
 }
 
 static rtok sname(pstate* p) {
-  p->tok = T_SYM;
+  p->tok = T_NAME;
   while (p->inp < p->inend && isname(*p->inp))
     p->inp++;
   if (p->inp < p->inend && (u8)*p->inp >= UTF8_SELF)
@@ -258,9 +303,9 @@ end:
 static rtok snumber(pstate* p, int base) {
   rerror err = snumber1(p, base);
   if (err) switch (err) {
-    case rerr_not_supported: return perr(p, "floating-point literal not supported");
-    case rerr_overflow:      return perr(p, "integer literal too large");
-    default:                 return perr(p, "invalid integer literal");
+    case rerr_not_supported: return serr(p, "floating-point literal not supported");
+    case rerr_overflow:      return serr(p, "integer literal too large");
+    default:                 return serr(p, "invalid integer literal");
   }
   return p->tok;
 }
@@ -272,10 +317,10 @@ static rtok sreg(pstate* p) {
     goto invalid;
   return p->tok;
 invalid:
-  return perr(p, "invalid register");
+  return serr(p, "invalid register");
 }
 
-static rtok padvance(pstate* p) { // read the next token
+static rtok sadvance(pstate* p) { // scan the next token
   const char* linestart = p->linestart;
   while (p->inp < p->inend && isspace(*p->inp)) {
     if (*p->inp == '\n') {
@@ -326,11 +371,16 @@ static rtok padvance(pstate* p) { // read the next token
     } FALLTHROUGH;
     case '1' ... '9': p->inp--; p->tok = T_INT10; return snumber(p, 10);
     case '/':
-      if (*p->inp) { p->inp++; p->insertsemi = insertsemi; return scomment(p); }
+      if (*p->inp == '/') {
+        p->inp++;
+        p->insertsemi = insertsemi;
+        // return scomment(p); // alt 1: produce comments
+        scomment(p); MUSTTAIL return sadvance(p); // alt 2: ignore comments
+      }
       return p->tok = T_SLASH;
     case 'R': p->tok = T_IREG; return sreg(p);
     case 'F': p->tok = T_FREG; return sreg(p);
-    default: // anything else is the start of a name (symbol, label etc)
+    default: // anything else is the start of a name
       if ((u8)c >= UTF8_SELF) {
         p->inp--;
         return snameunicode(p);
@@ -339,39 +389,56 @@ static rtok padvance(pstate* p) { // read the next token
   }
 }
 
-#define padvance(p) ({ padvance(p); logpstate(p); (p)->tok; })
+#define sadvance(p) ({ sadvance(p); logpstate(p); (p)->tok; })
 static void logpstate(pstate* p);
 
 // --- parse
 
 static node* pstmt(PPARAMS);
 #define pexpr pstmt
-#define ptype pstmt
 
-// if the current token is t, advances scanner and returns true
+// got comsumes the next token if p->tok == t
 static bool got(pstate* p, rtok t) {
   if (p->tok != t)
     return false;
-  padvance(p);
+  sadvance(p);
   return true;
 }
 
-// expect reports a syntax error if p->tok != t. Does not advance parser.
-static void expect(pstate* p, rtok t) {
-  if UNLIKELY(p->tok != t) {
-    dlog("unexpected token (expected %s)", tokname(t));
-    perr(p, "unexpected token");
-  }
+// perrunexpected reports a syntax error along with the current token
+static void perrunexpected(pstate* p, const char* expected, const char* got) {
+  perr(p, "expected %s, got %s", expected, got);
 }
 
-// pskip calls padvance(). Reports a syntax error if got(t) is false.
-static void pskip(pstate* p, rtok t) {
-  if UNLIKELY(!got(p, t)) {
-    expect(p, t);
-    padvance(p);
-  }
+// expect reports a syntax error if p->tok != t
+static void expecttok(pstate* p, rtok t) {
+  if UNLIKELY(p->tok != t)
+    perrunexpected(p, tokname(t), tokname(p->tok));
 }
 
+static bool expecttype(pstate* p, node* n) {
+  if UNLIKELY(!istypetok(n->t)) {
+    perrunexpected(p, "type", tokname(n->t));
+    return false;
+  }
+  return true;
+}
+
+static bool expectname(pstate* p, node* n) {
+  if UNLIKELY(n->t != T_NAME) {
+    perrunexpected(p, "name", tokname(n->t));
+    return false;
+  }
+  return true;
+}
+
+// eat comsumes the next token, reporting a syntax error if p->tok != t
+static void eat(pstate* p, rtok t) {
+  expecttok(p, t);
+  sadvance(p);
+}
+
+// mk* functions makes new nodes
 static node* mknode(pstate* p) {
   node* n = rmem_allocz(p->mem, sizeof(node));
   n->t = p->tok;
@@ -392,17 +459,24 @@ static node* mknil(pstate* p) {
   return n;
 }
 
-static node* pint(PPARAMS) {
+static node* ptype(PPARAMS) {
+  node* n = pstmt(PARGS);
+  expecttype(p, n);
+  return n;
+}
+
+// parse any token with an ival
+static node* prefix_int(PPARAMS) {
   node* n = mknode(p);
   n->ival = p->ival;
-  padvance(p); // consume token
+  sadvance(p); // consume token
   return n;
 }
 
 // [infix] regop = op reg operand* ";"
-static node* preg_infix(PPARAMS, node* op) {
+static node* infix_reg(PPARAMS, node* op) {
   op->t = T_OP;
-  node* reg = pint(PARGS);
+  node* reg = prefix_int(PARGS);
   nlist_append(&op->list, reg);
   while (p->tok != T_SEMI && p->tok != T_END) {
     node* cn = pstmt(PARGS);
@@ -411,139 +485,137 @@ static node* preg_infix(PPARAMS, node* op) {
   return op;
 }
 
-// [infix] assign = (reg | sym) "=" expr ";"
-static node* peq_infix(PPARAMS, node* dst) {
+// [infix] assign = (reg | name) "=" expr ";"
+static node* infix_eq(PPARAMS, node* dst) {
   node* n = mknode(p);
-  padvance(p);
+  sadvance(p);
   node* src = pexpr(PARGS);
   nlist_set2(&n->list, dst, src);
   return n;
 }
 
-static node* pname(PPARAMS) {
+static node* prefix_name(PPARAMS) {
   node* n = mknode(p);
   n->strslice.p = p->tokstart;
   n->strslice.len = toklen(p);
-  padvance(p);
+  sadvance(p);
   return n;
 }
 
-// block = (assignment | op | sym)*
-static node* pblock(PPARAMS) {
-  node* n = pname(PARGS);
-  if (n->t == T_LABEL) {
-    n->strslice.len--; // trim off trailing ":"
-    assert(n->strslice.p[n->strslice.len] == ':');
-  }
+#define prefix_type prefix_name
+
+// blockbody = (operation | assignment)*
+static node* pblockbody(PPARAMS, node* block) {
   while (p->tok != T_RBRACE && p->tok != T_END && p->tok != T_LABEL) {
     node* cn = pstmt(PARGS);
-    if (cn->t == T_SYM) // block-level symbol is operation, e.g. "ret"
+    if (cn->t == T_NAME) // block-level name is operation, e.g. "ret"
       cn->t = T_OP;
-    nlist_append(&n->list, cn);
-    got(p, T_COMMENT); // FIXME
-    pskip(p, T_SEMI);
+    nlist_append(&block->list, cn);
+    eat(p, T_SEMI);
   }
-  return n;
+  return block;
+}
+
+// labelblock = name ":" (operation | assignment)*
+static node* prefix_label(PPARAMS) {
+  node* n = prefix_name(PARGS); // label
+  n->strslice.len--; // trim off trailing ":"
+  assert(n->strslice.p[n->strslice.len] == ':');
+  return pblockbody(PARGS, n);
 }
 
 // param = (name type | type)
 static node* pparam(PPARAMS) {
   node* n = pexpr(PARGS);
-  if (p->tok == T_SEMI || p->tok == T_COMMA || p->tok == T_RPAREN || p->tok == T_END)
-    return n;
-  node* tuple = mklist(p);
-  nlist_append(&tuple->list, n);
-  nlist_append(&tuple->list, ptype(PARGS));
-  return tuple;
+  if (!istypetok(p->tok)) {
+    expecttype(p, n); // n should be a type
+    return n; // just type
+  }
+  // both name and type
+  expectname(p, n);
+  node* typ = ptype(PARGS);
+  nlist_append(&n->list, typ);
+  return n;
+}
+
+// params = param ("," param)*
+static node* pparams(PPARAMS) {
+  node* n = mklist(p);
+  for (;;) {
+    nlist_append(&n->list, pparam(PARGS));
+    if (!got(p, T_COMMA))
+      return n;
+  }
 }
 
 // fundef = "fun" name "(" params? ")" result? "{" body "}"
-// params = param ("," param)*
-// result = param ("," param)*
+// result = params
 // body   = (stmt ";")*
-static node* pfun(PPARAMS) {
+static node* prefix_fun(PPARAMS) {
   node* n = mknode(p);
-  padvance(p); // consume token
+  sadvance(p); // consume token
 
   // name
-  expect(p, T_SYM);
+  expecttok(p, T_NAME);
   n->strslice.p = p->tokstart;
   n->strslice.len = toklen(p);
-  padvance(p);
+  sadvance(p);
 
   // parameters
-  expect(p, T_LPAREN);
-  node* params = mklist(p);
-  padvance(p); // consume T_LPAREN
-  while (p->tok != T_RPAREN) {
-    node* param = pparam(PARGS);
-    nlist_append(&params->list, param);
-    if (!got(p, T_COMMA))
-      break;
-  }
-  pskip(p, T_RPAREN);
-  nlist_append(&n->list, params);
+  eat(p, T_LPAREN);
+  nlist_append(&n->list, pparams(PARGS));
+  eat(p, T_RPAREN);
 
   // result
-  node* result;
-  if (p->tok == T_LBRACE) {
-    result = mknil(p);
-  } else {
-    result = pparam(PARGS);
-    if (got(p, T_COMMA)) {
-      node* list = mklist(p);
-      nlist_append(&list->list, result);
-      result = list;
-      for (;;) {
-        node* param = pparam(PARGS);
-        nlist_append(&list->list, param);
-        if (!got(p, T_COMMA))
-          break;
-      }
-    }
-  }
-  nlist_append(&n->list, result);
+  nlist_append(&n->list, p->tok == T_LBRACE ? mknil(p) : pparams(PARGS));
 
   // body "{" ... "}"
-  pskip(p, T_LBRACE);
-  if UNLIKELY(got(p, T_RBRACE)) {
-    perr(p, "missing function body");
+  expecttok(p, T_LBRACE);
+  node* block0 = mknode(p); // recycle the "{" token
+  node* body = mklist(p); // body starts at position of "{"
+  sadvance(p); // consume "{"
+  if (got(p, T_RBRACE)) // empty function body
     return n;
+
+  // implicit first block?
+  if (p->tok != T_LABEL) {
+    block0->t = T_LABEL;
+    block0->strslice.p = kBlock0Name;
+    block0->strslice.len = 2;
+    pblockbody(PARGS, block0);
+    nlist_append(&body->list, block0);
   }
-  node* body = mklist(p);
-  for (;;) {
-    node* cn = pstmt(PARGS);
-    nlist_append(&body->list, cn);
-    if (p->tok == T_RBRACE || p->tok == T_END)
-      break;
+  while (p->tok == T_LABEL) {
+    node* block = prefix_label(PARGS);
+    if (body->list.head && strsliceeq(&block->strslice, kBlock0Name))
+      perr(p, "block named %s must be first block", kBlock0Name);
+    nlist_append(&body->list, block);
   }
   nlist_append(&n->list, body);
-  pskip(p, T_RBRACE);
-
+  eat(p, T_RBRACE);
   return n;
 }
 
 static const parselet parsetab[rtok_COUNT] = {
-  [T_IREG] = {pint, preg_infix, PREC_MEMBER},
-  [T_FREG] = {pint, preg_infix, PREC_MEMBER},
-  [T_EQ] = {NULL, peq_infix, PREC_MEMBER},
-  [T_COMMENT] = {pname, NULL, PREC_MEMBER},
-  [T_SYM] = {pname, NULL, PREC_MEMBER},
-  [T_LABEL] = {pblock, NULL, PREC_MEMBER},
-  [T_I1] = {pname, NULL, PREC_MEMBER},
-  [T_I8] = {pname, NULL, PREC_MEMBER},
-  [T_I16] = {pname, NULL, PREC_MEMBER},
-  [T_I32] = {pname, NULL, PREC_MEMBER},
-  [T_I64] = {pname, NULL, PREC_MEMBER},
+  [T_IREG] = {prefix_int, infix_reg, PREC_MEMBER},
+  [T_FREG] = {prefix_int, infix_reg, PREC_MEMBER},
+  [T_EQ] = {NULL, infix_eq, PREC_MEMBER},
+  [T_LABEL] = {prefix_label, NULL, PREC_MEMBER},
+  [T_NAME] = {prefix_name, NULL, PREC_MEMBER},
+  [T_I1] = {prefix_type, NULL, PREC_MEMBER},
+  [T_I8] = {prefix_type, NULL, PREC_MEMBER},
+  [T_I16] = {prefix_type, NULL, PREC_MEMBER},
+  [T_I32] = {prefix_type, NULL, PREC_MEMBER},
+  [T_I64] = {prefix_type, NULL, PREC_MEMBER},
 
-  [T_INT2] = {pint, NULL, PREC_MEMBER},
-  [T_SINT2] = {pint, NULL, PREC_MEMBER},
-  [T_INT10] = {pint, NULL, PREC_MEMBER},
-  [T_SINT10] = {pint, NULL, PREC_MEMBER},
-  [T_INT16] = {pint, NULL, PREC_MEMBER},
-  [T_SINT16] = {pint, NULL, PREC_MEMBER},
+  [T_INT2] = {prefix_int, NULL, PREC_MEMBER},
+  [T_SINT2] = {prefix_int, NULL, PREC_MEMBER},
+  [T_INT10] = {prefix_int, NULL, PREC_MEMBER},
+  [T_SINT10] = {prefix_int, NULL, PREC_MEMBER},
+  [T_INT16] = {prefix_int, NULL, PREC_MEMBER},
+  [T_SINT16] = {prefix_int, NULL, PREC_MEMBER},
 
-  [T_FUN] = {pfun, NULL, PREC_MEMBER},
+  [T_FUN] = {prefix_fun, NULL, PREC_MEMBER},
 };
 
 // stmt = anynode ";"
@@ -552,7 +624,7 @@ static node* pstmt(PPARAMS) {
   if (!ps->prefix) {
     dlog("no prefix parselet for %s", tokname(p->tok));
     node* n = mknil(p);
-    padvance(p); // make progress
+    sadvance(p); // make progress
     return n;
   }
 
@@ -576,12 +648,19 @@ static node* pstmt(PPARAMS) {
 
 // --- ast formatter
 
-void fmtnode1(abuf* s, node* n, int depth, bool ishead) {
-  if (!ishead) {
+typedef u32 fmtflag;
+enum fmtflag {
+  FMT_HEAD = 1 << 0, // is list head
+} END_TYPED_ENUM(fmtflag)
+
+static void fmtnode1(abuf* s, node* n, usize indent, fmtflag fl) {
+  if ((fl & FMT_HEAD) == 0) {
     abuf_c(s, '\n');
-    for (int i = 0; i < depth; i++)
+    for (usize i = 0; i < indent; i++)
       abuf_c(s, ' ');
   }
+  fl &= ~FMT_HEAD;
+  indent += 2;
 
   // atoms
   switch ((enum rtok)n->t) {
@@ -602,7 +681,7 @@ void fmtnode1(abuf* s, node* n, int depth, bool ishead) {
   if (n->t == T_LPAREN) {
     for (node* cn = n->list.head; cn; cn = cn->next) {
       abuf_c(s, ' ');
-      fmtnode1(s, cn, depth+2, cn == n->list.head);
+      fmtnode1(s, cn, indent, cn == n->list.head ? fl | FMT_HEAD : fl);
     }
     abuf_c(s, ' ');
     return abuf_c(s, ')');
@@ -616,7 +695,7 @@ void fmtnode1(abuf* s, node* n, int depth, bool ishead) {
     case T_FREG:
       abuf_u64(s, n->ival, 10); break;
 
-    case T_SYM:
+    case T_NAME:
     case T_COMMENT:
     case T_LABEL:
     case T_FUN:
@@ -639,14 +718,14 @@ void fmtnode1(abuf* s, node* n, int depth, bool ishead) {
   }
   for (node* cn = n->list.head; cn; cn = cn->next) {
     abuf_c(s, ' ');
-    fmtnode1(s, cn, depth+2, false);
+    fmtnode1(s, cn, indent, fl);
   }
   abuf_c(s, ')');
 }
 
-usize fmtnode(char* buf, usize bufcap, node* n) {
+static usize fmtnode(char* buf, usize bufcap, node* n) {
   abuf s = abuf_make(buf, bufcap);
-  fmtnode1(&s, n, 0, true);
+  fmtnode1(&s, n, 0, FMT_HEAD);
   return abuf_terminate(&s);
 }
 
@@ -670,22 +749,14 @@ static void logpstate(pstate* p) {
 }
 
 static void parse(rmem* mem, const char* src) {
-  /*
-  fun factorial (i32) i32
-    b0:
-      R1 = R0  // ACC = n (argument 0)
-      123 -456 0xface 0b101 F31
-      \xF0\x9F\x91\xA9\xF0\x9F\x8F\xBE\xE2\x80\x8D\xF0\x9F\x9A\x80
-      ret            // RES is at R0
-  */
-  pstate p = {  .mem=mem,.inp=src, .inend=src+strlen(src), .linestart=src, .lineno=1 };
-  padvance(&p);
+  pstate p = { .mem=mem, .inp=src, .inend=src+strlen(src), .linestart=src, .lineno=1 };
+  sadvance(&p); // prime parser with initial token
   while (p.tok != T_END) {
     node* n = pstmt(mem, &p, PREC_MEMBER);
-    if UNLIKELY(!got(&p, T_SEMI) && p.tok != T_END) {
-      perr(&p, "unexpected token (expected \";\")");
-      padvance(&p);
-    }
+    if UNLIKELY(p.errstr[0]) // did an error occur?
+      break;
+    if (p.tok != T_END) // every statement ends with a semicolon
+      eat(&p, T_SEMI);
 
     char buf[1024];
     fmtnode(buf, sizeof(buf), n);

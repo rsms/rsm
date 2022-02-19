@@ -1,3 +1,4 @@
+file       = fundef*
 fundef     = "fun" name "(" params? ")" result? funbody?
 params     = param ("," param)*
 result     = param ("," param)*

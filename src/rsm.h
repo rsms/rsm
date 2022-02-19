@@ -164,7 +164,7 @@ const char* rop_name(rop); // name of an opcode
 const char* rtype_name(rtype); // name of a type constant
 
 // rsm_asm assembles instructions from source text src
-usize rsm_asm(rinstr* idst, usize idstcap, const char* src);
+usize rsm_asm(rmem*, rinstr* idst, usize idstcap, const char* src);
 
 // rsm_fmtprog formats an array of instructions ip as "assembly" text to buf.
 // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th

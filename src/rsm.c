@@ -55,13 +55,15 @@ int main(int argc, const char** argv) {
   // assemble
   rinstr* idst = rmem_allocz(m, sizeof(rinstr)*32);
   dlog("parsing assembly source");
-  usize icount = rsm_asm(idst, 32,
-    "fun factorial (i32) i32\n"
-    "  b0:\n"
-    "    R1 = R0  // ACC = n (argument 0)\n"
-    "    123 -456 0xface 0b101 F31\n"
-    //   U+1F469 woman, U+1F3FE skin tone mod 5, U+200D zwj, U+1F680 rocket = astronaut
-    "    \xF0\x9F\x91\xA9\xF0\x9F\x8F\xBE\xE2\x80\x8D\xF0\x9F\x9A\x80\n"
+  usize icount = rsm_asm(m, idst, 32,
+    "R1 = R0\n"
+    "R2 = R3\n"
+    // "fun factorial (i32) i32\n"
+    // "  b0:\n"
+    // "    R1 = R0  // ACC = n (argument 0)\n"
+    // "    123 -456 0xface 0b101 F31\n"
+    // //   U+1F469 woman, U+1F3FE skin tone mod 5, U+200D zwj, U+1F680 rocket = astronaut
+    // "    \xF0\x9F\x91\xA9\xF0\x9F\x8F\xBE\xE2\x80\x8D\xF0\x9F\x9A\x80\n"
     // "    R0 = 1         // RES (return value 0)\n"
     // "    brz R1 end     // if n==0 goto end\n"
     // "  b1:              // <- [b0] b1\n"
@@ -69,7 +71,7 @@ int main(int argc, const char** argv) {
     // "    R1 = sub R1 1  // ACC = ACC - 1\n"
     // "    brnz R1  b1    // if n!=0 goto b1\n"
     // "  end:             // <- b0 [b1]\n"
-    "    ret            // RES is at R0\n"
+    // "    ret            // RES is at R0\n"
   );
   rsm_fmtprog(buf, sizeof(buf), idst, icount);
   log("rsm_asm =>\n%s", buf);

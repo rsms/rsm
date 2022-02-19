@@ -45,6 +45,26 @@ enum rtok {
   rtok_COUNT
 } END_TYPED_ENUM(rtok)
 
+typedef u8 precedence;
+enum precedence {
+  PREC_LOWEST,
+  PREC_ASSIGN,
+  PREC_COMMA,
+  PREC_LOGICAL_OR,
+  PREC_LOGICAL_AND,
+  PREC_BITWISE_OR,
+  PREC_BITWISE_XOR,
+  PREC_BITWISE_AND,
+  PREC_EQUAL,
+  PREC_COMPARE,
+  PREC_SHIFT,
+  PREC_ADD,
+  PREC_MULTIPLY,
+  PREC_UNARY_PREFIX,
+  PREC_UNARY_POSTFIX,
+  PREC_MEMBER,
+};
+
 // parse state
 typedef struct pstate pstate;
 struct pstate {
@@ -61,6 +81,31 @@ struct pstate {
   const char* nullable errstr; // non-null when an error occured
 };
 
+typedef struct node node;
+typedef struct parselet parselet;
+#define PPARAMS       rmem* mem, pstate* p, precedence prec
+#define PARGS         mem, p, prec
+typedef node*(*prefixparselet)(PPARAMS); // token...
+typedef node*(*infixparselet)(PPARAMS, node* left); // (left token)...
+struct parselet {
+  prefixparselet nullable prefix;
+  infixparselet  nullable infix;
+  precedence     prec;
+};
+
+struct node {
+  rtok t;
+  u32  line, col;
+  union {
+    u64   ival;       // T_IREG, T_FREG
+    node* operand[2]; // unaryop, binop
+  };
+};
+
+static const node _badnode = {0};
+static node* badnode = (node*)&_badnode;
+
+
 #define isname(c) (isalnum(c) || (c) == '_')
 
 static const char* tokname(rtok t);
@@ -73,6 +118,7 @@ static u32 pcolumn(pstate* p) { // source column of current token
 }
 
 static rtok perr(pstate* p, const char* errstr) {
+  log("input:%u:%u: error: %s", p->lineno, pcolumn(p), errstr);
   p->errstr = errstr;
   return p->tok = T_END;
 }
@@ -202,7 +248,7 @@ invalid:
   return perr(p, "invalid register");
 }
 
-static rtok scantok(pstate* p) { // read the next token
+static rtok padvance(pstate* p) { // read the next token
   const char* linestart = p->linestart;
   while (p->inp < p->inend && isspace(*p->inp)) {
     if (*p->inp == '\n') {
@@ -229,6 +275,7 @@ static rtok scantok(pstate* p) { // read the next token
 
   assert(p->isneg == false); // make sure we don't have a bug in snumber
   char c = *p->inp++; // read current byte and advance cursor
+  p->insertsemi = false;
   // dlog("0x%02x %c", c, isprint(c) ? c : ' ');
 
   switch (c) {
@@ -260,6 +307,116 @@ static rtok scantok(pstate* p) { // read the next token
   }
 }
 
+#define padvance(p) ({ padvance(p); logpstate(p); (p)->tok; })
+static void logpstate(pstate* p);
+
+// --- parse
+
+static node* pstmt(PPARAMS);
+#define pexpr pstmt
+
+static void want(pstate* p, rtok expect) {
+  if UNLIKELY(p->tok != expect)
+    perr(p, "unexpected token");
+}
+
+static node* pignore(PPARAMS) {
+  padvance(p); // consume token
+  return badnode;
+}
+
+static node* preg(PPARAMS) {
+  node* n = rmem_allocz(mem, sizeof(node));
+  n->t = p->tok;
+  n->line = p->lineno;
+  n->col = pcolumn(p);
+  n->ival = p->ival;
+  padvance(p); // consume token
+  return n;
+}
+
+// [infix] assign = (reg | sym) "=" expr ";"
+static node* peq_infix(PPARAMS, node* dst) {
+  node* n = rmem_allocz(mem, sizeof(node));
+  n->t = p->tok;
+  n->line = p->lineno;
+  n->col = pcolumn(p);
+  padvance(p); // consume token
+  n->operand[0] = dst;
+  node* src = pexpr(PARGS);
+  n->operand[1] = src;
+  want(p, T_SEMI);
+  return n;
+}
+
+static const parselet parsetab[rtok_COUNT] = {
+  [T_IREG] = {preg, NULL, PREC_MEMBER},
+  [T_FREG] = {preg, NULL, PREC_MEMBER},
+  [T_EQ] = {NULL, peq_infix, PREC_MEMBER},
+  [T_COMMENT] = {pignore, NULL, PREC_MEMBER},
+};
+
+// stmt = anynode ";"
+static node* pstmt(PPARAMS) {
+  const parselet* ps = &parsetab[p->tok];
+  if (!ps->prefix) {
+    dlog("no prefix parselet for %s", tokname(p->tok));
+    padvance(p); // make progress
+    return badnode;
+  }
+
+  UNUSED const void* p1 = p->inp;
+  UNUSED bool insertsemi = p->insertsemi;
+
+  node* n = ps->prefix(PARGS);
+
+  assertf(insertsemi != p->insertsemi || (uintptr)p1 < (uintptr)p->inp,
+    "parselet did not advance scanner");
+
+  // infix
+  while (p->tok != T_END) {
+    ps = &parsetab[p->tok];
+    if (ps->infix == NULL || ps->prec < prec)
+      return n;
+    n = ps->infix(PARGS, n);
+    break;
+  }
+
+  if (p->tok != T_SEMI)
+    perr(p, "unexpected token; expected \";\"");
+  padvance(p);
+
+  return n;
+}
+
+// --- ast formatter
+
+void fmtnode1(abuf* s, node* n) {
+  abuf_c(s, '(');
+  abuf_str(s, tokname(n->t));
+  switch ((enum rtok)n->t) {
+    case T_EQ:
+      abuf_c(s, ' ');
+      fmtnode1(s, n->operand[0]);
+      abuf_c(s, ' ');
+      fmtnode1(s, n->operand[1]);
+      break;
+    case T_IREG:
+      abuf_c(s, ' ');
+      abuf_u64(s, n->ival, 10);
+      break;
+  }
+  abuf_c(s, ')');
+}
+
+usize fmtnode(char* buf, usize bufcap, node* n) {
+  abuf s = abuf_make(buf, bufcap);
+  fmtnode1(&s, n);
+  return abuf_terminate(&s);
+}
+
+// --- main parse function
+
 static void logpstate(pstate* p) {
   u32 line = p->lineno, col = pcolumn(p);
   rtok t = p->tok;
@@ -277,7 +434,26 @@ static void logpstate(pstate* p) {
   log("%3u:%-3u %-12s \"%.*s\"", line, col, tname, tvalc, tvalp);
 }
 
-static void parse(const char* src) {
+#if rstrst
+  while (p->tok != TNone && p->err == 0) {
+    Node* n = parse_next_tuple(p, PREC_LOWEST, PFlagNone);
+    NodeArrayPush(&file->a, n, p->build->mem);
+    NodeTransferUnresolved(file, n);
+
+    // if we didn't end on EOF and we didn'd find a semicolon, report error
+    if (UNLIKELY( p->tok != TNone && !got(p, TSemi) )) {
+      syntaxerr(p, "after top level declaration");
+      if (n && is_IdNode(n)) {
+        b_notef(b, (PosSpan){n->pos,NoPos},
+          "Did you mean \"var %s\"?", as_IdNode(n)->name);
+      }
+      Tok stoplist[] = { TType, TFun, TSemi, 0 };
+      advance(p, stoplist);
+    }
+  }
+#endif
+
+static void parse(rmem* mem, const char* src) {
   /*
   fun factorial (i32) i32
     b0:
@@ -287,15 +463,19 @@ static void parse(const char* src) {
       ret            // RES is at R0
   */
   pstate p = { .inp=src, .inend=src+strlen(src), .linestart=src, .lineno=1 };
-  while (scantok(&p) != T_END) {
-    logpstate(&p);
+  padvance(&p);
+  while (p.tok != T_END) {
+    node* n = pstmt(mem, &p, PREC_MEMBER);
+
+    char buf[256];
+    fmtnode(buf, sizeof(buf), n);
+    log("input:%u:%u: parsed: %s", n->line, n->col, buf);
   }
-  if (p.errstr)
-    log("input:%u:%u: error: %s", p.lineno, pcolumn(&p), p.errstr);
 }
 
-usize rsm_asm(rinstr* idst, usize idstcap, const char* src) {
-  parse(src);
+
+usize rsm_asm(rmem* mem, rinstr* idst, usize idstcap, const char* src) {
+  parse(mem, src);
   // TODO: analysis
   // TODO: codegen
   return 0;

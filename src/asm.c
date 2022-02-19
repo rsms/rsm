@@ -435,25 +435,6 @@ static void logpstate(pstate* p) {
   log("%3u:%-3u %-12s \"%.*s\"", line, col, tname, tvalc, tvalp);
 }
 
-#if rstrst
-  while (p->tok != TNone && p->err == 0) {
-    Node* n = parse_next_tuple(p, PREC_LOWEST, PFlagNone);
-    NodeArrayPush(&file->a, n, p->build->mem);
-    NodeTransferUnresolved(file, n);
-
-    // if we didn't end on EOF and we didn'd find a semicolon, report error
-    if (UNLIKELY( p->tok != TNone && !got(p, TSemi) )) {
-      syntaxerr(p, "after top level declaration");
-      if (n && is_IdNode(n)) {
-        b_notef(b, (PosSpan){n->pos,NoPos},
-          "Did you mean \"var %s\"?", as_IdNode(n)->name);
-      }
-      Tok stoplist[] = { TType, TFun, TSemi, 0 };
-      advance(p, stoplist);
-    }
-  }
-#endif
-
 static void parse(rmem* mem, const char* src) {
   /*
   fun factorial (i32) i32

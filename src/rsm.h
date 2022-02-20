@@ -33,7 +33,6 @@ _( MOVE  , AB   , "move"  , "R(A) = R(B) -- copy register" ) \
 _( LOADI , ABu  , "loadi" , "R(A) = I(B) -- load immediate" ) \
 _( LOADK , ABk  , "loadk" , "R(A) = K(B) -- load constant" ) \
 \
-_( CMPEQ , ABC  , "cmpeq" , "R(A) = R(B) == R(C)" ) \
 _( ADD   , ABC  , "add"   , "R(A) = R(B) + R(C)" ) \
 _( SUB   , ABC  , "sub"   , "R(A) = R(B) - R(C)" ) \
 _( SUBI  , ABCu , "subi"  , "R(A) = R(B) - C" ) \
@@ -47,8 +46,9 @@ _( SHL   , ABC  , "shl"   , "R(A) = R(B) << R(C)" ) \
 _( SHRS  , ABC  , "shrs"  , "R(A) = R(B) >> R(C) -- sign-replicating (arithmetic)" ) \
 _( SHRU  , ABC  , "shru"  , "R(A) = R(B) >> R(C) -- zero-replicating (logical)" ) \
 \
-_( CMPLT , ABC  , "cmplt"  , "R(A) = R(B) < R(C)" ) \
-_( CMPGT , ABC  , "cmpgt"  , "R(A) = R(B) > R(C)" ) \
+_( CMPEQ , ABC  , "cmpeq" , "R(A) = R(B) == R(C)" ) \
+_( CMPLT , ABC  , "cmplt" , "R(A) = R(B) < R(C)" ) \
+_( CMPGT , ABC  , "cmpgt" , "R(A) = R(B) > R(C)" ) \
 \
 _( BRZ   , AB   , "brz"   , "goto instr(R(B)) if R(A) == 0 -- conditional branch absolute" ) \
 _( BRNZ  , AB   , "brnz"  , "goto instr(R(B)) if R(A) != 0 -- conditional branch absolute" ) \

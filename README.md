@@ -113,15 +113,15 @@ params     = param ("," param)*
 result     = param ("," param)*
 param      = name type | type
 funbody    = "{" block+ "}"
-block      = anonblock | labelblock
-anonblock  = blockstmt+
-labelblock = name ":" blockstmt*
-blockstmt  = operation | assignment
+block      = name ":" blockstmt*
+blockstmt  = operation | assignment | binop
+operation  = op arg*
+           ; brz R1 end
+binop      = arg ("-" | "+" | "*" | "/") arg
+           ; x + 3
 assignment = (reg | local) "=" (operation | arg)
            ; R3 = add R1 R4
            ; x  = add y z
-operation  = op arg*
-           ; brz R1 end
 arg        = reg | local | literal
 literal    = intlit
 intlit     = "-"? (binlit | declit | hexlit)

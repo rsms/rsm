@@ -102,16 +102,30 @@ Calling convention:
 
 ## Assembly language
 
-[this is just at the idea stage]
+### Syntax
 
-Simple syntax where white-space is ignored
+White-space is ignored
 
-```
-fundef = "fun" name "(" params? ")" result? LF
-params = name type ("," name type)*
-result = type ("," type)*
-type   = i1 | i8 | i16 | i32 | i64
-       | u1 | u8 | u16 | u32 | u64 | addr
-       | f32 | f64 | f128
-instr  = [reg "="] op arg*
+```abnf
+file       = fundef*
+fundef     = "fun" name "(" params? ")" result? funbody?
+params     = param ("," param)*
+result     = param ("," param)*
+param      = name type | type
+funbody    = "{" block+ "}"
+block      = anonblock | labelblock
+anonblock  = blockstmt+
+labelblock = name ":" blockstmt*
+blockstmt  = operation | assignment
+assignment = (reg | local) "=" (operation | arg)
+           ; R3 = add R1 R4
+           ; x  = add y z
+operation  = op arg*
+           ; brz R1 end
+arg        = reg | local | literal
+literal    = intlit
+intlit     = "-"? (binlit | declit | hexlit)
+binlit     = "0b" ("0" | "1")+
+declit     = (0-9)+
+hexlit     = "0x" (0-9A-Fa-f)+
 ```

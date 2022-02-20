@@ -52,7 +52,7 @@ usize rsm_fmtprog(char* buf, usize bufcap, rinstr* ip, usize ilen) {
 
 const char* rop_name(rop op) {
   switch (op) {
-    #define _(name, ...) case rop_##name: return #name;
+    #define _(name, enc, asmname, ...) case rop_##name: return asmname;
     RSM_FOREACH_OP(_)
     #undef _
   }

@@ -8,6 +8,8 @@
 // 3. checks that the ast is valid
 // 4. generates code (our vm instructions)
 
+//#define LOG_TOKENS /* define to log() token scanning */
+
 // source tokens
 typedef u8 rtok;
 #define RSM_FOREACH_TOKEN(_) \
@@ -17,22 +19,36 @@ _( T_COMMENT ) \
 _( T_LPAREN ) _( T_RPAREN ) \
 _( T_LBRACE ) _( T_RBRACE ) \
 _( T_SEMI   ) /* ; */ \
-_( T_EQ     ) /* = */ \
-_( T_SLASH  ) /* / */ \
-_( T_MINUS  ) /* - */ \
 _( T_COMMA  ) /* , */ \
+_( T_EQ     ) /* = */ \
 /* names              */ \
 _( T_IREG   ) /* Rn   */ \
 _( T_FREG   ) /* Fn   */ \
 _( T_LABEL  ) /* foo: */ \
 _( T_NAME   ) /* foo  */ \
+_( T_OP     ) /* brz */ \
 /* literal numbers (order matters; see snumber) */ \
 _( T_INT2   ) _( T_SINT2   ) /* 0b1111011       */ \
 _( T_INT10  ) _( T_SINT10  ) /* 123, -123       */ \
 _( T_INT16  ) _( T_SINT16  ) /* 0x7b            */ \
-/* special ast-only tokens */ \
-_( T_OP ) \
 // end RSM_FOREACH_TOKEN
+// RSM_FOREACH_BINOP_TOKEN maps an infix binary operation to opcodes,
+// allowing "x + y" as an alternative to "add x y"
+#define RSM_FOREACH_BINOP_TOKEN(_) \
+_( T_PLUS  , ADD   ) /* + */ \
+_( T_MINUS , SUB   ) /* - */ \
+_( T_STAR  , MUL   ) /* * */ \
+_( T_SLASH , DIV   ) /* / */ \
+_( T_PERC  , MOD   ) /* % */ \
+_( T_AMP   , AND   ) /* & */ \
+_( T_PIPE  , OR    ) /* | */ \
+_( T_HAT   , XOR   ) /* ^ */ \
+_( T_LT2   , SHL   ) /* << */ \
+_( T_GT2   , SHRS  ) /* >> */ \
+_( T_GT3   , SHRU  ) /* >>> */ \
+_( T_LT    , CMPLT ) /* < */ \
+_( T_GT    , CMPGT ) /* > */ \
+// end RSM_FOREACH_BINOP_TOKEN
 #define RSM_FOREACH_KEYWORD_TOKEN(_) \
 _( T_FUN , "fun" ) \
 _( T_I1  , "i1"  ) \
@@ -44,6 +60,7 @@ _( T_I64 , "i64" ) \
 enum rtok {
   #define _(name, ...) name,
   RSM_FOREACH_TOKEN(_)
+  RSM_FOREACH_BINOP_TOKEN(_)
   RSM_FOREACH_KEYWORD_TOKEN(_)
   #undef _
   rtok_COUNT
@@ -169,9 +186,9 @@ static u32 pcolumn(pstate* p) { // source column of current token
   return (u32)((uintptr)p->tokstart - (uintptr)p->linestart) + 1;
 }
 
-static rtok errv(pstate* p, const char* fmt, va_list ap) {
+static rtok errv(pstate* p, u32 line, u32 col, const char* fmt, va_list ap) {
   abuf s = abuf_make(p->errstr, sizeof(p->errstr));
-  abuf_fmt(&s, "input:%u:%u: error: ", p->lineno, pcolumn(p));
+  abuf_fmt(&s, "input:%u:%u: error: ", line, col);
   abuf_fmtv(&s, fmt, ap);
   abuf_terminate(&s);
   dlog("%s", p->errstr);
@@ -182,16 +199,20 @@ ATTR_FORMAT(printf, 2, 3)
 static rtok serr(pstate* p, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  errv(p, fmt, ap);
+  errv(p, p->lineno, pcolumn(p), fmt, ap);
   va_end(ap);
   return p->tok = T_END;
 }
 
-ATTR_FORMAT(printf, 2, 3)
-static void perr(pstate* p, const char* fmt, ...) {
+ATTR_FORMAT(printf, 3, 4)
+static void perr(pstate* p, node* nullable n, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  errv(p, fmt, ap);
+  if (n) {
+    errv(p, n->line, n->col, fmt, ap);
+  } else {
+    errv(p, p->lineno, pcolumn(p), fmt, ap);
+  }
   va_end(ap);
 }
 
@@ -245,12 +266,23 @@ static rtok sname(pstate* p) {
   }
   p->insertsemi = true;
   usize len = toklen(p);
+
   // map keywords to T_ tokens
-  #define _(token, kw) \
+  #define _(token, kw)                                            \
     if (len == strlen(kw) && memcmp((kw), p->tokstart, len) == 0) \
       return p->tok = token;
   RSM_FOREACH_KEYWORD_TOKEN(_)
   #undef _
+
+  // map operations to T_OP token
+  #define _(op, enc, asmname, ...) \
+    if (len == strlen(asmname) && memcmp(asmname, p->tokstart, len) == 0) { \
+      p->ival = rop_##op;                                                   \
+      return p->tok = T_OP;                                                 \
+    }
+  RSM_FOREACH_OP(_)
+  #undef _
+
   // okay, its just a symbolic name
   return p->tok;
 }
@@ -360,11 +392,25 @@ static rtok sadvance(pstate* p) { // scan the next token
     case '=': return p->tok = T_EQ;
     case ';': return p->tok = T_SEMI;
     case ',': return p->tok = T_COMMA;
-    case '-':
+    case '+': return p->tok = T_PLUS;
+    case '*': return p->tok = T_STAR;
+    case '%': return p->tok = T_PERC;
+    case '&': return p->tok = T_AMP;
+    case '|': return p->tok = T_PIPE;
+    case '^': return p->tok = T_HAT;
+    case '-': // "-" | "-" numlit
       if (!isdigit(*p->inp)) return p->tok = T_MINUS;
       p->inp++;
       p->isneg = true;
       FALLTHROUGH;
+    case '<':
+      if (*p->inp != '<') return p->tok = T_LT;
+      p->inp++;           return p->tok = T_LT2;
+    case '>':
+      if (*p->inp != '>') return p->tok = T_GT;
+      p->inp++;
+      if (*p->inp != '>') return p->tok = T_GT2;
+      p->inp++;           return p->tok = T_GT3;
     case '0': switch (*p->inp) {
       case 'B': case 'b': p->inp++; p->tok = T_INT2;  return snumber(p, 2);
       case 'X': case 'x': p->inp++; p->tok = T_INT16; return snumber(p, 16);
@@ -385,17 +431,16 @@ static rtok sadvance(pstate* p) { // scan the next token
         p->inp--;
         return snameunicode(p);
       }
+      if UNLIKELY(!isalnum(c) && c != '_' && c != '$')
+        return serr(p, "unexpected character");
       return sname(p);
   }
 }
 
-// #define sadvance(p) ({ sadvance(p); logpstate(p); (p)->tok; })
-static void logpstate(pstate* p);
-
-// --- parse
-
-static node* pstmt(PPARAMS);
-#define pexpr pstmt
+#ifdef LOG_TOKENS
+  #define sadvance(p) ({ sadvance(p); logpstate(p); (p)->tok; })
+  static void logpstate(pstate* p);
+#endif
 
 // got comsumes the next token if p->tok == t
 static bool got(pstate* p, rtok t) {
@@ -405,20 +450,46 @@ static bool got(pstate* p, rtok t) {
   return true;
 }
 
+// sfastforward advances the scanner until one of the tokens in stoplist is encountered.
+// stoplist should be NULL-terminated.
+static void sfastforward(pstate* p, const rtok* stoplist) {
+  const char* inp = p->inp;
+  while (p->tok != T_END) {
+    const rtok* lp = stoplist;
+    while (*lp) {
+      if (*lp++ == p->tok)
+        goto end;
+    }
+    sadvance(p);
+  }
+end:
+  if (inp == p->inp)
+    sadvance(p);  // guarantee progress
+  got(p, T_SEMI); // slurp a trailing semicolon
+}
+
+// --- parse
+
+
+static node* pstmt(PPARAMS);
+#define pexpr pstmt
+
 // perrunexpected reports a syntax error along with the current token
-static void perrunexpected(pstate* p, const char* expected, const char* got) {
-  perr(p, "expected %s, got %s", expected, got);
+static void perrunexpected(
+  pstate* p, node* nullable n, const char* expected, const char* got)
+{
+  perr(p, n, "expected %s, got %s", expected, got);
 }
 
 // expect reports a syntax error if p->tok != t
 static void expecttok(pstate* p, rtok t) {
   if UNLIKELY(p->tok != t)
-    perrunexpected(p, tokname(t), tokname(p->tok));
+    perrunexpected(p, NULL, tokname(t), tokname(p->tok));
 }
 
 static bool expecttype(pstate* p, node* n) {
   if UNLIKELY(!istypetok(n->t)) {
-    perrunexpected(p, "type", tokname(n->t));
+    perrunexpected(p, NULL, "type", tokname(n->t));
     return false;
   }
   return true;
@@ -426,7 +497,7 @@ static bool expecttype(pstate* p, node* n) {
 
 static bool expectname(pstate* p, node* n) {
   if UNLIKELY(n->t != T_NAME) {
-    perrunexpected(p, "name", tokname(n->t));
+    perrunexpected(p, n, "name", tokname(n->t));
     return false;
   }
   return true;
@@ -473,19 +544,7 @@ static node* prefix_int(PPARAMS) {
   return n;
 }
 
-// [infix] regop = op reg operand* ";"
-static node* infix_reg(PPARAMS, node* op) {
-  op->t = T_OP;
-  node* reg = prefix_int(PARGS);
-  nlist_append(&op->list, reg);
-  while (p->tok != T_SEMI && p->tok != T_END) {
-    node* cn = pstmt(PARGS);
-    nlist_append(&op->list, cn);
-  }
-  return op;
-}
-
-// [infix] assign = (reg | name) "=" expr ";"
+// assign = (reg | name) "=" expr ";"
 static node* infix_eq(PPARAMS, node* dst) {
   node* n = mknode(p);
   sadvance(p);
@@ -504,17 +563,68 @@ static node* prefix_name(PPARAMS) {
 
 #define prefix_type prefix_name
 
+static node* pargs(PPARAMS, node* n) {
+  while (p->tok != T_SEMI && p->tok != T_END) {
+    node* arg = pstmt(PARGS);
+    nlist_append(&n->list, arg);
+  }
+  return n;
+}
+
+// operation = op arg*
+static node* prefix_op(PPARAMS) {
+  node* n = prefix_int(PARGS);
+  return pargs(PARGS, n);
+}
+
+// (reg | name) op expr
+static node* infix_op(PPARAMS, node* arg0) {
+  node* n = mknode(p);
+  // map token to opcode
+  switch (n->t) {
+    #define _(tok, op) case tok: n->ival = rop_##op; break;
+    RSM_FOREACH_BINOP_TOKEN(_)
+    #undef _
+    default: UNREACHABLE;
+  }
+  n->t = T_OP;
+  sadvance(p);
+  nlist_append(&n->list, arg0);
+  return pargs(PARGS, n);
+}
+
 // blockbody = blockstmt*
 // blockstmt = operation | assignment
 static node* pblockbody(PPARAMS, node* block) {
-  while (p->tok != T_RBRACE && p->tok != T_END && p->tok != T_LABEL) {
+  for (;;) {
+    switch (p->tok) {
+      // stop tokens
+      case T_RBRACE:
+      case T_END:
+      case T_LABEL:
+        return block;
+      // will-parse tokens
+      case T_OP:
+      case T_EQ:
+      case T_IREG:
+      case T_FREG:
+        break;
+      // unexpected
+      default: {
+        if (p->tok == T_NAME) {
+          perr(p, NULL, "unknown operation \"%.*s\"", (int)toklen(p), p->tokstart);
+        } else {
+          perrunexpected(p, NULL, "operation or assignment", tokname(p->tok));
+        }
+        const rtok stoplist[] = { T_SEMI, 0 };
+        sfastforward(p, stoplist);
+        continue;
+      }
+    }
     node* cn = pstmt(PARGS);
-    if (cn->t == T_NAME) // block-level name is operation, e.g. "ret"
-      cn->t = T_OP;
     nlist_append(&block->list, cn);
     eat(p, T_SEMI);
   }
-  return block;
 }
 
 // labelblock = name ":" (operation | assignment)*
@@ -592,7 +702,7 @@ static node* prefix_fun(PPARAMS) {
   while (p->tok == T_LABEL) {
     node* block = prefix_label(PARGS);
     if (body->list.head != NULL && strsliceeq(&block->strslice, kBlock0Name))
-      perr(p, "block named %s must be first block", kBlock0Name);
+      perr(p, block, "block named %s must be first block", kBlock0Name);
     nlist_append(&body->list, block);
   }
   nlist_append(&n->list, body);
@@ -601,22 +711,28 @@ static node* prefix_fun(PPARAMS) {
 }
 
 static const parselet parsetab[rtok_COUNT] = {
-  [T_IREG] = {prefix_int, infix_reg, PREC_MEMBER},
-  [T_FREG] = {prefix_int, infix_reg, PREC_MEMBER},
-  [T_EQ] = {NULL, infix_eq, PREC_MEMBER},
+  [T_IREG]  = {prefix_int, NULL, PREC_MEMBER},
+  [T_FREG]  = {prefix_int, NULL, PREC_MEMBER},
+  [T_OP]    = {prefix_op, NULL, PREC_MEMBER},
   [T_LABEL] = {prefix_label, NULL, PREC_MEMBER},
-  [T_NAME] = {prefix_name, NULL, PREC_MEMBER},
-  [T_I1] = {prefix_type, NULL, PREC_MEMBER},
-  [T_I8] = {prefix_type, NULL, PREC_MEMBER},
-  [T_I16] = {prefix_type, NULL, PREC_MEMBER},
-  [T_I32] = {prefix_type, NULL, PREC_MEMBER},
-  [T_I64] = {prefix_type, NULL, PREC_MEMBER},
+  [T_NAME]  = {prefix_name, NULL, PREC_MEMBER},
+  [T_I1]    = {prefix_type, NULL, PREC_MEMBER},
+  [T_I8]    = {prefix_type, NULL, PREC_MEMBER},
+  [T_I16]   = {prefix_type, NULL, PREC_MEMBER},
+  [T_I32]   = {prefix_type, NULL, PREC_MEMBER},
+  [T_I64]   = {prefix_type, NULL, PREC_MEMBER},
 
-  [T_INT2] = {prefix_int, NULL, PREC_MEMBER},
-  [T_SINT2] = {prefix_int, NULL, PREC_MEMBER},
-  [T_INT10] = {prefix_int, NULL, PREC_MEMBER},
+  [T_EQ]    = {NULL, infix_eq, PREC_MEMBER},
+
+  #define _(tok, ...) [tok] = {NULL, infix_op, PREC_MEMBER},
+  RSM_FOREACH_BINOP_TOKEN(_)
+  #undef _
+
+  [T_INT2]   = {prefix_int, NULL, PREC_MEMBER},
+  [T_SINT2]  = {prefix_int, NULL, PREC_MEMBER},
+  [T_INT10]  = {prefix_int, NULL, PREC_MEMBER},
   [T_SINT10] = {prefix_int, NULL, PREC_MEMBER},
-  [T_INT16] = {prefix_int, NULL, PREC_MEMBER},
+  [T_INT16]  = {prefix_int, NULL, PREC_MEMBER},
   [T_SINT16] = {prefix_int, NULL, PREC_MEMBER},
 
   [T_FUN] = {prefix_fun, NULL, PREC_MEMBER},
@@ -625,18 +741,18 @@ static const parselet parsetab[rtok_COUNT] = {
 // stmt = anynode ";"
 static node* pstmt(PPARAMS) {
   const parselet* ps = &parsetab[p->tok];
-  if (!ps->prefix) {
-    dlog("no prefix parselet for %s", tokname(p->tok));
+
+  if UNLIKELY(!ps->prefix) {
+    perrunexpected(p, NULL, "statement", tokname(p->tok));
     node* n = mknil(p);
-    sadvance(p); // make progress
+    const rtok stoplist[] = { T_SEMI, 0 };
+    sfastforward(p, stoplist);
     return n;
   }
 
   UNUSED const void* p1 = p->inp;
   UNUSED bool insertsemi = p->insertsemi;
-
   node* n = ps->prefix(PARGS);
-
   assertf(insertsemi != p->insertsemi || (uintptr)p1 < (uintptr)p->inp,
     "parselet did not advance scanner");
 
@@ -703,8 +819,10 @@ static void fmtnode1(abuf* s, node* n, usize indent, fmtflag fl) {
     case T_COMMENT:
     case T_LABEL:
     case T_FUN:
-    case T_OP:
       abuf_append(s, n->strslice.p, n->strslice.len); break;
+
+    case T_OP:
+      abuf_str(s, rop_name((rop)n->ival)); break;
 
     case T_SINT2:  abuf_c(s, '-'); FALLTHROUGH;
     case T_INT2:   abuf_str(s, "0b"); abuf_u64(s, n->ival, 2); break;
@@ -735,22 +853,24 @@ static usize fmtnode(char* buf, usize bufcap, node* n) {
 
 // --- main parse function
 
-static void logpstate(pstate* p) {
-  u32 line = p->lineno, col = pcolumn(p);
-  rtok t = p->tok;
-  const char* tname = tokname(t);
-  const char* tvalp = p->tokstart;
-  int tvalc = (int)toklen(p);
-  if (t == T_INT2 || t == T_INT10 || t == T_INT16 || t == T_IREG || t == T_FREG) {
-    return log("%3u:%-3u %-12s \"%.*s\"\t%llu\t0x%llx",
-      line, col, tname, tvalc, tvalp, p->ival, p->ival);
+#ifdef LOG_TOKENS
+  static void logpstate(pstate* p) {
+    u32 line = p->lineno, col = pcolumn(p);
+    rtok t = p->tok;
+    const char* tname = tokname(t);
+    const char* tvalp = p->tokstart;
+    int tvalc = (int)toklen(p);
+    if (t == T_INT2 || t == T_INT10 || t == T_INT16 || t == T_IREG || t == T_FREG) {
+      return log("%3u:%-3u %-12s \"%.*s\"\t%llu\t0x%llx",
+        line, col, tname, tvalc, tvalp, p->ival, p->ival);
+    }
+    if (t == T_SINT2 || t == T_SINT10 || t == T_SINT16) { // uses ival
+      return log("%3u:%-3u %-12s \"%.*s\"\t%lld\t0x%llx",
+        line, col, tname, tvalc, tvalp, (i64)p->ival, p->ival);
+    }
+    log("%3u:%-3u %-12s \"%.*s\"", line, col, tname, tvalc, tvalp);
   }
-  if (t == T_SINT2 || t == T_SINT10 || t == T_SINT16) { // uses ival
-    return log("%3u:%-3u %-12s \"%.*s\"\t%lld\t0x%llx",
-      line, col, tname, tvalc, tvalp, (i64)p->ival, p->ival);
-  }
-  log("%3u:%-3u %-12s \"%.*s\"", line, col, tname, tvalc, tvalp);
-}
+#endif
 
 static void parse(rmem* mem, const char* src) {
   pstate p = { .mem=mem, .inp=src, .inend=src+strlen(src), .linestart=src, .lineno=1 };
@@ -764,7 +884,7 @@ static void parse(rmem* mem, const char* src) {
 
     char buf[1024];
     fmtnode(buf, sizeof(buf), n);
-    log("input:%u:%u: parsed:\n%s", n->line, n->col, buf);
+    log("input:%u:%u: parsed top-level statement:\n%s", n->line, n->col, buf);
   }
 }
 
@@ -781,6 +901,7 @@ static const char* tokname(rtok t) {
   switch (t) {
   #define _(name, ...) case name: return &#name[2]; // [2] to skip "T_" prefix
   RSM_FOREACH_TOKEN(_)
+  RSM_FOREACH_BINOP_TOKEN(_)
   RSM_FOREACH_KEYWORD_TOKEN(_)
   #undef _
   }

@@ -16,6 +16,8 @@ R_ASSUME_NONNULL_BEGIN
 #define isspace(c)    ( (c) == ' ' || (u32)(c) - '\t' < 5 )     /* SP, \{tnvfr} */
 #define ishexdigit(c) ( isdigit(c) || ((u32)c | 32) - 'a' < 6 ) /* 0-9A-Fa-f */
 
+#define tolower(c) ((c) | 0x20)
+
 usize stru64(char buf[64], u64 v, u32 base);
 
 void logbin(u32 v);

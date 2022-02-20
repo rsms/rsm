@@ -67,6 +67,7 @@ int main(int argc, const char** argv) {
     "  end:             // <- b0 [b1]\n"
     "    ret            // RES is at R0\n"
     "}\n"
+
     // "    123 -456 0xface 0b101 F31\n"
     // //   U+1F469 woman, U+1F3FE skin tone mod 5, U+200D zwj, U+1F680 rocket = astronaut
     // "    \xF0\x9F\x91\xA9\xF0\x9F\x8F\xBE\xE2\x80\x8D\xF0\x9F\x9A\x80\n"

@@ -28,22 +28,34 @@ typedef u32 rinstr;
 //   ABs  register A, immediate signed B
 //   ...
 #define RSM_FOREACH_OP(_) \
-/* name, instruction encoding, description */ \
-_( MOVE  , AB   , "R(A) = R(B) -- copy register" ) \
-_( LOADI , ABu  , "R(A) = I(B) -- load immediate" ) \
-_( LOADK , ABk  , "R(A) = K(B) -- load constant" ) \
+/* name, instruction encoding, asm keyword, description */ \
+_( MOVE  , AB   , "move"  , "R(A) = R(B) -- copy register" ) \
+_( LOADI , ABu  , "loadi" , "R(A) = I(B) -- load immediate" ) \
+_( LOADK , ABk  , "loadk" , "R(A) = K(B) -- load constant" ) \
 \
-_( CMPEQ , ABC  , "R(A) = R(B) == R(C)" ) \
-_( ADD   , ABC  , "R(A) = R(B) + R(C)" ) \
-_( SUBI  , ABCu , "R(A) = R(B) - C" ) \
-_( MUL   , ABC  , "R(A) = R(B) * R(C)" ) \
+_( CMPEQ , ABC  , "cmpeq" , "R(A) = R(B) == R(C)" ) \
+_( ADD   , ABC  , "add"   , "R(A) = R(B) + R(C)" ) \
+_( SUB   , ABC  , "sub"   , "R(A) = R(B) - R(C)" ) \
+_( SUBI  , ABCu , "subi"  , "R(A) = R(B) - C" ) \
+_( MUL   , ABC  , "mul"   , "R(A) = R(B) * R(C)" ) \
+_( DIV   , ABC  , "div"   , "R(A) = R(B) / R(C)" ) \
+_( MOD   , ABC  , "mod"   , "R(A) = R(B) % R(C)" ) \
+_( AND   , ABC  , "and"   , "R(A) = R(B) & R(C)" ) \
+_( OR    , ABC  , "or"    , "R(A) = R(B) | R(C)" ) \
+_( XOR   , ABC  , "xor"   , "R(A) = R(B) ^ R(C)" ) \
+_( SHL   , ABC  , "shl"   , "R(A) = R(B) << R(C)" ) \
+_( SHRS  , ABC  , "shrs"  , "R(A) = R(B) >> R(C) -- sign-replicating (arithmetic)" ) \
+_( SHRU  , ABC  , "shru"  , "R(A) = R(B) >> R(C) -- zero-replicating (logical)" ) \
 \
-_( BRZ   , AB   , "goto instr(R(B)) if R(A) == 0 -- conditional branch absolute" ) \
-_( BRNZ  , AB   , "goto instr(R(B)) if R(A) != 0 -- conditional branch absolute" ) \
-_( BRZI  , ABs  , "goto PC±instr(Bs) if R(A) == 0 -- conditional branch relative" ) \
-_( BRNZI , ABs  , "goto PC±instr(Bs) if R(A) != 0 -- conditional branch relative" ) \
+_( CMPLT , ABC  , "cmplt"  , "R(A) = R(B) < R(C)" ) \
+_( CMPGT , ABC  , "cmpgt"  , "R(A) = R(B) > R(C)" ) \
 \
-_( RET   , _    , "return" ) \
+_( BRZ   , AB   , "brz"   , "goto instr(R(B)) if R(A) == 0 -- conditional branch absolute" ) \
+_( BRNZ  , AB   , "brnz"  , "goto instr(R(B)) if R(A) != 0 -- conditional branch absolute" ) \
+_( BRZI  , ABs  , "brzi"  , "goto PC±instr(Bs) if R(A) == 0 -- conditional branch relative" ) \
+_( BRNZI , ABs  , "brnzi" , "goto PC±instr(Bs) if R(A) != 0 -- conditional branch relative" ) \
+\
+_( RET   , _    , "ret"   , "return" ) \
 // end RSM_FOREACH_OP
 
 typedef u8 rop; // rop, rop_* -- opcode

@@ -170,6 +170,7 @@ cflags = $
   -Wno-unused-parameter $
   -Werror=implicit-function-declaration $
   -Werror=incompatible-pointer-types $
+  -Werror=format-insufficient-args $
   -Wcovered-switch-default ${CFLAGS[@]}
 
 cflags_c = $

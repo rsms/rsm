@@ -37,7 +37,8 @@ usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in) {
   return abuf_terminate(&s);
 }
 
-usize rsm_fmtprog(char* buf, usize bufcap, rinstr* ip, usize ilen) {
+usize rsm_fmtprog(char* buf, usize bufcap, rinstr* nullable ip, usize ilen) {
+  assert(ip != NULL || ilen == 0); // ok to pass NULL,0 but not NULL,>0
   abuf s1 = abuf_make(buf, bufcap); abuf* s = &s1;
   for (usize i = 0; i < ilen; i++) {
     if (i)

@@ -97,6 +97,34 @@ struct rmem {
   u32   flags;
 };
 
+// rdiag is a diagnostic report
+typedef struct rdiag rdiag;
+struct rdiag {
+  int         code;      // error code (1=error, 0=warning)
+  const char* msg;       // descriptive message including "srcname:line:col: type:"
+  const char* msgshort;  // short descriptive message without source location
+  const char* srcname;   // eg filename
+  u32         line, col; // origin (0 if unknown or not line-specific)
+};
+// rdiaghandler is called with a diagnostict report.
+// Return false to stop the process (e.g. stop assembling.)
+typedef bool(*rdiaghandler)(const rdiag*, void* nullable userdata);
+
+// rasmctx holds information of an assembly session
+typedef struct rasmctx rasmctx;
+struct rasmctx {
+  rmem*          mem;         // memory allocator
+  const char*    srcdata;     // input source bytes
+  usize          srclen;      // length of srcdata
+  const char*    srcname;     // symbolic name of source (e.g. filename)
+  rdiag          diag;        // last diagnostic report
+  rdiaghandler   diaghandler; // diagnostic report callback
+  void* nullable userdata;    // passed along to diaghandler
+  // internal fields
+  char _diagmsg[128]; // storage for diag.msg
+  bool _stop;         // negated diaghandler return value
+};
+
 // size and position of instruction arguments
 #define RSM_SIZE_OP  8
 #define RSM_SIZE_A   5
@@ -175,8 +203,10 @@ struct rmem {
 const char* rop_name(rop); // name of an opcode
 const char* rtype_name(rtype); // name of a type constant
 
-// rsm_asm assembles instructions from source text src
-usize rsm_asm(rmem*, rinstr* idst, usize idstcap, const char* src);
+// rsm_asm assembles instructions from source text src. Allocates *res in ctx->mem.
+// ctx can be reused with multiple calls.
+// Returns the number of instructions at *res on success, or 0 on failure.
+usize rsm_asm(rasmctx* ctx, rinstr** res);
 
 // rsm_fmtprog formats an array of instructions ip as "assembly" text to buf.
 // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th
@@ -185,7 +215,7 @@ usize rsm_asm(rmem*, rinstr* idst, usize idstcap, const char* src);
 // discarded. The output is always null-terminated, unless size is 0.
 // Returns the number of characters that would have been printed if bufcap was
 // unlimited (not including the final `\0').
-usize rsm_fmtprog(char* buf, usize bufcap, rinstr* ip, usize ilen);
+usize rsm_fmtprog(char* buf, usize bufcap, rinstr* nullable ip, usize ilen);
 usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in);
 
 // rsm_eval executes a program, starting with instruction inv[0]

@@ -8,6 +8,12 @@
 //   - codegen
 // - think about how a "program" is represented (functions + constants)
 
+// diaghandler is called by the assembler when an error occurs
+bool diaghandler(const rdiag* d, void* userdata) {
+  log("%s", d->msg);
+  return true; // keep going (show all errors)
+}
+
 int main(int argc, const char** argv) {
   rmem* m = rmem_makevm(4096*1000);
 
@@ -53,9 +59,7 @@ int main(int argc, const char** argv) {
   dlog("result: %llu", iregs[0]);
 
   // assemble
-  rinstr* idst = rmem_allocz(m, sizeof(rinstr)*32);
-  dlog("parsing assembly source");
-  usize icount = rsm_asm(m, idst, 32,
+  const char* src =
     "fun factorial (n i32, j i32) a i32 {\n"
     "    R1 = R0        // ACC = n (argument 0)\n"
     "    R0 = 1         // RES (return value 0)\n"
@@ -67,13 +71,22 @@ int main(int argc, const char** argv) {
     "  end:             // <- b0 [b1]\n"
     "    ret            // RES is at R0\n"
     "}\n"
-
     // "    123 -456 0xface 0b101 F31\n"
     // //   U+1F469 woman, U+1F3FE skin tone mod 5, U+200D zwj, U+1F680 rocket = astronaut
     // "    \xF0\x9F\x91\xA9\xF0\x9F\x8F\xBE\xE2\x80\x8D\xF0\x9F\x9A\x80\n"
-  );
-  rsm_fmtprog(buf, sizeof(buf), idst, icount);
-  log("rsm_asm =>\n%s", buf);
+  ;
+  rasmctx actx = {
+    .mem         = m,
+    .srcdata     = src,
+    .srclen      = strlen(src),
+    .srcname     = "factorial",
+    .diaghandler = diaghandler,
+  };
+  rinstr* iv = NULL;
+  usize icount = rsm_asm(&actx, &iv);
+  rsm_fmtprog(buf, sizeof(buf), iv, icount);
+  if (icount)
+    log("rsm_asm =>\n%s", buf);
 
   return 0;
 }

@@ -9,6 +9,7 @@
 // 4. generates code (our vm instructions)
 
 //#define LOG_TOKENS /* define to log() token scanning */
+//#define LOG_AST /* define to log() parsed top-level ast nodes */
 
 // source tokens
 typedef u8 rtok;
@@ -89,7 +90,7 @@ enum precedence {
 // parse state
 typedef struct pstate pstate;
 struct pstate {
-  rmem*       mem;         // memory allocator
+  rasmctx*    ctx;
   const char* inp;         // source bytes cursor (source ends with 0x00)
   const char* inend;       // source bytes end
   const char* tokstart;    // start of current token in source
@@ -99,7 +100,7 @@ struct pstate {
   bool        insertsemi;  // insert T_SEMI before next newline
   bool        isneg;       // true when parsing a negative number
   u64         ival;        // integer value for T_INT* tokens
-  char        errstr[128]; // last error message (empty if no error occured)
+  usize       nops;        // number of ops we encountered; a hint for codegen
 };
 
 typedef struct node     node;
@@ -125,8 +126,8 @@ struct node {
 };
 
 typedef struct parselet parselet;
-#define PPARAMS       rmem* mem, pstate* p, precedence prec
-#define PARGS         mem, p, prec
+#define PPARAMS pstate* p, precedence prec
+#define PARGS   p, prec
 typedef node*(*prefixparselet)(PPARAMS); // token...
 typedef node*(*infixparselet)(PPARAMS, node* left); // (left token)...
 struct parselet {
@@ -186,20 +187,33 @@ static u32 pcolumn(pstate* p) { // source column of current token
   return (u32)((uintptr)p->tokstart - (uintptr)p->linestart) + 1;
 }
 
-static rtok errv(pstate* p, u32 line, u32 col, const char* fmt, va_list ap) {
-  abuf s = abuf_make(p->errstr, sizeof(p->errstr));
-  abuf_fmt(&s, "input:%u:%u: error: ", line, col);
+static void errv(rasmctx* ctx, u32 line, u32 col, const char* fmt, va_list ap) {
+  if (ctx->_stop)
+    return; // previous call to diaghandler has asked us to stop
+  ctx->diag.code = 1;
+  ctx->diag.msg = ctx->_diagmsg;
+  ctx->diag.srcname = ctx->srcname;
+  ctx->diag.line = line;
+  ctx->diag.col = col;
+
+  abuf s = abuf_make(ctx->_diagmsg, sizeof(ctx->_diagmsg));
+  if (line > 0) {
+    abuf_fmt(&s, "%s:%u:%u: error: ", ctx->srcname, line, col);
+  } else {
+    abuf_fmt(&s, "%s: error: ", ctx->srcname);
+  }
+  ctx->diag.msgshort = s.p;
   abuf_fmtv(&s, fmt, ap);
   abuf_terminate(&s);
-  dlog("%s", p->errstr);
-  return p->tok;
+
+  ctx->_stop = !ctx->diaghandler(&ctx->diag, ctx->userdata);
 }
 
 ATTR_FORMAT(printf, 2, 3)
 static rtok serr(pstate* p, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  errv(p, p->lineno, pcolumn(p), fmt, ap);
+  errv(p->ctx, p->lineno, pcolumn(p), fmt, ap);
   va_end(ap);
   return p->tok = T_END;
 }
@@ -209,9 +223,9 @@ static void perr(pstate* p, node* nullable n, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
   if (n) {
-    errv(p, n->line, n->col, fmt, ap);
+    errv(p->ctx, n->line, n->col, fmt, ap);
   } else {
-    errv(p, p->lineno, pcolumn(p), fmt, ap);
+    errv(p->ctx, p->lineno, pcolumn(p), fmt, ap);
   }
   va_end(ap);
 }
@@ -368,7 +382,7 @@ static rtok sadvance(pstate* p) { // scan the next token
     return p->tok = T_SEMI;
   }
 
-  if UNLIKELY(p->inp == p->inend) {
+  if UNLIKELY(p->inp == p->inend || p->ctx->_stop) {
     p->tokstart--;
     if (p->insertsemi) {
       p->insertsemi = false;
@@ -442,7 +456,22 @@ static rtok sadvance(pstate* p) { // scan the next token
 
 #ifdef LOG_TOKENS
   #define sadvance(p) ({ sadvance(p); logpstate(p); (p)->tok; })
-  static void logpstate(pstate* p);
+  static void logpstate(pstate* p) {
+    u32 line = p->lineno, col = pcolumn(p);
+    rtok t = p->tok;
+    const char* tname = tokname(t);
+    const char* tvalp = p->tokstart;
+    int tvalc = (int)toklen(p);
+    if (t == T_INT2 || t == T_INT10 || t == T_INT16 || t == T_IREG || t == T_FREG) {
+      return log("%3u:%-3u %-12s \"%.*s\"\t%llu\t0x%llx",
+        line, col, tname, tvalc, tvalp, p->ival, p->ival);
+    }
+    if (t == T_SINT2 || t == T_SINT10 || t == T_SINT16) { // uses ival
+      return log("%3u:%-3u %-12s \"%.*s\"\t%lld\t0x%llx",
+        line, col, tname, tvalc, tvalp, (i64)p->ival, p->ival);
+    }
+    log("%3u:%-3u %-12s \"%.*s\"", line, col, tname, tvalc, tvalp);
+  }
 #endif
 
 // got comsumes the next token if p->tok == t
@@ -514,7 +543,7 @@ static void eat(pstate* p, rtok t) {
 
 // mk* functions makes new nodes
 static node* mknode(pstate* p) {
-  node* n = rmem_allocz(p->mem, sizeof(node));
+  node* n = rmem_allocz(p->ctx->mem, sizeof(node));
   n->t = p->tok;
   n->line = p->lineno;
   n->col = pcolumn(p);
@@ -551,6 +580,7 @@ static node* prefix_int(PPARAMS) {
 static node* infix_eq(PPARAMS, node* dst) {
   node* n = mknode(p);
   sadvance(p);
+  p->nops++;
   node* src = pexpr(PARGS);
   nlist_set2(&n->list, dst, src);
   return n;
@@ -577,6 +607,7 @@ static node* pargs(PPARAMS, node* n) {
 // operation = op arg*
 static node* prefix_op(PPARAMS) {
   node* n = prefix_int(PARGS);
+  p->nops++;
   return pargs(PARGS, n);
 }
 
@@ -592,6 +623,7 @@ static node* infix_op(PPARAMS, node* arg0) {
   }
   n->t = T_OP;
   sadvance(p);
+  p->nops++;
   nlist_append(&n->list, arg0);
   return pargs(PARGS, n);
 }
@@ -865,57 +897,58 @@ static const char* tokname(rtok t) {
   return "?";
 }
 
-// --- main parse function
+// --- main functions
 
-#ifdef LOG_TOKENS
-  static void logpstate(pstate* p) {
-    u32 line = p->lineno, col = pcolumn(p);
-    rtok t = p->tok;
-    const char* tname = tokname(t);
-    const char* tvalp = p->tokstart;
-    int tvalc = (int)toklen(p);
-    if (t == T_INT2 || t == T_INT10 || t == T_INT16 || t == T_IREG || t == T_FREG) {
-      return log("%3u:%-3u %-12s \"%.*s\"\t%llu\t0x%llx",
-        line, col, tname, tvalc, tvalp, p->ival, p->ival);
-    }
-    if (t == T_SINT2 || t == T_SINT10 || t == T_SINT16) { // uses ival
-      return log("%3u:%-3u %-12s \"%.*s\"\t%lld\t0x%llx",
-        line, col, tname, tvalc, tvalp, (i64)p->ival, p->ival);
-    }
-    log("%3u:%-3u %-12s \"%.*s\"", line, col, tname, tvalc, tvalp);
-  }
-#endif
-
-static node* parse(rmem* mem, const char* src) {
-  pstate p = { .mem=mem, .inp=src, .inend=src+strlen(src), .linestart=src, .lineno=1 };
+static node* parse(rasmctx* ctx) {
+  pstate p = {
+    .ctx       = ctx,
+    .inp       = ctx->srcdata,
+    .inend     = ctx->srcdata + ctx->srclen,
+    .linestart = ctx->srcdata,
+    .lineno    = 1,
+  };
   sadvance(&p); // prime parser with initial token
-  node* list = mklist(&p);
-  while (p.tok != T_END) {
-    node* n = pstmt(mem, &p, PREC_MEMBER);
-    if UNLIKELY(p.errstr[0]) // did an error occur?
-      break;
+  node* module = mklist(&p);
+  while (p.tok != T_END && !ctx->_stop) {
+    node* n = pstmt(&p, PREC_MEMBER);
     if (p.tok != T_END) // every statement ends with a semicolon
       eat(&p, T_SEMI);
-    nlist_append(&list->list, n);
+    nlist_append(&module->list, n);
 
-    char buf[1024];
-    fmtnode(buf, sizeof(buf), n);
-    log("input:%u:%u: parsed top-level statement:\n%s", n->line, n->col, buf);
+    #ifdef LOG_AST
+      char buf[4096];
+      fmtnode(buf, sizeof(buf), n);
+      log("input:%u:%u: parsed top-level statement:\n%s", n->line, n->col, buf);
+    #endif
   }
-  return list;
+  return module;
 }
 
-static node* analyze(node* n) {
+static node* analyze(rasmctx* ctx, node* n) {
   // TODO
   return n;
 }
 
-// --- api
-
-usize rsm_asm(rmem* mem, rinstr* idst, usize idstcap, const char* src) {
-  node* tunit = parse(mem, src);
-  tunit = analyze(tunit);
-  // TODO: codegen
+static usize codegen(rasmctx* ctx, node* module, rinstr** res) {
+  // TODO
+  *res = NULL;
   return 0;
+}
+
+// assembler entry point
+usize rsm_asm(rasmctx* ctx, rinstr** res) {
+  ctx->_stop = false;
+  dlog("assembling \"%s\"", ctx->srcname);
+
+  node* module = parse(ctx);
+  if UNLIKELY(ctx->_stop)
+    return 0;
+  char buf[4096];
+  fmtnode(buf, sizeof(buf), module);
+  log("\"%s\" module parsed as:\n%s", ctx->srcname, buf);
+
+  module = analyze(ctx, module);
+
+  return codegen(ctx, module, res);
 }
 

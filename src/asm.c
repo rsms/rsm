@@ -851,6 +851,17 @@ static usize fmtnode(char* buf, usize bufcap, node* n) {
   return abuf_terminate(&s);
 }
 
+static const char* tokname(rtok t) {
+  switch (t) {
+  #define _(name, ...) case name: return &#name[2]; // [2] to skip "T_" prefix
+  RSM_FOREACH_TOKEN(_)
+  RSM_FOREACH_BINOP_TOKEN(_)
+  RSM_FOREACH_KEYWORD_TOKEN(_)
+  #undef _
+  }
+  return "?";
+}
+
 // --- main parse function
 
 #ifdef LOG_TOKENS
@@ -872,38 +883,36 @@ static usize fmtnode(char* buf, usize bufcap, node* n) {
   }
 #endif
 
-static void parse(rmem* mem, const char* src) {
+static node* parse(rmem* mem, const char* src) {
   pstate p = { .mem=mem, .inp=src, .inend=src+strlen(src), .linestart=src, .lineno=1 };
   sadvance(&p); // prime parser with initial token
+  node* list = mklist(&p);
   while (p.tok != T_END) {
     node* n = pstmt(mem, &p, PREC_MEMBER);
     if UNLIKELY(p.errstr[0]) // did an error occur?
       break;
     if (p.tok != T_END) // every statement ends with a semicolon
       eat(&p, T_SEMI);
+    nlist_append(&list->list, n);
 
     char buf[1024];
     fmtnode(buf, sizeof(buf), n);
     log("input:%u:%u: parsed top-level statement:\n%s", n->line, n->col, buf);
   }
+  return list;
 }
 
+static node* analyze(node* n) {
+  // TODO
+  return n;
+}
+
+// --- api
 
 usize rsm_asm(rmem* mem, rinstr* idst, usize idstcap, const char* src) {
-  parse(mem, src);
-  // TODO: analysis
+  node* tunit = parse(mem, src);
+  tunit = analyze(tunit);
   // TODO: codegen
   return 0;
 }
 
-
-static const char* tokname(rtok t) {
-  switch (t) {
-  #define _(name, ...) case name: return &#name[2]; // [2] to skip "T_" prefix
-  RSM_FOREACH_TOKEN(_)
-  RSM_FOREACH_BINOP_TOKEN(_)
-  RSM_FOREACH_KEYWORD_TOKEN(_)
-  #undef _
-  }
-  return "?";
-}

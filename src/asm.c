@@ -398,11 +398,6 @@ static rtok sadvance(pstate* p) { // scan the next token
     case '&': return p->tok = T_AMP;
     case '|': return p->tok = T_PIPE;
     case '^': return p->tok = T_HAT;
-    case '-': // "-" | "-" numlit
-      if (!isdigit(*p->inp)) return p->tok = T_MINUS;
-      p->inp++;
-      p->isneg = true;
-      FALLTHROUGH;
     case '<':
       if (*p->inp != '<') return p->tok = T_LT;
       p->inp++;           return p->tok = T_LT2;
@@ -411,11 +406,19 @@ static rtok sadvance(pstate* p) { // scan the next token
       p->inp++;
       if (*p->inp != '>') return p->tok = T_GT2;
       p->inp++;           return p->tok = T_GT3;
+
+    // number or "-"
+    case '-': // "-" | "-" numlit
+      if (!isdigit(*p->inp)) return p->tok = T_MINUS;
+      p->inp++;
+      p->isneg = true;
+      FALLTHROUGH;
     case '0': switch (*p->inp) {
       case 'B': case 'b': p->inp++; p->tok = T_INT2;  return snumber(p, 2);
       case 'X': case 'x': p->inp++; p->tok = T_INT16; return snumber(p, 16);
     } FALLTHROUGH;
     case '1' ... '9': p->inp--; p->tok = T_INT10; return snumber(p, 10);
+
     case '/':
       if (*p->inp == '/') {
         p->inp++;

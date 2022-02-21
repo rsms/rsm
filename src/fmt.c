@@ -24,17 +24,17 @@
 
 static void fi__(abuf* s, rinstr in)     { }
 static void fi_A(abuf* s, rinstr in)     { RA; }
-static void fi_Au(abuf* s, rinstr in)    { RAu; }
-static void fi_As(abuf* s, rinstr in)    { RAs; }
+// static void fi_Au(abuf* s, rinstr in)    { RAu; }
+// static void fi_As(abuf* s, rinstr in)    { RAs; }
 static void fi_AB(abuf* s, rinstr in)    { fi_A(s, in);   RB; }
 static void fi_ABu(abuf* s, rinstr in)   { fi_A(s, in);   RBu; }
 static void fi_ABs(abuf* s, rinstr in)   { fi_A(s, in);   RBs; }
-static void fi_ABC(abuf* s, rinstr in)   { fi_AB(s, in);  RC; }
+// static void fi_ABC(abuf* s, rinstr in)   { fi_AB(s, in);  RC; }
 static void fi_ABCu(abuf* s, rinstr in)  { fi_AB(s, in);  RCu; }
 static void fi_ABCs(abuf* s, rinstr in)  { fi_AB(s, in);  RCs; }
-static void fi_ABCD(abuf* s, rinstr in)  { fi_ABC(s, in); RD; }
-static void fi_ABCDu(abuf* s, rinstr in) { fi_ABC(s, in); RDu; }
-static void fi_ABCDs(abuf* s, rinstr in) { fi_ABC(s, in); RDs; }
+// static void fi_ABCD(abuf* s, rinstr in)  { fi_ABC(s, in); RD; }
+// static void fi_ABCDu(abuf* s, rinstr in) { fi_ABC(s, in); RDu; }
+// static void fi_ABCDs(abuf* s, rinstr in) { fi_ABC(s, in); RDs; }
 
 static void fmtinstr1(abuf* s, rinstr in) {
   abuf_str(s, rop_name(RSM_GET_OP(in)));

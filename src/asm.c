@@ -9,7 +9,7 @@
 // 4. generates code (our vm instructions)
 
 //#define LOG_TOKENS /* define to log() token scanning */
-//#define LOG_AST /* define to log() parsed top-level ast nodes */
+#define LOG_AST /* define to log() parsed top-level ast nodes */
 
 // source tokens
 typedef u8 rtok;
@@ -973,7 +973,7 @@ static usize labelderef(gstate* g, usize referreri, const strslice* name) {
 
 // getiargs checks & reads integer arguments for an operation described by AST node n.
 // returns true if the last arg is an immediate value.
-static bool getiargs(gstate* g, node* n, i32* argv, u32 wantargc) {
+static bool getiargs(gstate* g, node* n, i64* argv, u32 wantargc) {
   assert(n->t == T_OP);
   u32 argc = 0;
 
@@ -1030,7 +1030,7 @@ static void genop(gstate* g, node* n) {
 
   rinstr* in = &g->iv[g->ilen++]; // allocate instruction
   rop op = (rop)n->ival;
-  i32 arg[4];
+  i64 arg[4];
 
   // route opcode to instruction encoder
   switch (op) {

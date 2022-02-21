@@ -37,11 +37,9 @@ void rsm_eval(u64* iregs, rinstr* inv, u32 incount) {
   #define RDs ( RSM_GET_Di(in) ? (i64)RSM_GET_Ds(in) : (i64)RD )
 
   isize pc = 0; // program counter; current instruction#
-  usize limit = 20;
   logstate_header();
 
   for (;;) {
-    assert(limit--);
     assertf(pc < (isize)incount, "pc=%ld incount=%u", pc, incount);
     logstate(iregs, inv, pc);
 

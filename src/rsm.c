@@ -17,7 +17,10 @@ bool diaghandler(const rdiag* d, void* userdata) {
 
 int main(int argc, const char** argv) {
   rmem* m = rmem_makevm(4096*1000);
+  char buf[512]; // for logging stuff
+  u64 iregs[32] = {0}; // for eval
 
+  #if 0
   rinstr* ip = rmem_allocz(m, sizeof(rinstr)*32);
   u32 pc = 0;
   // fun factorial (i32) i32
@@ -48,16 +51,15 @@ int main(int argc, const char** argv) {
 
   // print function
   dlog("function size: %lu B", pc*sizeof(rinstr));
-  char buf[512];
   rsm_fmtprog(buf, sizeof(buf), ip, pc);
   log("%s", buf);
 
   // eval
-  u64 iregs[32] = {0};
   iregs[0] = 3; // arg 1
   dlog("evaluating factorial(%lld)", (i64)iregs[0]);
   rsm_eval(iregs, ip, pc);
   dlog("result: %llu", iregs[0]);
+  #endif
 
   // assemble
   const char* src =
@@ -86,14 +88,15 @@ int main(int argc, const char** argv) {
   rinstr* iv = NULL;
   usize icount = rsm_asm(&actx, &iv);
   rsm_fmtprog(buf, sizeof(buf), iv, icount);
-  if (icount)
-    log("rsm_asm =>\n%s", buf);
+  if (!icount)
+    return 1;
+  log("assembled some sweet vm code:\n%s", buf);
 
   // eval
   iregs[0] = 3; // arg 1
-  dlog("evaluating parsed function0(%lld)", (i64)iregs[0]);
+  log("evaluating function0(%lld)", (i64)iregs[0]);
   rsm_eval(iregs, iv, icount);
-  dlog("result: %llu", iregs[0]);
+  log("result: %llu", iregs[0]);
 
   return 0;
 }

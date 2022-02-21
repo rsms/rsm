@@ -138,13 +138,16 @@ void* rmem_alloczv(rmem* m, usize elemsize, usize count) {
 }
 
 
-void* nullable rmem_resize(rmem* m, void* p, usize newsize) {
+void* nullable rmem_resize(rmem* m, void* p1, usize oldsize, usize newsize) {
   if (newsize == 0) {
-    rmem_free(p);
+    rmem_free(p1);
     return NULL;
   }
-  // TODO
-  return p;
+  if (newsize <= oldsize)
+    return p1;
+  void* p2 = rmem_alloc(m, newsize);
+  memcpy(p2, p1, oldsize);
+  return p2;
 }
 
 

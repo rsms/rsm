@@ -25,6 +25,7 @@ void logbin(u32 v);
 
 rerror mmapfile(const char* filename, void** p_put, usize* len_out);
 void unmapfile(void* p, usize len);
+rerror read_stdin_data(rmem* m, usize maxlen, void** p_put, usize* len_out);
 
 // abuf is a string append buffer for implementing snprintf-style functions which
 // writes to a limited buffer and separately keeps track of the number of bytes

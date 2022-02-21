@@ -122,6 +122,7 @@ struct rasmctx {
   const char*    srcdata;     // input source bytes
   usize          srclen;      // length of srcdata
   const char*    srcname;     // symbolic name of source (e.g. filename)
+  u32            errcount;    // number of errors reported
   rdiag          diag;        // last diagnostic report
   rdiaghandler   diaghandler; // diagnostic report callback
   void* nullable userdata;    // passed along to diaghandler
@@ -291,7 +292,7 @@ void* _rmem_allocz(rmem* m, usize size)
 void* rmem_alloczv(rmem* m, usize elemsize, usize count)
   ATTR_MALLOC ATTR_ALLOC_SIZE(2, 3) WARN_UNUSED_RESULT;
 inline static void rmem_free(void* p) {}
-void* nullable rmem_resize(rmem* m, void* p, usize newsize)
+void* nullable rmem_resize(rmem* m, void* p, usize oldsize, usize newsize)
   ATTR_ALLOC_SIZE(3) WARN_UNUSED_RESULT;
 void* rmem_dup(rmem* m, const void* p, usize len);
 #define rmem_strdup(m, cstr) ((char*)rmem_dup((m),(cstr),strlen(cstr)))

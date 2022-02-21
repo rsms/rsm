@@ -195,6 +195,7 @@ static void errv(rasmctx* ctx, u32 line, u32 col, const char* fmt, va_list ap) {
   ctx->diag.srcname = ctx->srcname;
   ctx->diag.line = line;
   ctx->diag.col = col;
+  ctx->errcount++;
 
   abuf s = abuf_make(ctx->_diagmsg, sizeof(ctx->_diagmsg));
   if (line > 0) {
@@ -717,11 +718,19 @@ static node* prefix_fun(PPARAMS) {
 
   // parameters
   eat(p, T_LPAREN);
-  nlist_append(&n->list, pparams(PARGS));
-  eat(p, T_RPAREN);
+  if (got(p, T_RPAREN)) {
+    nlist_append(&n->list, mknil(p));
+  } else {
+    nlist_append(&n->list, pparams(PARGS));
+    eat(p, T_RPAREN);
+  }
 
   // result
-  nlist_append(&n->list, p->tok == T_LBRACE ? mknil(p) : pparams(PARGS));
+  if (p->tok == T_LBRACE || p->tok == T_SEMI) {
+    nlist_append(&n->list, mknil(p));
+  } else {
+    nlist_append(&n->list, pparams(PARGS));
+  }
 
   if (p->tok == T_SEMI)
     return n;
@@ -1168,6 +1177,9 @@ static node* parse(rasmctx* ctx) {
       eat(&p, T_SEMI);
     nlist_append(&module->list, n);
 
+    if UNLIKELY(n->t != T_FUN)
+      perr(&p, n, "expected function, got %s", tokname(n->t));
+
     #ifdef LOG_AST
       char buf[4096];
       fmtnode(buf, sizeof(buf), n);
@@ -1207,10 +1219,11 @@ static usize codegen(rasmctx* ctx, node* module, rinstr** res) {
 // assembler entry point
 usize rsm_asm(rasmctx* ctx, rinstr** res) {
   ctx->_stop = false;
+  ctx->errcount = 0;
   dlog("assembling \"%s\"", ctx->srcname);
 
   node* module = parse(ctx);
-  if UNLIKELY(ctx->_stop)
+  if UNLIKELY(ctx->_stop || ctx->errcount)
     return 0;
 
   #ifdef LOG_AST

@@ -1,3 +1,4 @@
+#include "rsm.h"
 #include "util.h"
 
 #ifdef R_WITH_LIBC
@@ -45,29 +46,63 @@ static rerror rerror_errno(int e) {
 
 
 rerror mmapfile(const char* filename, void** p_put, usize* len_out) {
-  int fd = open(filename, O_RDONLY);
-  if (fd < 0)
-    return rerror_errno(errno);
+  #ifdef R_WITH_LIBC
+    int fd = open(filename, O_RDONLY);
+    if (fd < 0)
+      return rerror_errno(errno);
 
-  struct stat st;
-  if (fstat(fd, &st) != 0) {
-    rerror err = rerror_errno(errno);
+    struct stat st;
+    if (fstat(fd, &st) != 0) {
+      rerror err = rerror_errno(errno);
+      close(fd);
+      return err;
+    }
+    *len_out = (usize)st.st_size;
+
+    void* p = mmap(0, (usize)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
-    return err;
-  }
-  *len_out = (usize)st.st_size;
+    if (p == MAP_FAILED)
+      return rerr_nomem;
 
-  void* p = mmap(0, (usize)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-  close(fd);
-  if (p == MAP_FAILED)
-    return rerr_nomem;
-
-  *p_put = p;
-  return 0;
+    *p_put = p;
+    return 0;
+  #else
+    return rerr_not_supported;
+  #endif
 }
 
 void unmapfile(void* p, usize len) {
-  munmap(p, len);
+  #ifdef R_WITH_LIBC
+    munmap(p, len);
+  #endif
+}
+
+rerror read_stdin_data(rmem* m, usize maxlen, void** p_put, usize* len_out) {
+  *len_out = 0;
+  #ifdef R_WITH_LIBC
+    if (isatty(0))
+      return rerr_badfd;
+    usize cap = 4096;
+    usize len = 0;
+    void* dst = rmem_alloc(m, cap);
+    for (;;) {
+      if (!dst)
+        return rerr_nomem;
+      isize n = read(0, dst + len, cap - len);
+      if (n < 0)
+        return rerror_errno(errno);
+      len += (usize)n;
+      if ((usize)n < cap - len)
+        break;
+      dst = rmem_resize(m, dst, cap, cap*2);
+      cap *= 2;
+    }
+    *p_put = dst;
+    *len_out = len;
+    return 0;
+  #else
+    return rerr_not_supported;
+  #endif
 }
 
 static char* strrevn(char* s, usize len) {

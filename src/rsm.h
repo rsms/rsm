@@ -18,14 +18,12 @@
   typedef signed long        isize;
   typedef unsigned long      usize;
 #endif
-
 #ifndef __has_attribute
   #define __has_attribute(x)  0
 #endif
 #ifndef __has_feature
   #define __has_feature(x)  0
 #endif
-
 #ifndef NULL
   #define NULL ((void*)0)
 #endif
@@ -48,11 +46,8 @@
   #define RSM_ASSUME_NONNULL_BEGIN
   #define RSM_ASSUME_NONNULL_END
 #endif
-
-// END_TYPED_ENUM(NAME) should be placed at an enum that has a matching integer typedef
 #if __has_attribute(__packed__)
-  #define RSM_END_ENUM(NAME)     \
-    __attribute__((__packed__)); \
+  #define RSM_END_ENUM(NAME) __attribute__((__packed__)); \
     _Static_assert(sizeof(enum NAME) <= sizeof(NAME), "too many " #NAME " values");
 #else
   #define RSM_END_ENUM(NAME) ;

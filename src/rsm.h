@@ -136,7 +136,7 @@ struct rasmctx {
 #define RSM_SIZE_A   5
 #define RSM_SIZE_B   5
 #define RSM_SIZE_C   5
-#define RSM_SIZE_D   9
+#define RSM_SIZE_D   8
 #define RSM_SIZE_Dw  (RSM_SIZE_D - RSM_SIZE_i)
 #define RSM_SIZE_Cw  (RSM_SIZE_C + RSM_SIZE_D - RSM_SIZE_i)
 #define RSM_SIZE_Bw  (RSM_SIZE_B + RSM_SIZE_C + RSM_SIZE_D - RSM_SIZE_i)

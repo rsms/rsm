@@ -263,6 +263,9 @@ const char* rtype_name(rtype); // name of a type constant
 // Returns the number of instructions at *res on success, or 0 on failure.
 usize rsm_asm(rasmctx* ctx, rinstr** res);
 
+// rsm_vmexec executes a program, starting with instruction inv[0]
+void rsm_vmexec(u64* iregs, u32* inv, u32 inc);
+
 // rsm_fmtprog formats an array of instructions ip as "assembly" text to buf.
 // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th
 // character then gets the terminating '\0'). If the return value is greater than or
@@ -272,9 +275,6 @@ usize rsm_asm(rasmctx* ctx, rinstr** res);
 // unlimited (not including the final `\0').
 usize rsm_fmtprog(char* buf, usize bufcap, rinstr* nullable ip, usize ilen);
 usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in);
-
-// rsm_eval executes a program, starting with instruction inv[0]
-void rsm_eval(u64* iregs, u32* inv, u32 inc);
 
 // rmem
 // RMEM_MIN -- minimum amount of memory (in bytes) that rmem_init accepts

@@ -51,7 +51,7 @@ UNUSED static void test_stuff() {
   // eval
   iregs[0] = 3; // arg 1
   dlog("evaluating factorial(%lld)", (i64)iregs[0]);
-  rsm_eval(iregs, ip, pc);
+  rsm_vmexec(iregs, ip, pc);
   dlog("result: %llu", iregs[0]);
 
   const char* src =
@@ -151,7 +151,7 @@ int main(int argc, const char** argv) {
 
   // eval
   log("evaluating function0(%lld)", (i64)iregs[0]);
-  rsm_eval(iregs, iv, icount);
+  rsm_vmexec(iregs, iv, icount);
   log("result R0..R7: %llu %llu %llu %llu %llu %llu %llu %llu",
     iregs[0], iregs[1], iregs[2], iregs[3], iregs[4], iregs[5], iregs[6], iregs[7]);
 

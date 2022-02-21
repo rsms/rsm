@@ -20,7 +20,7 @@
 #endif
 
 
-void rsm_eval(u64* iregs, rinstr* inv, u32 incount) {
+void rsm_vmexec(u64* iregs, rinstr* inv, u32 incount) {
   #define RA  iregs[ar]
   #define RB  iregs[RSM_GET_B(in)]
   #define RC  iregs[RSM_GET_C(in)]

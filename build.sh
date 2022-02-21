@@ -149,9 +149,12 @@ if [ -n "$CC_IS_CLANG" -a "$BUILD_MODE" = "debug" ]; then
     \
     -fno-omit-frame-pointer \
     -fno-optimize-sibling-calls \
+    \
+    -flto \
   )
   LDFLAGS+=(
     -fsanitize=address,undefined \
+    -flto \
   )
 fi
 
@@ -164,6 +167,7 @@ cflags = $
   -g $
   -fcolor-diagnostics $
   -feliminate-unused-debug-types $
+  -fvisibility=hidden $
   -Wall -Wextra -Wvla $
   -Wimplicit-fallthrough $
   -Wno-missing-field-initializers $

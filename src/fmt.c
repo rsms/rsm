@@ -1,4 +1,5 @@
 // string formatting
+// SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
 
 #define RA  FMTR(RSM_GET_A(in))

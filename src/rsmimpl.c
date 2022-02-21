@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
 
 #ifdef R_WITH_LIBC

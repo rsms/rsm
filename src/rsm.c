@@ -1,3 +1,5 @@
+// rsm CLI program
+// SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
 
 // diaghandler is called by the assembler when an error occurs

@@ -1,3 +1,5 @@
+// RSM virtual machine API
+// SPDX-License-Identifier: Apache-2.0
 #pragma once
 #ifdef __cplusplus
   #error no C++ support

@@ -1,4 +1,4 @@
-# RSM — rsms's smol machine
+# RSM
 
 Virtual computer
 
@@ -16,17 +16,23 @@ Constraints
     - mutable locals, parameters and variables are all treated the same
     - simple syntax where white-space is ignored
 
+"RSM" initially stands for "rsms's smol machine" but can also be interpreted as
+"Really smol machine", or "Raggedy-ass special mumbojumbo", or
+the recursive acronym "RSM smol machine" (in case you miss the golden days of PHP), or
+anything you'd like it to mean! Your imagination is really the limit here my friend.
+
 
 ## Building & running
 
 ```
-./build.sh -debug && ./out/rsm factorial.rsm 15
+./build.sh -debug
+./out/rsm factorial.rsm 15
 ```
 
 You'll need the following things to build rsm:
 - bash (or a bash-compatible shell like zsh)
 - [ninja](https://ninja-build.org) (or a ninja-compatible program like [samurai](https://github.com/michaelforney/samurai))
-- C11 compiler (like Clang or GCC) with a standard libc
+- C11 compiler with libc (e.g. clang or GCC)
 
 
 ## Example

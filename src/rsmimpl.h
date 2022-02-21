@@ -1,3 +1,6 @@
+// Internal functionality.
+// This file is included by every implementation file.
+// SPDX-License-Identifier: Apache-2.0
 #pragma once
 #ifdef RSM_NO_INT_DEFS
   #undef RSM_NO_INT_DEFS

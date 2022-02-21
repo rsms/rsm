@@ -1,4 +1,5 @@
-// assembler
+// compiler (parser & assembler)
+// SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
 
 // assembler does

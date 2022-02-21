@@ -76,6 +76,15 @@ typedef unsigned long       usize;
   #define __has_builtin(x)  0
 #endif
 
+#if defined(__clang__) || defined(__gcc__)
+  #define _DIAGNOSTIC_IGNORE_PUSH(x)  _Pragma("GCC diagnostic push") _Pragma(#x)
+  #define DIAGNOSTIC_IGNORE_PUSH(STR) _DIAGNOSTIC_IGNORE_PUSH(GCC diagnostic ignored STR)
+  #define DIAGNOSTIC_IGNORE_POP()     _Pragma("GCC diagnostic pop")
+#else
+  #define DIAGNOSTIC_IGNORE_PUSH(STR)
+  #define DIAGNOSTIC_IGNORE_POP()
+#endif
+
 // nullability
 #if defined(__clang__) && __has_feature(nullability)
   #define __NULLABILITY_PRAGMA_PUSH \
@@ -552,12 +561,7 @@ NORETURN void _rpanic(const char* file, int line, const char* fun, const char* f
       _assertfail("\"%s\" != \"%s\"", cstr1__, cstr2__); \
   })
 
-  #define asserteq(a,b)    assertop((a),==,(b))
-  #define assertne(a,b)    assertop((a),!=,(b))
-  #define assertlt(a,b)    assertop((a),<, (b))
-  #define assertgt(a,b)    assertop((a),>, (b))
-  #define assertnull(a)    assertop((a),==,NULL)
-
+  #define assertnull(a)  assert((a) == NULL)
   #define assertnotnull(a) ({                                         \
     __typeof__(a) val__ = (a);                                        \
     UNUSED const void* valp__ = val__; /* build bug on non-pointer */ \

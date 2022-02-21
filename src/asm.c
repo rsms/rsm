@@ -120,7 +120,7 @@ struct node {
   u32            line, col; // source postion
   union { // field used depends on value of t
     u64      ival;
-    strslice strslice;
+    strslice name;
   };
   nlist list;
 };
@@ -207,6 +207,14 @@ static void errv(rasmctx* ctx, u32 line, u32 col, const char* fmt, va_list ap) {
   abuf_terminate(&s);
 
   ctx->_stop = !ctx->diaghandler(&ctx->diag, ctx->userdata);
+}
+
+ATTR_FORMAT(printf, 4, 5)
+static void errf(rasmctx* ctx, u32 line, u32 col, const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  errv(ctx, line, col, fmt, ap);
+  va_end(ap);
 }
 
 ATTR_FORMAT(printf, 2, 3)
@@ -588,8 +596,8 @@ static node* infix_eq(PPARAMS, node* dst) {
 
 static node* prefix_name(PPARAMS) {
   node* n = mknode(p);
-  n->strslice.p = p->tokstart;
-  n->strslice.len = toklen(p);
+  n->name.p = p->tokstart;
+  n->name.len = toklen(p);
   sadvance(p);
   return n;
 }
@@ -665,8 +673,8 @@ static node* pblockbody(PPARAMS, node* block) {
 // labelblock = name ":" (operation | assignment)*
 static node* prefix_label(PPARAMS) {
   node* n = prefix_name(PARGS); // label
-  n->strslice.len--; // trim off trailing ":"
-  assert(n->strslice.p[n->strslice.len] == ':');
+  n->name.len--; // trim off trailing ":"
+  assert(n->name.p[n->name.len] == ':');
   return pblockbody(PARGS, n);
 }
 
@@ -703,8 +711,8 @@ static node* prefix_fun(PPARAMS) {
 
   // name
   expecttok(p, T_NAME);
-  n->strslice.p = p->tokstart;
-  n->strslice.len = toklen(p);
+  n->name.p = p->tokstart;
+  n->name.len = toklen(p);
   sadvance(p);
 
   // parameters
@@ -729,14 +737,14 @@ static node* prefix_fun(PPARAMS) {
   // implicit first block?
   if (p->tok != T_LABEL) {
     block0->t = T_LABEL;
-    block0->strslice.p = kBlock0Name;
-    block0->strslice.len = 2;
+    block0->name.p = kBlock0Name;
+    block0->name.len = 2;
     pblockbody(PARGS, block0);
     nlist_append(&body->list, block0);
   }
   while (p->tok == T_LABEL) {
     node* block = prefix_label(PARGS);
-    if (body->list.head != NULL && strsliceeq(&block->strslice, kBlock0Name))
+    if (body->list.head != NULL && strsliceeq(&block->name, kBlock0Name))
       perr(p, block, "block named %s must be first block", kBlock0Name);
     nlist_append(&body->list, block);
   }
@@ -803,88 +811,92 @@ static node* pstmt(PPARAMS) {
 
 // --- ast formatter
 
-typedef u32 fmtflag;
-enum fmtflag {
-  FMT_HEAD = 1 << 0, // is list head
-} END_TYPED_ENUM(fmtflag)
+#ifdef LOG_AST
 
-static void fmtnode1(abuf* s, node* n, usize indent, fmtflag fl) {
-  if ((fl & FMT_HEAD) == 0) {
-    abuf_c(s, '\n');
-    for (usize i = 0; i < indent; i++)
+  typedef u32 fmtflag;
+  enum fmtflag {
+    FMT_HEAD = 1 << 0, // is list head
+  } END_TYPED_ENUM(fmtflag)
+
+  static void fmtnode1(abuf* s, node* n, usize indent, fmtflag fl) {
+    if ((fl & FMT_HEAD) == 0) {
+      abuf_c(s, '\n');
+      for (usize i = 0; i < indent; i++)
+        abuf_c(s, ' ');
+    }
+    fl &= ~FMT_HEAD;
+    indent += 2;
+
+    // atoms
+    switch ((enum rtok)n->t) {
+      case T_I1:
+      case T_I8:
+      case T_I16:
+      case T_I32:
+      case T_I64:
+        return abuf_str(s, tokname(n->t));
+      case T_END:
+        return abuf_str(s, "nil");
+      default: break;
+    }
+
+    abuf_c(s, '(');
+
+    // list
+    if (n->t == T_LPAREN) {
+      for (node* cn = n->list.head; cn; cn = cn->next) {
+        abuf_c(s, ' ');
+        fmtnode1(s, cn, indent, cn == n->list.head ? fl | FMT_HEAD : fl);
+      }
       abuf_c(s, ' ');
-  }
-  fl &= ~FMT_HEAD;
-  indent += 2;
+      return abuf_c(s, ')');
+    }
 
-  // atoms
-  switch ((enum rtok)n->t) {
-    case T_I1:
-    case T_I8:
-    case T_I16:
-    case T_I32:
-    case T_I64:
-      return abuf_str(s, tokname(n->t));
-    case T_END:
-      return abuf_str(s, "nil");
-    default: break;
-  }
+    // complex
+    abuf_str(s, tokname(n->t));
+    abuf_c(s, ' ');
+    switch ((enum rtok)n->t) {
+      case T_IREG:
+      case T_FREG:
+        abuf_u64(s, n->ival, 10); break;
 
-  abuf_c(s, '(');
+      case T_NAME:
+      case T_COMMENT:
+      case T_LABEL:
+      case T_FUN:
+        abuf_append(s, n->name.p, n->name.len); break;
 
-  // list
-  if (n->t == T_LPAREN) {
+      case T_OP:
+        abuf_str(s, rop_name((rop)n->ival)); break;
+
+      case T_SINT2:  abuf_c(s, '-'); FALLTHROUGH;
+      case T_INT2:   abuf_str(s, "0b"); abuf_u64(s, n->ival, 2); break;
+      case T_SINT10: abuf_c(s, '-'); FALLTHROUGH;
+      case T_INT10:  abuf_u64(s, n->ival, 10); break;
+      case T_SINT16: abuf_c(s, '-'); FALLTHROUGH;
+      case T_INT16:  abuf_str(s, "0x"); abuf_u64(s, n->ival, 16); break;
+
+      case T_EQ:
+        break; // only list
+
+      default:
+        abuf_str(s, "[TODO fmtnode1]");
+        break;
+    }
     for (node* cn = n->list.head; cn; cn = cn->next) {
       abuf_c(s, ' ');
-      fmtnode1(s, cn, indent, cn == n->list.head ? fl | FMT_HEAD : fl);
+      fmtnode1(s, cn, indent, fl);
     }
-    abuf_c(s, ' ');
-    return abuf_c(s, ')');
+    abuf_c(s, ')');
   }
 
-  // complex
-  abuf_str(s, tokname(n->t));
-  abuf_c(s, ' ');
-  switch ((enum rtok)n->t) {
-    case T_IREG:
-    case T_FREG:
-      abuf_u64(s, n->ival, 10); break;
-
-    case T_NAME:
-    case T_COMMENT:
-    case T_LABEL:
-    case T_FUN:
-      abuf_append(s, n->strslice.p, n->strslice.len); break;
-
-    case T_OP:
-      abuf_str(s, rop_name((rop)n->ival)); break;
-
-    case T_SINT2:  abuf_c(s, '-'); FALLTHROUGH;
-    case T_INT2:   abuf_str(s, "0b"); abuf_u64(s, n->ival, 2); break;
-    case T_SINT10: abuf_c(s, '-'); FALLTHROUGH;
-    case T_INT10:  abuf_u64(s, n->ival, 10); break;
-    case T_SINT16: abuf_c(s, '-'); FALLTHROUGH;
-    case T_INT16:  abuf_str(s, "0x"); abuf_u64(s, n->ival, 16); break;
-
-    case T_EQ:
-      break; // only list
-
-    default:
-      abuf_str(s, "[TODO fmtnode1]");
-      break;
+  static usize fmtnode(char* buf, usize bufcap, node* n) {
+    abuf s = abuf_make(buf, bufcap);
+    fmtnode1(&s, n, 0, FMT_HEAD);
+    return abuf_terminate(&s);
   }
-  for (node* cn = n->list.head; cn; cn = cn->next) {
-    abuf_c(s, ' ');
-    fmtnode1(s, cn, indent, fl);
-  }
-  abuf_c(s, ')');
-}
 
-static usize fmtnode(char* buf, usize bufcap, node* n) {
-  abuf s = abuf_make(buf, bufcap);
-  fmtnode1(&s, n, 0, FMT_HEAD);
-  return abuf_terminate(&s);
-}
+#endif // LOG_AST
 
 static const char* tokname(rtok t) {
   switch (t) {
@@ -895,6 +907,246 @@ static const char* tokname(rtok t) {
   #undef _
   }
   return "?";
+}
+
+// --- codegen functions
+
+// codegen state
+typedef struct gstate    gstate;
+typedef struct labelinfo labelinfo;
+struct labelinfo {
+  const char* name;
+  usize       namelen;
+  usize       i; // iv offset (location for lv, referrer for ulv)
+};
+struct gstate {
+  rasmctx* ctx;
+
+  // instructions
+  rinstr*  iv;
+  usize    ilen;
+  usize    icap;
+
+  // functions, mapping [function index] => iv offset
+  usize*   fv;
+  usize    flen;
+  usize    fcap;
+
+  // defined labels
+  labelinfo* lv;
+  usize      llen;
+  usize      lcap;
+
+  // undefined label references
+  labelinfo* ulv;
+  usize      ullen;
+  usize      ulcap;
+};
+
+static u8 nregno(gstate* g, node* n) {
+  if UNLIKELY(n->t != T_IREG && n->t != T_FREG) {
+    errf(g->ctx, n->line, n->col, "expected register, got %s", tokname(n->t));
+    return 0;
+  }
+  assert(n->ival < 32); // parser checks this, so no real error checking needed
+  return (u8)n->ival;
+}
+
+static usize labelderef(gstate* g, usize referreri, const strslice* name) {
+  dlog("labelderef %.*s", (int)name->len, name->p);
+  for (usize i = 0; i < g->llen; i++) {
+    labelinfo* li = &g->lv[i];
+    if (strsliceeqn(name, li->name, li->namelen)) { // label found
+      referreri++;
+      i64 idelta = referreri > li->i ? (i64)(referreri - li->i) : -(i64)(li->i - referreri);
+      return -idelta;
+    }
+  }
+  // label is not (yet) defined -- record a pending reference
+  assertf(g->ullen < g->ulcap, "TODO grow ulv if needed");
+  labelinfo* li = &g->ulv[g->ullen++];
+  li->i = referreri;
+  li->name = name->p;
+  li->namelen = name->len;
+  return 0;
+}
+
+// getiargs checks & reads integer arguments for an operation described by AST node n.
+// returns true if the last arg is an immediate value.
+static bool getiargs(gstate* g, node* n, i32* argv, u32 wantargc) {
+  assert(n->t == T_OP);
+  u32 argc = 0;
+
+  // first argc-1 args are registers
+  node* arg = n->list.head;
+  for (; argc < wantargc-1 && arg; argc++, arg = arg->next)
+    argv[argc] = nregno(g, arg);
+
+  if UNLIKELY(!arg || arg->next != NULL) {
+    if (arg)
+      argc += 2;
+    goto err_argc;
+  }
+
+  // last arg is either a register, immediate or label (resolved as immediate)
+  switch (arg->t) {
+  case T_IREG:
+    assert(arg->ival < 32);
+    argv[argc] = (i32)arg->ival;
+    return false;
+  case T_NAME: // label
+    argv[argc] = labelderef(g, g->ilen - 1, &arg->name);
+    return true;
+  case T_INT2 ... T_SINT16:
+    if UNLIKELY(arg->ival > RSM_MAX_Bw) {
+      errf(g->ctx, arg->line, arg->col, "value %llu too large", arg->ival);
+      return false;
+    }
+    argv[argc] = (i32)arg->ival;
+    return true;
+  default:
+    errf(g->ctx, arg->line, arg->col,
+      "expected register or immediate integer, got %s", tokname(arg->t));
+    argv[argc] = 0;
+    return false;
+  }
+
+err_argc:
+  if (argc < wantargc) {
+    errf(g->ctx, n->line, n->col, "not enough arguments for %s; want %u, got %u",
+      rop_name((rop)n->ival), wantargc, argc);
+  } else {
+    errf(g->ctx, n->line, n->col, "too many arguments for %s; want %u, got %u",
+      rop_name((rop)n->ival), wantargc, argc);
+  }
+  return false;
+}
+
+
+static void genop(gstate* g, node* n) {
+  assert(n->t == T_OP);
+  assert(n->ival < RSM_OP_COUNT);
+  assertf(g->ilen < g->icap, "TODO grow iv if needed");
+
+  rinstr* in = &g->iv[g->ilen++]; // allocate instruction
+  rop op = (rop)n->ival;
+  i32 arg[4];
+
+  // route opcode to instruction encoder
+  switch (op) {
+    #define _(OP, ENC, ...) case rop_##OP: goto make_##ENC;
+    RSM_FOREACH_OP(_)
+    #undef _
+  }
+
+  // instruction encoders
+  #define NOIMM(argc, ENC, args...)            \
+    if (getiargs(g, n, arg, argc)) goto noimm; \
+    *in = RSM_MAKE_##ENC(op, args); return;
+
+  #define RoIMM(argc, ENC, ENCi, args...) \
+    if (getiargs(g, n, arg, argc)) {      \
+      *in = RSM_MAKE_##ENCi(op, args);    \
+    } else {                              \
+      *in = RSM_MAKE_##ENC(op, args);     \
+    }                                     \
+    return;
+
+  DIAGNOSTIC_IGNORE_PUSH("-Wunused-label")
+  make__:
+    if UNLIKELY(n->list.head)
+      errf(g->ctx, n->line, n->col, "%s does not accept any arguments", rop_name(op));
+    *in = RSM_MAKE__(op);
+    return;
+  make_A:     NOIMM(1, A          , arg[0])
+  make_Au:    RoIMM(1, A, Au      , arg[0])
+  make_As:    RoIMM(1, A, As      , arg[0])
+  make_AB:    NOIMM(2, AB         , arg[0], arg[1])
+  make_ABu:   RoIMM(2, AB, ABu    , arg[0], arg[1])
+  make_ABs:   RoIMM(2, AB, ABs    , arg[0], arg[1])
+  make_ABC:   NOIMM(3, ABC        , arg[0], arg[1], arg[2])
+  make_ABCu:  RoIMM(3, ABC, ABCu  , arg[0], arg[1], arg[2])
+  make_ABCs:  RoIMM(3, ABC, ABCs  , arg[0], arg[1], arg[2])
+  make_ABCD:  NOIMM(4, ABCD       , arg[0], arg[1], arg[2], arg[3])
+  make_ABCDu: RoIMM(4, ABCD, ABCDu, arg[0], arg[1], arg[2], arg[3])
+  make_ABCDs: RoIMM(4, ABCD, ABCDs, arg[0], arg[1], arg[2], arg[3])
+  DIAGNOSTIC_IGNORE_POP()
+  #undef RoIMM
+  #undef NOIMM
+
+noimm: // the operation does not accept an immediate-value as the last argument
+  errf(g->ctx, n->line, n->col, "last argument for %s must be a register", rop_name(op));
+}
+
+
+static void genassign(gstate* g, node* n) {
+  assert(n->t == T_EQ);
+  // convert to op
+  n->t = T_OP;
+  n->ival = rop_MOVE;
+  node* lhs = assertnotnull(n->list.head);
+  node* rhs = assertnotnull(lhs->next);
+  assertnull(rhs->next); // n must only have two operands
+
+  if (rhs->list.head) {
+    // a = op b c  ⟶  op a b c
+    assert(rhs->t == T_OP);
+    n->ival = rhs->ival;
+    lhs->next = rhs->list.head;
+  } else {
+    // a = b  ⟶  move a b
+    assert(rhs->t != T_OP);
+    n->ival = rop_MOVE;
+  }
+
+  return genop(g, n);
+}
+
+static void genblock(gstate* g, node* block) {
+  assert(block->t == T_LABEL);
+  assertf(g->llen < g->lcap, "TODO grow lv if needed");
+
+  // record label's name and "position"
+  labelinfo* li = &g->lv[g->llen++];
+  li->i = g->ilen;
+  li->name = block->name.p;
+  li->namelen = block->name.len;
+
+  // resolve any pending references
+  for (usize i = 0; i < g->ullen; i++) {
+    labelinfo* li = &g->ulv[i];
+    if (strsliceeqn(&block->name, li->name, li->namelen)) {
+      rinstr in = g->iv[li->i];
+      i64 idelta = (i64)(g->ilen - li->i - 1);
+      g->iv[li->i] = RSM_SET_Bs(in, idelta);
+      // dlog("patch instruction iv[%lu] label %.*s Cs = %lld",
+      //   li->i, (int)block->name.len, block->name.p, idelta);
+      assertf(RSM_GET_OP(in) == rop_BRZ, "TODO handle other ops");
+      dlog("TODO splice out from ulv"); // reference is now resolved
+    }
+  }
+
+  for (node* cn = block->list.head; cn; cn = cn->next) {
+    switch (cn->t) {
+      case T_OP: genop(g, cn); break;
+      case T_EQ: genassign(g, cn); break;
+      default: errf(g->ctx, cn->line, cn->col, "invalid block element %s", tokname(cn->t));
+    }
+  }
+}
+
+static void genfun(gstate* g, node* fun) {
+  assert(fun->t == T_FUN);
+  node* params = fun->list.head;
+  node* results = params->next;
+  node* body = results->next;
+  if (!body)
+    return;
+  assertf(g->flen < g->fcap, "TODO grow fv if needed");
+  g->fv[g->flen++] = g->ilen; // record function's "position"
+  g->llen = 0; // clear label mappings from any past functions
+  for (node* cn = body->list.head; cn; cn = cn->next)
+    genblock(g, cn);
 }
 
 // --- main functions
@@ -930,9 +1182,25 @@ static node* analyze(rasmctx* ctx, node* n) {
 }
 
 static usize codegen(rasmctx* ctx, node* module, rinstr** res) {
-  // TODO
-  *res = NULL;
-  return 0;
+  gstate g = { .ctx=ctx };
+
+  g.icap = 4096/sizeof(rinstr);
+  g.iv = rmem_allocz(ctx->mem, g.icap*sizeof(rinstr));
+
+  g.fcap = 16;
+  g.fv = rmem_allocz(ctx->mem, g.fcap*sizeof(usize));
+
+  g.lcap = 16;
+  g.lv = rmem_allocz(ctx->mem, g.lcap*sizeof(labelinfo));
+
+  g.ulcap = 16;
+  g.ulv = rmem_allocz(ctx->mem, g.ulcap*sizeof(labelinfo));
+
+  assert(module->t == T_LPAREN);
+  for (node* cn = module->list.head; cn; cn = cn->next)
+    genfun(&g, cn);
+  *res = g.iv;
+  return g.ilen;
 }
 
 // assembler entry point
@@ -943,9 +1211,12 @@ usize rsm_asm(rasmctx* ctx, rinstr** res) {
   node* module = parse(ctx);
   if UNLIKELY(ctx->_stop)
     return 0;
-  char buf[4096];
-  fmtnode(buf, sizeof(buf), module);
-  log("\"%s\" module parsed as:\n%s", ctx->srcname, buf);
+
+  #ifdef LOG_AST
+    char buf[4096];
+    fmtnode(buf, sizeof(buf), module);
+    log("\"%s\" module parsed as:\n%s", ctx->srcname, buf);
+  #endif
 
   module = analyze(ctx, module);
 

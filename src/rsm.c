@@ -1,4 +1,5 @@
 #include "rsm.h"
+#include "util.h"
 
 // TODO:
 // - assembler
@@ -32,12 +33,12 @@ int main(int argc, const char** argv) {
   //     ret            // RES is at r0
   //
   ip[pc++] = RSM_MAKE_AB(rop_MOVE, 1, 0); // r1 = r0
-  ip[pc++] = RSM_MAKE_AB(rop_LOADI, 0, 1); // r0 = 1
-  ip[pc++] = RSM_MAKE_ABs(rop_BRZI, 1, 3); // brz r1 end -- PC+3=end (TODO patch marker)
+  ip[pc++] = RSM_MAKE_ABu(rop_MOVE, 0, 1); // r0 = 1
+  ip[pc++] = RSM_MAKE_ABs(rop_BRZ, 1, 3); // brz r1 end -- PC+3=end (TODO patch marker)
   u32 b1 = pc; // b1:
   ip[pc++] = RSM_MAKE_ABC(rop_MUL, 0, 1, 0); // r0 = mul r1 r0
-  ip[pc++] = RSM_MAKE_ABC(rop_SUBI, 1, 1, 1); // r1 = sub r1 1
-  ip[pc]   = RSM_MAKE_ABs(rop_BRNZI, 1, -(pc+1-b1)); // brnz r1 b1 (TODO sign)
+  ip[pc++] = RSM_MAKE_ABCu(rop_SUB, 1, 1, 1); // r1 = sub r1 1
+  ip[pc]   = RSM_MAKE_ABs(rop_BRNZ, 1, -(pc+1-b1)); // brnz r1 b1 (TODO sign)
   pc++;
   // end:
   ip[pc++] = RSM_MAKE_A(rop_RET, 0); // ret
@@ -87,6 +88,12 @@ int main(int argc, const char** argv) {
   rsm_fmtprog(buf, sizeof(buf), iv, icount);
   if (icount)
     log("rsm_asm =>\n%s", buf);
+
+  // eval
+  iregs[0] = 3; // arg 1
+  dlog("evaluating parsed function0(%lld)", (i64)iregs[0]);
+  rsm_eval(iregs, iv, icount);
+  dlog("result: %llu", iregs[0]);
 
   return 0;
 }

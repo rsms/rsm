@@ -1,6 +1,5 @@
 // assembler
-#include "rsm.h"
-#include "util.h"
+#include "rsmimpl.h"
 
 // assembler does
 // 1. scan the input for tokens
@@ -65,7 +64,7 @@ enum rtok {
   RSM_FOREACH_KEYWORD_TOKEN(_)
   #undef _
   rtok_COUNT
-} END_TYPED_ENUM(rtok)
+} RSM_END_ENUM(rtok)
 
 typedef u8 precedence;
 enum precedence {
@@ -90,19 +89,20 @@ enum precedence {
 // parse state
 typedef struct pstate pstate;
 struct pstate {
-  rasmctx*    ctx;
-  const char* inp;         // source bytes cursor (source ends with 0x00)
-  const char* inend;       // source bytes end
-  const char* tokstart;    // start of current token in source
-  const char* linestart;   // source position line start pointer (for column)
-  u32         lineno;      // source position line
-  rtok        tok;         // current token
-  bool        insertsemi;  // insert T_SEMI before next newline
-  bool        isneg;       // true when parsing a negative number
-  u64         ival;        // integer value for T_INT* tokens
-  usize       nops;        // number of ops we encountered; a hint for codegen
+  rcomp*      c;          // compilation session/context
+  const char* inp;        // source bytes cursor (source ends with 0x00)
+  const char* inend;      // source bytes end
+  const char* tokstart;   // start of current token in source
+  const char* linestart;  // source position line start pointer (for column)
+  u32         lineno;     // source position line
+  rtok        tok;        // current token
+  bool        insertsemi; // insert T_SEMI before next newline
+  bool        isneg;      // true when parsing a negative number
+  u64         ival;       // integer value for T_INT* tokens
+  usize       nops;       // number of ops we encountered; a hint for codegen
 };
 
+// AST
 typedef struct node     node;
 typedef struct nlist    nlist;
 typedef struct strslice strslice;
@@ -125,6 +125,7 @@ struct node {
   nlist list;
 };
 
+// Pratt parselet
 typedef struct parselet parselet;
 #define PPARAMS pstate* p, precedence prec
 #define PARGS   p, prec
@@ -135,6 +136,41 @@ struct parselet {
   infixparselet  nullable infix;
   precedence     prec;
 };
+
+// codegen state
+typedef struct gstate    gstate;
+typedef struct labelinfo labelinfo;
+struct labelinfo {
+  const char* name;
+  usize       namelen;
+  usize       i; // iv offset (location for lv, referrer for ulv)
+};
+struct gstate {
+  rcomp* c; // compilation session/context
+
+  // instructions
+  rinstr*  iv;
+  rmem     imem; // allocator for iv
+  usize    ilen;
+  usize    icap;
+
+  // functions, mapping [function index] => iv offset
+  usize*   fv;
+  usize    flen;
+  usize    fcap;
+
+  // defined labels
+  labelinfo* lv;
+  usize      llen;
+  usize      lcap;
+
+  // undefined label references
+  labelinfo* ulv;
+  usize      ullen;
+  usize      ulcap;
+};
+
+
 
 static const char* kBlock0Name = "b0"; // name of first block
 
@@ -187,34 +223,34 @@ static u32 pcolumn(pstate* p) { // source column of current token
   return (u32)((uintptr)p->tokstart - (uintptr)p->linestart) + 1;
 }
 
-static void errv(rasmctx* ctx, u32 line, u32 col, const char* fmt, va_list ap) {
-  if (ctx->_stop)
+static void errv(rcomp* c, u32 line, u32 col, const char* fmt, va_list ap) {
+  if (c->_stop)
     return; // previous call to diaghandler has asked us to stop
-  ctx->diag.code = 1;
-  ctx->diag.msg = ctx->_diagmsg;
-  ctx->diag.srcname = ctx->srcname;
-  ctx->diag.line = line;
-  ctx->diag.col = col;
-  ctx->errcount++;
+  c->diag.code = 1;
+  c->diag.msg = c->_diagmsg;
+  c->diag.srcname = c->srcname;
+  c->diag.line = line;
+  c->diag.col = col;
+  c->errcount++;
 
-  abuf s = abuf_make(ctx->_diagmsg, sizeof(ctx->_diagmsg));
+  abuf s = abuf_make(c->_diagmsg, sizeof(c->_diagmsg));
   if (line > 0) {
-    abuf_fmt(&s, "%s:%u:%u: error: ", ctx->srcname, line, col);
+    abuf_fmt(&s, "%s:%u:%u: error: ", c->srcname, line, col);
   } else {
-    abuf_fmt(&s, "%s: error: ", ctx->srcname);
+    abuf_fmt(&s, "%s: error: ", c->srcname);
   }
-  ctx->diag.msgshort = s.p;
+  c->diag.msgshort = s.p;
   abuf_fmtv(&s, fmt, ap);
   abuf_terminate(&s);
 
-  ctx->_stop = !ctx->diaghandler(&ctx->diag, ctx->userdata);
+  c->_stop = !c->diaghandler(&c->diag, c->userdata);
 }
 
 ATTR_FORMAT(printf, 4, 5)
-static void errf(rasmctx* ctx, u32 line, u32 col, const char* fmt, ...) {
+static void errf(rcomp* comp, u32 line, u32 col, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  errv(ctx, line, col, fmt, ap);
+  errv(comp, line, col, fmt, ap);
   va_end(ap);
 }
 
@@ -222,7 +258,7 @@ ATTR_FORMAT(printf, 2, 3)
 static rtok serr(pstate* p, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  errv(p->ctx, p->lineno, pcolumn(p), fmt, ap);
+  errv(p->c, p->lineno, pcolumn(p), fmt, ap);
   va_end(ap);
   return p->tok = T_END;
 }
@@ -232,9 +268,9 @@ static void perr(pstate* p, node* nullable n, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
   if (n) {
-    errv(p->ctx, n->line, n->col, fmt, ap);
+    errv(p->c, n->line, n->col, fmt, ap);
   } else {
-    errv(p->ctx, p->lineno, pcolumn(p), fmt, ap);
+    errv(p->c, p->lineno, pcolumn(p), fmt, ap);
   }
   va_end(ap);
 }
@@ -391,7 +427,7 @@ static rtok sadvance(pstate* p) { // scan the next token
     return p->tok = T_SEMI;
   }
 
-  if UNLIKELY(p->inp == p->inend || p->ctx->_stop) {
+  if UNLIKELY(p->inp == p->inend || p->c->_stop) {
     p->tokstart--;
     if (p->insertsemi) {
       p->insertsemi = false;
@@ -552,7 +588,8 @@ static void eat(pstate* p, rtok t) {
 
 // mk* functions makes new nodes
 static node* mknode(pstate* p) {
-  node* n = rmem_allocz(p->ctx->mem, sizeof(node));
+  node* n = rmem_alloc(p->c->mem, sizeof(node));
+  memset(n, 0, sizeof(node));
   n->t = p->tok;
   n->line = p->lineno;
   n->col = pcolumn(p);
@@ -802,8 +839,8 @@ static node* pstmt(PPARAMS) {
     return n;
   }
 
-  UNUSED const void* p1 = p->inp;
-  UNUSED bool insertsemi = p->insertsemi;
+  ATTR_UNUSED const void* p1 = p->inp;
+  ATTR_UNUSED bool insertsemi = p->insertsemi;
   node* n = ps->prefix(PARGS);
   assertf(insertsemi != p->insertsemi || (uintptr)p1 < (uintptr)p->inp,
     "parselet did not advance scanner");
@@ -825,7 +862,7 @@ static node* pstmt(PPARAMS) {
   typedef u32 fmtflag;
   enum fmtflag {
     FMT_HEAD = 1 << 0, // is list head
-  } END_TYPED_ENUM(fmtflag)
+  } RSM_END_ENUM(fmtflag)
 
   static void fmtnode1(abuf* s, node* n, usize indent, fmtflag fl) {
     if ((fl & FMT_HEAD) == 0) {
@@ -920,41 +957,9 @@ static const char* tokname(rtok t) {
 
 // --- codegen functions
 
-// codegen state
-typedef struct gstate    gstate;
-typedef struct labelinfo labelinfo;
-struct labelinfo {
-  const char* name;
-  usize       namelen;
-  usize       i; // iv offset (location for lv, referrer for ulv)
-};
-struct gstate {
-  rasmctx* ctx;
-
-  // instructions
-  rinstr*  iv;
-  usize    ilen;
-  usize    icap;
-
-  // functions, mapping [function index] => iv offset
-  usize*   fv;
-  usize    flen;
-  usize    fcap;
-
-  // defined labels
-  labelinfo* lv;
-  usize      llen;
-  usize      lcap;
-
-  // undefined label references
-  labelinfo* ulv;
-  usize      ullen;
-  usize      ulcap;
-};
-
 static u8 nregno(gstate* g, node* n) {
   if UNLIKELY(n->t != T_IREG && n->t != T_FREG) {
-    errf(g->ctx, n->line, n->col, "expected register, got %s", tokname(n->t));
+    errf(g->c, n->line, n->col, "expected register, got %s", tokname(n->t));
     return 0;
   }
   assert(n->ival < 32); // parser checks this, so no real error checking needed
@@ -1007,13 +1012,13 @@ static bool getiargs(gstate* g, node* n, i32* argv, u32 wantargc) {
     return true;
   case T_INT2 ... T_SINT16:
     if UNLIKELY(arg->ival > RSM_MAX_Bw) {
-      errf(g->ctx, arg->line, arg->col, "value %llu too large", arg->ival);
+      errf(g->c, arg->line, arg->col, "value %llu too large", arg->ival);
       return false;
     }
     argv[argc] = (i32)arg->ival;
     return true;
   default:
-    errf(g->ctx, arg->line, arg->col,
+    errf(g->c, arg->line, arg->col,
       "expected register or immediate integer, got %s", tokname(arg->t));
     argv[argc] = 0;
     return false;
@@ -1021,10 +1026,10 @@ static bool getiargs(gstate* g, node* n, i32* argv, u32 wantargc) {
 
 err_argc:
   if (argc < wantargc) {
-    errf(g->ctx, n->line, n->col, "not enough arguments for %s; want %u, got %u",
+    errf(g->c, n->line, n->col, "not enough arguments for %s; want %u, got %u",
       rop_name((rop)n->ival), wantargc, argc);
   } else {
-    errf(g->ctx, n->line, n->col, "too many arguments for %s; want %u, got %u",
+    errf(g->c, n->line, n->col, "too many arguments for %s; want %u, got %u",
       rop_name((rop)n->ival), wantargc, argc);
   }
   return false;
@@ -1063,7 +1068,7 @@ static void genop(gstate* g, node* n) {
   DIAGNOSTIC_IGNORE_PUSH("-Wunused-label")
   make__:
     if UNLIKELY(n->list.head)
-      errf(g->ctx, n->line, n->col, "%s does not accept any arguments", rop_name(op));
+      errf(g->c, n->line, n->col, "%s does not accept any arguments", rop_name(op));
     *in = RSM_MAKE__(op);
     return;
   make_A:     NOIMM(1, A          , arg[0])
@@ -1083,7 +1088,7 @@ static void genop(gstate* g, node* n) {
   #undef NOIMM
 
 noimm: // the operation does not accept an immediate-value as the last argument
-  errf(g->ctx, n->line, n->col, "last argument for %s must be a register", rop_name(op));
+  errf(g->c, n->line, n->col, "last argument for %s must be a register", rop_name(op));
 }
 
 
@@ -1140,7 +1145,7 @@ static void genblock(gstate* g, node* block) {
     switch (cn->t) {
       case T_OP: genop(g, cn); break;
       case T_EQ: genassign(g, cn); break;
-      default: errf(g->ctx, cn->line, cn->col, "invalid block element %s", tokname(cn->t));
+      default: errf(g->c, cn->line, cn->col, "invalid block element %s", tokname(cn->t));
     }
   }
 }
@@ -1161,17 +1166,17 @@ static void genfun(gstate* g, node* fun) {
 
 // --- main functions
 
-static node* parse(rasmctx* ctx) {
+static node* parse(rcomp* c) {
   pstate p = {
-    .ctx       = ctx,
-    .inp       = ctx->srcdata,
-    .inend     = ctx->srcdata + ctx->srclen,
-    .linestart = ctx->srcdata,
+    .c         = c,
+    .inp       = c->srcdata,
+    .inend     = c->srcdata + c->srclen,
+    .linestart = c->srcdata,
     .lineno    = 1,
   };
   sadvance(&p); // prime parser with initial token
   node* module = mklist(&p);
-  while (p.tok != T_END && !ctx->_stop) {
+  while (p.tok != T_END && !c->_stop) {
     node* n = pstmt(&p, PREC_MEMBER);
     if (p.tok != T_END) // every statement ends with a semicolon
       eat(&p, T_SEMI);
@@ -1189,51 +1194,44 @@ static node* parse(rasmctx* ctx) {
   return module;
 }
 
-static node* analyze(rasmctx* ctx, node* n) {
-  // TODO
-  return n;
-}
-
-static usize codegen(rasmctx* ctx, node* module, rinstr** res) {
-  gstate g = { .ctx=ctx };
+static usize codegen(rcomp* c, node* module, rmem imem, rinstr** resp) {
+  gstate g = { .c=c, .imem=imem };
 
   g.icap = 4096/sizeof(rinstr);
-  g.iv = rmem_allocz(ctx->mem, g.icap*sizeof(rinstr));
+  g.iv = rmem_alloc(imem, g.icap*sizeof(rinstr));
 
   g.fcap = 16;
-  g.fv = rmem_allocz(ctx->mem, g.fcap*sizeof(usize));
+  g.fv = rmem_alloc(c->mem, g.fcap*sizeof(usize));
 
   g.lcap = 16;
-  g.lv = rmem_allocz(ctx->mem, g.lcap*sizeof(labelinfo));
+  g.lv = rmem_alloc(c->mem, g.lcap*sizeof(labelinfo));
 
   g.ulcap = 16;
-  g.ulv = rmem_allocz(ctx->mem, g.ulcap*sizeof(labelinfo));
+  g.ulv = rmem_alloc(c->mem, g.ulcap*sizeof(labelinfo));
 
   assert(module->t == T_LPAREN);
   for (node* cn = module->list.head; cn; cn = cn->next)
     genfun(&g, cn);
-  *res = g.iv;
+  *resp = g.iv;
   return g.ilen;
 }
 
-// assembler entry point
-usize rsm_asm(rasmctx* ctx, rinstr** res) {
-  ctx->_stop = false;
-  ctx->errcount = 0;
-  dlog("assembling \"%s\"", ctx->srcname);
+// compiler entry point
+usize rsm_compile(rcomp* c, rmem resm, rinstr** resp) {
+  c->_stop = false;
+  c->errcount = 0;
+  dlog("assembling \"%s\"", c->srcname);
 
-  node* module = parse(ctx);
-  if UNLIKELY(ctx->_stop || ctx->errcount)
+  node* module = parse(c);
+  if UNLIKELY(c->_stop || c->errcount)
     return 0;
 
   #ifdef LOG_AST
     char buf[4096];
     fmtnode(buf, sizeof(buf), module);
-    log("\"%s\" module parsed as:\n%s", ctx->srcname, buf);
+    log("\"%s\" module parsed as:\n%s", c->srcname, buf);
   #endif
 
-  module = analyze(ctx, module);
-
-  return codegen(ctx, module, res);
+  return codegen(c, module, resm, resp);
 }
 

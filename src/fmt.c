@@ -1,6 +1,5 @@
 // string formatting
-#include "rsm.h"
-#include "util.h"
+#include "rsmimpl.h"
 
 #define RA  FMTR(RSM_GET_A(in))
 #define RB  FMTR(RSM_GET_B(in))
@@ -69,16 +68,6 @@ const char* rop_name(rop op) {
   switch (op) {
     #define _(name, enc, asmname, ...) case rop_##name: return asmname;
     RSM_FOREACH_OP(_)
-    #undef _
-  }
-  return "?";
-}
-
-
-const char* rtype_name(rtype t) {
-  switch (t) {
-    #define _(name, ...) case rt_##name: return #name;
-    RSM_FOREACH_TYPE(_)
     #undef _
   }
   return "?";

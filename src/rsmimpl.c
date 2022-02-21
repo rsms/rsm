@@ -1,13 +1,65 @@
-#include "rsm.h"
-#include "util.h"
+#include "rsmimpl.h"
 
 #ifdef R_WITH_LIBC
   #include <stdio.h>
   #include <fcntl.h>
   #include <errno.h>
   #include <unistd.h>
+  #include <stdlib.h> // free
+  #include <execinfo.h> // backtrace* (for _panic)
   #include <sys/stat.h>
-  #include <sys/mman.h>
+  #include <sys/mman.h> // mmap
+
+  #ifdef _WIN32
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
+    #define MEM_PAGESIZE malloc_getpagesize
+  #elif defined(malloc_getpagesize)
+    #define MEM_PAGESIZE malloc_getpagesize
+  #else
+    #include <unistd.h>
+    #ifdef _SC_PAGESIZE  /* some SVR4 systems omit an underscore */
+      #ifndef _SC_PAGE_SIZE
+        #define _SC_PAGE_SIZE _SC_PAGESIZE
+      #endif
+    #endif
+    #ifdef _SC_PAGE_SIZE
+      #define MEM_PAGESIZE sysconf(_SC_PAGE_SIZE)
+    #elif defined(BSD) || defined(DGUX) || defined(R_HAVE_GETPAGESIZE)
+      extern size_t getpagesize();
+      #define MEM_PAGESIZE getpagesize()
+    #else
+      #include <sys/param.h>
+      #ifdef EXEC_PAGESIZE
+        #define MEM_PAGESIZE EXEC_PAGESIZE
+      #elif defined(NBPG)
+        #ifndef CLSIZE
+          #define MEM_PAGESIZE NBPG
+        #else
+          #define MEM_PAGESIZE (NBPG * CLSIZE)
+        #endif
+      #elif defined(NBPC)
+          #define MEM_PAGESIZE NBPC
+      #elif defined(PAGESIZE)
+        #define MEM_PAGESIZE PAGESIZE
+      #endif
+    #endif
+    #include <sys/types.h>
+    #include <sys/mman.h>
+    #include <sys/resource.h>
+    #if defined(__MACH__) && defined(__APPLE__)
+      #include <mach/vm_statistics.h>
+      #include <mach/vm_prot.h>
+    #endif
+    #ifndef MAP_ANON
+      #define MAP_ANON MAP_ANONYMOUS
+    #endif
+    #define HAS_MMAP
+  #endif // _WIN32
+#endif // R_WITH_LIBC
+#ifndef MEM_PAGESIZE
+  // fallback value (should match wasm32)
+  #define MEM_PAGESIZE ((usize)4096U)
 #endif
 
 
@@ -77,7 +129,7 @@ void unmapfile(void* p, usize len) {
   #endif
 }
 
-rerror read_stdin_data(rmem* m, usize maxlen, void** p_put, usize* len_out) {
+rerror read_stdin_data(rmem m, usize maxlen, void** p_put, usize* len_out) {
   *len_out = 0;
   #ifdef R_WITH_LIBC
     if (isatty(0))
@@ -333,4 +385,118 @@ void abuf_fmt(abuf* s, const char* fmt, ...) {
 
 bool abuf_endswith(const abuf* s, const char* str, usize len) {
   return s->len >= len && memcmp(s->p - len, str, len) == 0;
+}
+
+
+NORETURN void _panic(const char* file, int line, const char* fun, const char* fmt, ...) {
+  #ifdef R_WITH_LIBC
+    FILE* fp = stderr;
+    flockfile(fp);
+    fprintf(fp, "\npanic: ");
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(fp, fmt, ap);
+    va_end(ap);
+    fprintf(fp, " in %s at %s:%d\n", fun, file, line);
+    void* buf[32];
+    int framecount = backtrace(buf, countof(buf));
+    if (framecount > 1) {
+      char** strs = backtrace_symbols(buf, framecount);
+      if (strs != NULL) {
+        for (int i = 1; i < framecount; ++i) {
+          fwrite(strs[i], strlen(strs[i]), 1, fp);
+          fputc('\n', fp);
+        }
+        free(strs);
+      } else {
+        fflush(fp);
+        backtrace_symbols_fd(buf, framecount, fileno(fp));
+      }
+    }
+    funlockfile(fp);
+    fflush(fp);
+    fsync(STDERR_FILENO);
+  #else
+    log("panic");
+  #endif
+  abort();
+}
+
+
+usize mem_pagesize() {
+  return MEM_PAGESIZE;
+}
+
+
+void* nullable vmem_alloc(usize nbytes) {
+  #ifndef HAS_MMAP
+    return NULL;
+  #else
+    if (nbytes == 0)
+      return NULL;
+
+    #if defined(DEBUG) && defined(HAS_MPROTECT)
+      usize nbytes2;
+      if (check_add_overflow(nbytes, MEM_PAGESIZE, &nbytes2)) {
+        // nbytes too large
+        nbytes2 = 0;
+      } else {
+        nbytes += MEM_PAGESIZE;
+      }
+    #endif
+
+    #if defined(__MACH__) && defined(__APPLE__) && defined(VM_PROT_DEFAULT)
+      // vm_map_entry_is_reusable uses VM_PROT_DEFAULT as a condition for page reuse.
+      // See http://fxr.watson.org/fxr/source/osfmk/vm/vm_map.c?v=xnu-2050.18.24#L10705
+      int mmapprot = VM_PROT_DEFAULT;
+    #else
+      int mmapprot = PROT_READ | PROT_WRITE;
+    #endif
+
+    int mmapflags = MAP_PRIVATE | MAP_ANON
+      #ifdef MAP_NOCACHE
+      | MAP_NOCACHE // don't cache pages for this mapping
+      #endif
+      #ifdef MAP_NORESERVE
+      | MAP_NORESERVE // don't reserve needed swap area
+      #endif
+    ;
+
+    // note: VM_FLAGS_PURGABLE implies a 2GB allocation limit on macos 10
+    // #if defined(__MACH__) && defined(__APPLE__) && defined(VM_FLAGS_PURGABLE)
+    //   int fd = VM_FLAGS_PURGABLE; // Create a purgable VM object for new VM region
+    // #else
+    int fd = -1;
+
+    void* ptr = mmap(0, nbytes, mmapprot, mmapflags, fd, 0);
+    if UNLIKELY(ptr == MAP_FAILED)
+      return NULL;
+
+    // protect the last page from access to cause a crash on out of bounds access
+    #if defined(DEBUG) && defined(HAS_MPROTECT)
+      if (nbytes2 != 0) {
+        const usize pagesize = MEM_PAGESIZE;
+        assert(nbytes > pagesize);
+        void* protPagePtr = ptr;
+        protPagePtr = &((u8*)ptr)[nbytes - pagesize];
+        int status = mprotect(protPagePtr, pagesize, PROT_NONE);
+        if LIKELY(status == 0) {
+          *nbytes = nbytes - pagesize;
+        } else {
+          dlog("mprotect failed");
+        }
+      }
+    #endif
+
+    return ptr;
+  #endif // HAS_MMAP
+}
+
+
+bool vmem_free(void* ptr, usize nbytes) {
+  #ifdef HAS_MMAP
+    return munmap(ptr, nbytes) == 0;
+  #else
+    return false;
+  #endif
 }

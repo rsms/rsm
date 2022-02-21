@@ -1,6 +1,83 @@
 #pragma once
-#include "prelude.h"
-R_ASSUME_NONNULL_BEGIN
+#ifdef __cplusplus
+  #error no C++ support
+#endif
+#ifndef RSM_NO_INT_DEFS
+typedef _Bool bool;
+#define true  ((bool)1)
+#define false ((bool)0)
+typedef signed char         i8;
+typedef unsigned char       u8;
+typedef signed short        i16;
+typedef unsigned short      u16;
+typedef signed int          i32;
+typedef unsigned int        u32;
+typedef signed long long    i64;
+typedef unsigned long long  u64;
+typedef float               f32;
+typedef double              f64;
+typedef unsigned int        uint;
+typedef signed long         isize;
+typedef unsigned long       usize;
+#ifdef __INTPTR_TYPE__
+  typedef __INTPTR_TYPE__   intptr;
+  typedef __UINTPTR_TYPE__  uintptr;
+#else
+  typedef signed long       intptr;
+  typedef unsigned long     uintptr;
+#endif
+#endif // RSM_NO_INT_DEFS
+
+#ifndef NULL
+  #define NULL ((void*)0)
+#endif
+#if defined(__clang__) && __has_feature(nullability)
+  #ifndef nullable
+    #define nullable _Nullable
+  #endif
+  #define RSM_ASSUME_NONNULL_BEGIN \
+    _Pragma("clang diagnostic push")  \
+    _Pragma("clang diagnostic ignored \"-Wnullability-completeness\"") \
+    _Pragma("clang diagnostic ignored \"-Wnullability-inferred-on-nested-type\"")
+    _Pragma("clang assume_nonnull begin")
+  #define RSM_ASSUME_NONNULL_END \
+    _Pragma("clang diagnostic pop")
+    _Pragma("clang assume_nonnull end")
+#else
+  #ifndef nullable
+    #define nullable
+  #endif
+  #define RSM_ASSUME_NONNULL_BEGIN
+  #define RSM_ASSUME_NONNULL_END
+#endif
+
+// END_TYPED_ENUM(NAME) should be placed at an enum that has a matching integer typedef
+#if __has_attribute(__packed__)
+  #define RSM_END_ENUM(NAME)     \
+    __attribute__((__packed__)); \
+    _Static_assert(sizeof(enum NAME) <= sizeof(NAME), "too many " #NAME " values");
+#else
+  #define RSM_END_ENUM(NAME) ;
+#endif
+#if __has_attribute(warn_unused_result)
+  #define RSM_WARN_UNUSED_RESULT __attribute__((warn_unused_result))
+#else
+  #define RSM_WARN_UNUSED_RESULT
+#endif
+#if __has_attribute(malloc)
+  #define RSM_ATTR_MALLOC __attribute__((malloc))
+#else
+  #define RSM_ATTR_MALLOC
+#endif
+#if __has_attribute(alloc_size)
+  #define RSM_ATTR_ALLOC_SIZE(args...) __attribute__((alloc_size(args)))
+#else
+  #define RSM_ATTR_ALLOC_SIZE(...)
+#endif
+
+// --------------------------------------------------------------------------------------
+// begin main interface
+RSM_ASSUME_NONNULL_BEGIN
 
 // Instructions are fixed-size at 32 bits long, little endian.
 // PC and jump- & branch destinations are expressed in #instructions rather than bytes.
@@ -62,87 +139,6 @@ _( BRNZ  , ABs  , "brnz"  /* if R(A)!=0 goto instr({R(B),PC+Bs}) */)\
 \
 _( RET   , _    , "ret" /* return */)\
 // end RSM_FOREACH_OP
-
-typedef u8 rop; // rop, rop_* -- opcode
-enum rop {
-  #define _(name, ...) rop_##name,
-  RSM_FOREACH_OP(_)
-  #undef _
-  RSM_OP_COUNT,
-} END_TYPED_ENUM(rop)
-
-// types
-#define RSM_FOREACH_TYPE(_) \
-/* name, bitsize */ \
-_( void, 0  ) \
-_( i1,   1  ) \
-_( i8,   8  ) \
-_( i16,  16 ) \
-_( i32,  32 ) \
-_( i64,  64 ) \
-_( f32,  32 ) \
-_( f64,  64 ) \
-_( ptr,  64 ) \
-// end RSM_FOREACH_TYPE
-
-// rtype, rt_* -- type code
-typedef u8 rtype;
-enum rtype {
-  #define _(name, ...) rt_##name,
-  RSM_FOREACH_TYPE(_)
-  #undef _
-} END_TYPED_ENUM(rtype)
-
-// rmem is a memory allocator
-typedef struct rmem rmem;
-struct rmem {
-  void* buf; // memory buffer
-  usize len; // number of bytes used up in the memory buffer
-  usize cap; // memory buffer size in bytes
-  u32   flags;
-};
-
-// rdiag is a diagnostic report
-typedef struct rdiag rdiag;
-struct rdiag {
-  int         code;      // error code (1=error, 0=warning)
-  const char* msg;       // descriptive message including "srcname:line:col: type:"
-  const char* msgshort;  // short descriptive message without source location
-  const char* srcname;   // eg filename
-  u32         line, col; // origin (0 if unknown or not line-specific)
-};
-// rdiaghandler is called with a diagnostict report.
-// Return false to stop the process (e.g. stop assembling.)
-typedef bool(*rdiaghandler)(const rdiag*, void* nullable userdata);
-
-// rasmctx holds information of an assembly session
-typedef struct rasmctx rasmctx;
-struct rasmctx {
-  rmem*          mem;         // memory allocator
-  const char*    srcdata;     // input source bytes
-  usize          srclen;      // length of srcdata
-  const char*    srcname;     // symbolic name of source (e.g. filename)
-  u32            errcount;    // number of errors reported
-  rdiag          diag;        // last diagnostic report
-  rdiaghandler   diaghandler; // diagnostic report callback
-  void* nullable userdata;    // passed along to diaghandler
-  // internal fields
-  char _diagmsg[128]; // storage for diag.msg
-  bool _stop;         // negated diaghandler return value
-};
-
-//        ┌─────────────────┬─────────┬─────────┬─────────┬───────────────┐
-//  bit   │3 3 2 2 2 2 2 2 2│2 2 2 1 1│1 1 1 1 1│1 1 1    │               │
-//        │1 0 9 8 7 6 5 4 3│2 1 0 9 8│7 6 5 4 3│2 1 0 9 8│7 6 5 4 3 2 1 0│
-//        ├───────────────┬─┼─────────┼─────────┼─────────┼───────────────┤
-//  ABCD  │         D (8) │i│  C (5)  │  B (5)  │  A (5)  │     OP (8)    │
-//        ├───────────────┴─┴───────┬─┼─────────┼─────────┼───────────────┤
-//  ABCw  │                  C (13) │i│  B (5)  │  A (5)  │     OP (8)    │
-//        ├─────────────────────────┴─┴───────┬─┼─────────┼───────────────┤
-//  ABw   │                            B (18) │i│  A (5)  │     OP (8)    │
-//        ├───────────────────────────────────┴─┴───────┬─┼───────────────┤
-//  Aw    │                                      A (23) │i│     OP (8)    │
-//        └─────────────────────────────────────────────┴─┴───────────────┘
 
 // size and position of instruction arguments
 #define RSM_SIZE_OP  8
@@ -255,13 +251,60 @@ struct rasmctx {
 #define RSM_MAKE_ABCs(op,a,b,c)    RSM_MAKE_ABCu(op,a,b,((rinstr)(c)) + (RSM_MAX_Cw / 2))
 #define RSM_MAKE_ABCDs(op,a,b,c,d) RSM_MAKE_ABCDu(op,a,b,c,((rinstr)(d)) + (RSM_MAX_Dw / 2))
 
-const char* rop_name(rop); // name of an opcode
-const char* rtype_name(rtype); // name of a type constant
+// rop, rop_* -- opcode
+typedef u8 rop;
+enum rop {
+  #define _(name, ...) rop_##name,
+  RSM_FOREACH_OP(_)
+  #undef _
+  RSM_OP_COUNT,
+} RSM_END_ENUM(rop)
 
-// rsm_asm assembles instructions from source text src. Allocates *res in ctx->mem.
+// rmem is a memory allocator
+typedef struct rmem rmem;
+struct rmem {
+  // a(s,NULL,0,>0) = new, a(s,p,>0,>0) = resize, a(s,p,>0,0) = free.
+  void* nullable (*a)(void* state, void* nullable p, usize oldsize, usize newsize);
+  void* state;
+};
+
+// rdiag is a diagnostic report
+typedef struct rdiag rdiag;
+struct rdiag {
+  int         code;      // error code (1=error, 0=warning)
+  const char* msg;       // descriptive message including "srcname:line:col: type:"
+  const char* msgshort;  // short descriptive message without source location
+  const char* srcname;   // eg filename
+  u32         line, col; // origin (0 if unknown or not line-specific)
+};
+// rdiaghandler is called with a diagnostict report.
+// Return false to stop the process (e.g. stop assembling.)
+typedef bool(*rdiaghandler)(const rdiag*, void* nullable userdata);
+
+// rcomp represents a compilation session
+typedef struct rcomp rcomp;
+struct rcomp {
+  rmem           mem;         // memory allocator
+  const char*    srcdata;     // input source bytes
+  usize          srclen;      // length of srcdata
+  const char*    srcname;     // symbolic name of source (e.g. filename)
+  u32            errcount;    // number of errors reported
+  rdiag          diag;        // last diagnostic report
+  rdiaghandler   diaghandler; // diagnostic report callback
+  void* nullable userdata;    // passed along to diaghandler
+  // internal fields
+  char _diagmsg[128]; // storage for diag.msg
+  bool _stop;         // negated diaghandler return value
+};
+
+// rop_name returns the name of an opcode
+const char* rop_name(rop);
+
+// rsm_compile compiles assembly source text into vm bytecode.
+// Uses ctx->mem for temporary storage, allocates *resp in resm.
 // ctx can be reused with multiple calls.
-// Returns the number of instructions at *res on success, or 0 on failure.
-usize rsm_asm(rasmctx* ctx, rinstr** res);
+// Returns the number of instructions at *resp on success, or 0 on failure.
+usize rsm_compile(rcomp* ctx, rmem resm, rinstr** resp);
 
 // rsm_vmexec executes a program, starting with instruction inv[0]
 void rsm_vmexec(u64* iregs, u32* inv, u32 inc);
@@ -276,31 +319,38 @@ void rsm_vmexec(u64* iregs, u32* inv, u32 inc);
 usize rsm_fmtprog(char* buf, usize bufcap, rinstr* nullable ip, usize ilen);
 usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in);
 
-// rmem
-// RMEM_MIN -- minimum amount of memory (in bytes) that rmem_init accepts
-#define RMEM_MIN   (sizeof(rmem)*2)
-#define RMEM_ALIGN sizeof(void*)  // must be pow2
-rmem* rmem_make(void* buf, usize size); // create in buf
-rmem* nullable rmem_makevm(usize size); // create in system-managed virtual memory
-void rmem_release(rmem* m); // frees vmem if rmem_new was used
-#define rmem_align_size(nbyte) ALIGN2((nbyte),RMEM_ALIGN)
-#define rmem_align_addr(addr)  ALIGN2_FLOOR((uintptr)(addr),RMEM_ALIGN)
-#define rmem_allocz(m, size)   _rmem_allocz((m), rmem_align_size(size))
-#define rmem_alloc             rmem_allocz
-void* _rmem_allocz(rmem* m, usize size)
-  ATTR_MALLOC ATTR_ALLOC_SIZE(2) WARN_UNUSED_RESULT;
-void* rmem_alloczv(rmem* m, usize elemsize, usize count)
-  ATTR_MALLOC ATTR_ALLOC_SIZE(2, 3) WARN_UNUSED_RESULT;
-inline static void rmem_free(void* p) {}
-void* nullable rmem_resize(rmem* m, void* p, usize oldsize, usize newsize)
-  ATTR_ALLOC_SIZE(3) WARN_UNUSED_RESULT;
-void* rmem_dup(rmem* m, const void* p, usize len);
-#define rmem_strdup(m, cstr) ((char*)rmem_dup((m),(cstr),strlen(cstr)))
-// rmem_vmalloc allocates nbytes of virtual memory. Returns NULL on failure.
-void* nullable rmem_vmalloc(usize nbytes);
-usize rmem_vmpagesize();
-// rmem_vmfree frees memory allocated with rmem_vmalloc
-bool rmem_vmfree(void* ptr, usize nbytes);
+// rmem_mkbufalloc creates an allocator that uses size-RMEM_MK_MIN bytes from buf
+rmem rmem_mkbufalloc(void* buf, usize size);
 
+// rmem_mkvmalloc creates an allocator backed by a slab of system-managed virtual memory.
+// If size=0, a very large allocation is created (~4GB).
+// On failure, the returned allocator is {NULL,NULL}.
+rmem rmem_mkvmalloc(usize size);
 
-R_ASSUME_NONNULL_END
+// rmem_freealloc frees an allocator created with a rmem_mk*alloc function
+void rmem_freealloc(rmem m);
+
+// RMEM_MK_MIN is the minimum size for rmem_mk*alloc functions
+#define RMEM_MK_MIN (sizeof(void*)*4)
+
+// memory allocation interface
+static void* nullable rmem_alloc(rmem m, usize size);
+static void* nullable rmem_resize(rmem m, void* p, usize oldsize, usize newsize);
+static void rmem_free(rmem m, void* p, usize size);
+
+RSM_ATTR_MALLOC RSM_ATTR_ALLOC_SIZE(2) RSM_WARN_UNUSED_RESULT
+inline static void* nullable rmem_alloc(rmem m, usize size) {
+  return m.a(m.state, NULL, 0, size);
+}
+RSM_ATTR_MALLOC RSM_ATTR_ALLOC_SIZE(4) RSM_WARN_UNUSED_RESULT
+inline static void* nullable rmem_resize(rmem m, void* p, usize oldsize, usize newsize) {
+  return m.a(m.state, p, oldsize, newsize);
+}
+inline static void rmem_free(rmem m, void* p, usize size) {
+  #if __has_attribute(unused)
+  __attribute__((unused))
+  #endif
+  void* _ = m.a(m.state,p,size,0);
+}
+
+RSM_ASSUME_NONNULL_END

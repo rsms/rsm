@@ -1,4 +1,4 @@
-#include "rsm.h"
+#include "rsmimpl.h"
 
 #ifdef DEBUG
   static void logstate_header() {

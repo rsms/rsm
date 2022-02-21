@@ -1,5 +1,4 @@
-#include "rsm.h"
-#include "util.h"
+#include "rsmimpl.h"
 
 // diaghandler is called by the assembler when an error occurs
 static bool diaghandler(const rdiag* d, void* userdata) {
@@ -13,12 +12,13 @@ static void usage(const char* prog) {
 
 
 #ifdef DEBUG
-UNUSED static void test_stuff() {
-  rmem* m = rmem_makevm(4096*1000);
+ATTR_UNUSED static void test_stuff() {
+  rmem mem = rmem_mkvmalloc(4096*1000);
   char buf[512]; // for logging stuff
   u64 iregs[32] = {0};
 
-  rinstr* ip = rmem_allocz(m, sizeof(rinstr)*32);
+  rinstr* ip = rmem_alloc(mem, sizeof(rinstr)*32);
+  memset(ip, 0, sizeof(rinstr)*32);
   u32 pc = 0;
   // fun factorial (i32) i32
   //   b0:              //
@@ -70,15 +70,15 @@ UNUSED static void test_stuff() {
     // //   U+1F469 woman, U+1F3FE skin tone mod 5, U+200D zwj, U+1F680 rocket = astronaut
     // "    \xF0\x9F\x91\xA9\xF0\x9F\x8F\xBE\xE2\x80\x8D\xF0\x9F\x9A\x80\n"
   ;
-  rasmctx actx = {
-    .mem         = m,
+  rcomp comp = {
+    .mem         = mem,
     .srcdata     = src,
     .srclen      = strlen(src),
     .srcname     = "factorial",
     .diaghandler = diaghandler,
   };
   rinstr* iv = NULL;
-  usize icount = rsm_asm(&actx, &iv);
+  usize icount = rsm_compile(&comp, mem, &iv);
   rsm_fmtprog(buf, sizeof(buf), iv, icount);
   if (!icount)
     return;
@@ -109,24 +109,23 @@ int main(int argc, const char** argv) {
     }
   }
 
-  rmem* m = rmem_makevm(4096*1000);
-  char buf[512]; // for logging stuff
-  rasmctx actx = {
-    .mem         = m,
+  rmem mem = rmem_mkvmalloc(0);
+  rcomp comp = {
+    .mem         = mem,
     .srcname     = "stdin",
     .diaghandler = diaghandler,
   };
 
   // open input file or read stdin
   if (argc > 1) {
-    actx.srcname = argv[1];
-    rerror err = mmapfile(argv[1], (void**)&actx.srcdata, &actx.srclen);
+    comp.srcname = argv[1];
+    rerror err = mmapfile(argv[1], (void**)&comp.srcdata, &comp.srclen);
     if (err != 0) {
       log("%s: %s", argv[1], rerror_str(err));
       return 1;
     }
   } else {
-    rerror err = read_stdin_data(m, 1024*1024, (void**)&actx.srcdata, &actx.srclen);
+    rerror err = read_stdin_data(mem, 1024*1024, (void**)&comp.srcdata, &comp.srclen);
     if (err) { // stdin is a tty
       if (err == rerr_badfd) {
         usage(argv[0]);
@@ -139,17 +138,24 @@ int main(int argc, const char** argv) {
 
   // compile
   rinstr* iv = NULL;
-  usize icount = rsm_asm(&actx, &iv);
-  if (actx.errcount)
+  usize icount = rsm_compile(&comp, mem, &iv);
+  if (comp.errcount)
     return 1;
   if (icount == 0) {
     log("empty program");
     return 1;
   }
-  rsm_fmtprog(buf, sizeof(buf), iv, icount);
+
+  // log vm assembly
+  char* buf = rmem_alloc(mem, 128);
+  usize n = rsm_fmtprog(buf, 512, iv, icount);
+  if (n >= 512) {
+    buf = rmem_alloc(mem, n) + 1;
+    rsm_fmtprog(buf, n, iv, icount);
+  }
   log("assembled some sweet vm code:\n%s", buf);
 
-  // eval
+  // execute first function
   log("evaluating function0(%lld)", (i64)iregs[0]);
   rsm_vmexec(iregs, iv, icount);
   log("result R0..R7: %llu %llu %llu %llu %llu %llu %llu %llu",

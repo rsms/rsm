@@ -1,3 +1,4 @@
+// buffer-backed memory allocator
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
 
@@ -10,13 +11,9 @@ struct bufalloc {
   void* buf; // memory buffer
   usize len; // number of bytes used up in the memory buffer
   usize cap; // memory buffer size in bytes
-  u32   flags;
+  bool  ismmap;
 };
 static_assert(sizeof(bufalloc) <= RMEM_MK_MIN, "");
-
-// bufalloc.flags
-#define F_VM (1 << 0) // m->buf is part of the system's virtual memory
-
 
 inline static bool ba_istail(bufalloc* a, void* p, usize size) {
   return a->buf + a->len == p + size;
@@ -68,13 +65,13 @@ static void* nullable ba_alloc(void* state, void* nullable p, usize oldsize, usi
   return p2;
 }
 
-static rmem ba_make(void* buf, usize size, u32 flags) {
+static rmem ba_make(void* buf, usize size, bool ismmap) {
   assert(size >= RMEM_MK_MIN);
   bufalloc* a = buf;
   a->buf = buf;
   a->cap = size;
   a->len = ALIGN2(sizeof(*a), RMEM_ALIGN);
-  a->flags = flags;
+  a->ismmap = ismmap;
   return (rmem){&ba_alloc, a};
 }
 
@@ -88,7 +85,7 @@ rmem rmem_mkbufalloc(void* buf, usize size) {
     }
     buf = (void*)addr;
   }
-  return ba_make(buf, size, 0);
+  return ba_make(buf, size, false);
 }
 
 rmem rmem_mkvmalloc(usize size) {
@@ -99,7 +96,7 @@ rmem rmem_mkvmalloc(usize size) {
     for (;;) {
       void* buf = vmem_alloc(size);
       if LIKELY(buf != NULL)
-        return ba_make(buf, size, F_VM);
+        return ba_make(buf, size, true);
       if (size <= 0xffff) // we weren't able to allocate 16kB; give up
         return (rmem){0,0};
       // try again with half the size
@@ -113,14 +110,14 @@ rmem rmem_mkvmalloc(usize size) {
     size += pagesize - rem;
   void* buf = vmem_alloc(size);
   if LIKELY(buf != NULL)
-    return ba_make(buf, size, F_VM);
+    return ba_make(buf, size, true);
 
   return (rmem){0,0};
 }
 
 void rmem_freealloc(rmem m) {
   bufalloc* a = m.state;
-  if (a->flags & 1) {
+  if (a->ismmap) {
     void* buf = a->buf;
     usize cap = a->cap;
     #if DEBUG

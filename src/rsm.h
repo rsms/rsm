@@ -12,27 +12,12 @@
     #define true  ((bool)1)
     #define false ((bool)0)
   #endif
-  typedef signed char         i8;
-  typedef unsigned char       u8;
-  typedef signed short        i16;
-  typedef unsigned short      u16;
-  typedef signed int          i32;
-  typedef unsigned int        u32;
-  typedef signed long long    i64;
-  typedef unsigned long long  u64;
-  typedef float               f32;
-  typedef double              f64;
-  typedef unsigned int        uint;
-  typedef signed long         isize;
-  typedef unsigned long       usize;
-  #ifdef __INTPTR_TYPE__
-    typedef __INTPTR_TYPE__   intptr;
-    typedef __UINTPTR_TYPE__  uintptr;
-  #else
-    typedef signed long       intptr;
-    typedef unsigned long     uintptr;
-  #endif
-#endif // RSM_NO_INT_DEFS
+  typedef unsigned char      u8;
+  typedef unsigned int       u32;
+  typedef unsigned long long u64;
+  typedef signed long        isize;
+  typedef unsigned long      usize;
+#endif
 
 #ifndef __has_attribute
   #define __has_attribute(x)  0
@@ -48,13 +33,13 @@
   #ifndef nullable
     #define nullable _Nullable
   #endif
-  #define RSM_ASSUME_NONNULL_BEGIN \
-    _Pragma("clang diagnostic push")  \
-    _Pragma("clang diagnostic ignored \"-Wnullability-completeness\"") \
-    _Pragma("clang diagnostic ignored \"-Wnullability-inferred-on-nested-type\"")
+  #define RSM_ASSUME_NONNULL_BEGIN                                                \
+    _Pragma("clang diagnostic push")                                              \
+    _Pragma("clang diagnostic ignored \"-Wnullability-completeness\"")            \
+    _Pragma("clang diagnostic ignored \"-Wnullability-inferred-on-nested-type\"") \
     _Pragma("clang assume_nonnull begin")
-  #define RSM_ASSUME_NONNULL_END \
-    _Pragma("clang diagnostic pop")
+  #define RSM_ASSUME_NONNULL_END    \
+    _Pragma("clang diagnostic pop") \
     _Pragma("clang assume_nonnull end")
 #else
   #ifndef nullable

@@ -7,6 +7,27 @@
 #endif
 #include "rsm.h"
 
+typedef signed char         i8;
+typedef unsigned char       u8;
+typedef signed short        i16;
+typedef unsigned short      u16;
+typedef signed int          i32;
+typedef unsigned int        u32;
+typedef signed long long    i64;
+typedef unsigned long long  u64;
+typedef float               f32;
+typedef double              f64;
+typedef unsigned int        uint;
+typedef signed long         isize;
+typedef unsigned long       usize;
+#ifdef __INTPTR_TYPE__
+  typedef __INTPTR_TYPE__   intptr;
+  typedef __UINTPTR_TYPE__  uintptr;
+#else
+  typedef signed long       intptr;
+  typedef unsigned long     uintptr;
+#endif
+
 #define I8_MAX    0x7f
 #define I16_MAX   0x7fff
 #define I32_MAX   0x7fffffff

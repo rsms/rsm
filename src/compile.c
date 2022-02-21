@@ -1116,7 +1116,7 @@ static void genassign(gstate* g, node* n) {
   return genop(g, n);
 }
 
-static void genblock(gstate* g, node* block) {
+static void genblock(gstate* g, node* block, bool islastblock) {
   assert(block->t == T_LABEL);
   assertf(g->llen < g->lcap, "TODO grow lv if needed");
 
@@ -1148,6 +1148,12 @@ static void genblock(gstate* g, node* block) {
       case T_EQ: genassign(g, cn); break;
       default: errf(g->c, cn->line, cn->col, "invalid block element %s", tokname(cn->t));
     }
+    if (islastblock && cn->next == NULL && (cn->t != T_OP || cn->ival != rop_RET)) {
+      // make sure the last instruction of the last block of a function is "ret".
+      // TODO: either synthesize a ret (and maybe emit a warning)
+      errf(g->c, cn->line, cn->col,
+        "function does not end with a %s instruction", rop_name(rop_RET));
+    }
   }
 }
 
@@ -1161,8 +1167,9 @@ static void genfun(gstate* g, node* fun) {
   assertf(g->flen < g->fcap, "TODO grow fv if needed");
   g->fv[g->flen++] = g->ilen; // record function's "position"
   g->llen = 0; // clear label mappings from any past functions
-  for (node* cn = body->list.head; cn; cn = cn->next)
-    genblock(g, cn);
+  for (node* cn = body->list.head; cn; cn = cn->next) {
+    genblock(g, cn, cn->next == NULL);
+  }
 }
 
 // --- main functions

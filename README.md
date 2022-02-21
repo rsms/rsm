@@ -34,42 +34,51 @@ You'll need the following things to build rsm:
 - [ninja](https://ninja-build.org) (or a ninja-compatible program like [samurai](https://github.com/michaelforney/samurai))
 - C11 compiler with libc (e.g. clang or GCC)
 
+You can use `rsm` as a really awkward calculator:
+
+```sh
+$ echo 'fun x() { R0 = R0 * 2; ret; }' | out/rsm - 123
+assembled some sweet vm code:
+   0  mul R0  R0  0x2
+   1  ret
+evaluating function0(123)
+result R0..R7: 246 0 0 0 0 0 0 0
+```
+
+If you're a bit crazy you can also embed it by copying the source files
+into your project and using the API in `rsm.h`.
 
 ## Example
 
-Factorial using explicit registers and named locals
-
-```
-fun factorial (i32) i32
-  b0:              //
-    r8 = r0        // ACC = n (n is in r0, argument 0)
-    r0 = 1         // RES (return value 0)
-    ifz r8 end     // if n==0 goto end
-  b1:              // <- [b0] b1  ("[b]=implicit/fallthrough")
-    r0 = mul r8 r0 // RES = ACC * RES
-    r8 = sub r8 1  // ACC = ACC - 1
-    ifnz r8 b1     // if n!=0 goto b1
+```sh
+$ cat <<EXAMPLE > example.rsm
+fun factorial (i32) i32 {
+    R1 = R0        // ACC = n (argument 0)
+    R0 = 1         // RES (return value 0)
+    brz R1 end     // if n==0 goto end
+  b1:              // <- [b0] b1
+    R0 = mul R1 R0 // RES = ACC * RES
+    R1 = sub R1 1  // ACC = ACC - 1
+    brnz R1  b1    // if n!=0 goto b1
   end:             // <- b0 [b1]
-    ret            // RES is at r0
-```
-
-```
-fun factorial (n i32) i32
-  var ACC i32         // accumulator
-  var RES i32         // result
-  b0:                 //
-    ifz n end         // if n==0 goto end
-    ACC = n           // initialize ACC to n
-    RES = 1           // initialize RES to 1
-  b1:                 // <- [b0] b1  ("[b]=implicit/fallthrough")
-    RES = mul ACC RES // RES = ACC * RES
-    ACC = sub ACC 1   // ACC = ACC - 1
-    ifnz ACC b1       // if n!=0 goto b1
-  end:                // <- b0 [b1]
-    ret RES
+    ret            // RES is at R0
+}
+EXAMPLE
+$ out/rsm example.rsm 15
+assembled some sweet vm code:
+   0  move   R1   R0
+   1  move   R0   0x1
+   2  brz    R1   3
+   3  mul    R0   R1   R0
+   4  sub    R1   R1   0x1
+   5  brnz   R1   -3
+   6  ret
+evaluating function0(15)
+result R0..R7: 1307674368000 0 0 0 0 0 0 0
 ```
 
 
+<a name="isa"></a>
 ## Instruction Set Architecture
 
 Instructions are fixed-size, 32 bits wide, little endian.

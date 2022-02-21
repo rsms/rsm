@@ -9,7 +9,7 @@
 // 4. generates code (our vm instructions)
 
 //#define LOG_TOKENS /* define to log() token scanning */
-#define LOG_AST /* define to log() parsed top-level ast nodes */
+//#define LOG_AST /* define to log() parsed top-level ast nodes */
 
 // source tokens
 typedef u8 rtok;

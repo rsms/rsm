@@ -119,7 +119,7 @@ int main(int argc, const char** argv) {
   };
 
   // open input file or read stdin
-  if (argc > 1) {
+  if (argc > 1 && strcmp(argv[1], "-") != 0) {
     comp.srcname = argv[1];
     rerror err = mmapfile(argv[1], (void**)&comp.srcdata, &comp.srclen);
     if (err != 0) {

@@ -2,8 +2,73 @@
 
 #ifdef R_WITH_LIBC
   #include <stdio.h>
+  #include <fcntl.h>
+  #include <errno.h>
+  #include <unistd.h>
+  #include <sys/stat.h>
+  #include <sys/mman.h>
 #endif
 
+
+const char* rerror_str(rerror e) {
+  switch ((enum rerror)e) {
+  case rerr_ok:            return "(no error)";
+  case rerr_invalid:       return "invalid data or argument";
+  case rerr_sys_op:        return "invalid syscall op or syscall op data";
+  case rerr_badfd:         return "invalid file descriptor";
+  case rerr_bad_name:      return "invalid or misformed name";
+  case rerr_not_found:     return "resource not found";
+  case rerr_name_too_long: return "name too long";
+  case rerr_canceled:      return "operation canceled";
+  case rerr_not_supported: return "not supported";
+  case rerr_exists:        return "already exists";
+  case rerr_end:           return "end of resource";
+  case rerr_access:        return "permission denied";
+  case rerr_nomem:         return "cannot allocate memory";
+  case rerr_mfault:        return "bad memory address";
+  case rerr_overflow:      return "value too large";
+  }
+  return "(unknown error)";
+}
+
+
+static rerror rerror_errno(int e) {
+  switch (e) {
+    case 0: return 0;
+    case EACCES: return rerr_access;
+    case EEXIST: return rerr_exists;
+    case ENOENT: return rerr_not_found;
+    case EBADF:  return rerr_badfd;
+    default: return rerr_invalid;
+  }
+}
+
+
+rerror mmapfile(const char* filename, void** p_put, usize* len_out) {
+  int fd = open(filename, O_RDONLY);
+  if (fd < 0)
+    return rerror_errno(errno);
+
+  struct stat st;
+  if (fstat(fd, &st) != 0) {
+    rerror err = rerror_errno(errno);
+    close(fd);
+    return err;
+  }
+  *len_out = (usize)st.st_size;
+
+  void* p = mmap(0, (usize)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+  close(fd);
+  if (p == MAP_FAILED)
+    return rerr_nomem;
+
+  *p_put = p;
+  return 0;
+}
+
+void unmapfile(void* p, usize len) {
+  munmap(p, len);
+}
 
 static char* strrevn(char* s, usize len) {
   for (usize i = 0, j = len - 1; i < j; i++, j--) {
@@ -27,6 +92,43 @@ usize stru64(char buf[64], u64 v, u32 base) {
   p--;
   strrevn(buf, len);
   return len;
+}
+
+rerror parseu64(const char* src, usize srclen, int base, u64* result, u64 cutoff) {
+  assert(base >= 2 && base <= 36);
+  const char* s = src;
+  const char* end = src + srclen;
+  u64 acc = 0;
+  u64 cutlim = cutoff % base;
+  cutoff /= base;
+  int any = 0;
+  for (char c = *s; s != end; c = *++s) {
+    if (isdigit(c)) {
+      c -= '0';
+    } else if (isupper(c)) {
+      c -= 'A' - 10;
+    } else if (islower(c)) {
+      c -= 'a' - 10;
+    } else {
+      return rerr_invalid;
+    }
+    if (c >= base)
+      return rerr_invalid;
+    if (any < 0 || acc > cutoff || (acc == cutoff && (u64)c > cutlim)) {
+      any = -1;
+    } else {
+      any = 1;
+      acc *= base;
+      acc += c;
+    }
+  }
+  if (any < 0 || // more digits than what fits in acc
+      any == 0)
+  {
+    return rerr_overflow;
+  }
+  *result = acc;
+  return 0;
 }
 
 // logbin is a little debug/development function which logs a number

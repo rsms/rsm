@@ -130,13 +130,26 @@ struct rasmctx {
   bool _stop;         // negated diaghandler return value
 };
 
+//        ┌─────────────────┬─────────┬─────────┬─────────┬───────────────┐
+//  bit   │3 3 2 2 2 2 2 2 2│2 2 2 1 1│1 1 1 1 1│1 1 1    │               │
+//        │1 0 9 8 7 6 5 4 3│2 1 0 9 8│7 6 5 4 3│2 1 0 9 8│7 6 5 4 3 2 1 0│
+//        ├───────────────┬─┼─────────┼─────────┼─────────┼───────────────┤
+//  ABCD  │         D (8) │i│  C (5)  │  B (5)  │  A (5)  │     OP (8)    │
+//        ├───────────────┴─┴───────┬─┼─────────┼─────────┼───────────────┤
+//  ABCw  │                  C (13) │i│  B (5)  │  A (5)  │     OP (8)    │
+//        ├─────────────────────────┴─┴───────┬─┼─────────┼───────────────┤
+//  ABw   │                            B (18) │i│  A (5)  │     OP (8)    │
+//        ├───────────────────────────────────┴─┴───────┬─┼───────────────┤
+//  Aw    │                                      A (23) │i│     OP (8)    │
+//        └─────────────────────────────────────────────┴─┴───────────────┘
+
 // size and position of instruction arguments
 #define RSM_SIZE_OP  8
 #define RSM_SIZE_i   1  /* immediate flag */
 #define RSM_SIZE_A   5
 #define RSM_SIZE_B   5
 #define RSM_SIZE_C   5
-#define RSM_SIZE_D   8
+#define RSM_SIZE_D   9
 #define RSM_SIZE_Dw  (RSM_SIZE_D - RSM_SIZE_i)
 #define RSM_SIZE_Cw  (RSM_SIZE_C + RSM_SIZE_D - RSM_SIZE_i)
 #define RSM_SIZE_Bw  (RSM_SIZE_B + RSM_SIZE_C + RSM_SIZE_D - RSM_SIZE_i)

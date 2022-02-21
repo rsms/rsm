@@ -502,6 +502,8 @@ enum rerror {
   rerr_overflow      = -14, // value too large
 };
 
+const char* rerror_str(rerror);
+
 // ======================================================================================
 // panic & assert
 

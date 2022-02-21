@@ -1,26 +1,25 @@
 #include "rsm.h"
 #include "util.h"
 
-// TODO:
-// - assembler
-//   - source scanner & parser
-//   - ir representation (graph)
-//   - register allocation to support "locals"
-//   - codegen
-// - think about how a "program" is represented (functions + constants)
-
 // diaghandler is called by the assembler when an error occurs
-bool diaghandler(const rdiag* d, void* userdata) {
+static bool diaghandler(const rdiag* d, void* userdata) {
+  int* errcount = (int*)userdata;
+  *errcount += d->code;
   log("%s", d->msg);
   return true; // keep going (show all errors)
 }
 
-int main(int argc, const char** argv) {
+static void usage(const char* prog) {
+  log("usage: %s <srcfile> [R0 [R1 ...]]", prog);
+}
+
+
+#ifdef DEBUG
+UNUSED static void test_stuff() {
   rmem* m = rmem_makevm(4096*1000);
   char buf[512]; // for logging stuff
-  u64 iregs[32] = {0}; // for eval
+  u64 iregs[32] = {0};
 
-  #if 0
   rinstr* ip = rmem_allocz(m, sizeof(rinstr)*32);
   u32 pc = 0;
   // fun factorial (i32) i32
@@ -59,9 +58,7 @@ int main(int argc, const char** argv) {
   dlog("evaluating factorial(%lld)", (i64)iregs[0]);
   rsm_eval(iregs, ip, pc);
   dlog("result: %llu", iregs[0]);
-  #endif
 
-  // assemble
   const char* src =
     "fun factorial (n i32, j i32) a i32 {\n"
     "    R1 = R0        // ACC = n (argument 0)\n"
@@ -78,25 +75,81 @@ int main(int argc, const char** argv) {
     // //   U+1F469 woman, U+1F3FE skin tone mod 5, U+200D zwj, U+1F680 rocket = astronaut
     // "    \xF0\x9F\x91\xA9\xF0\x9F\x8F\xBE\xE2\x80\x8D\xF0\x9F\x9A\x80\n"
   ;
+  int errcount = 0;
   rasmctx actx = {
     .mem         = m,
     .srcdata     = src,
     .srclen      = strlen(src),
     .srcname     = "factorial",
     .diaghandler = diaghandler,
+    .userdata    = &errcount,
   };
   rinstr* iv = NULL;
   usize icount = rsm_asm(&actx, &iv);
   rsm_fmtprog(buf, sizeof(buf), iv, icount);
   if (!icount)
+    return;
+  log("assembled some sweet vm code:\n%s", buf);
+}
+#else
+  #define test_stuff() ((void)0)
+#endif // DEBUG
+
+
+int main(int argc, const char** argv) {
+  test_stuff();
+
+  if (argc < 2) {
+    usage(argv[0]);
     return 1;
+  }
+  for (int i = 0; i < argc; i++) {
+    if (strcmp(argv[i], "-h") == 0) {
+      usage(argv[0]);
+      return 0;
+    }
+  }
+
+  rmem* m = rmem_makevm(4096*1000);
+  char buf[512]; // for logging stuff
+  u64 iregs[32] = {0};
+  int errcount = 0;
+  rasmctx actx = {
+    .mem         = m,
+    .srcname     = argv[1],
+    .diaghandler = diaghandler,
+    .userdata    = &errcount,
+  };
+
+  // open input file
+  rerror err = mmapfile(argv[1], (void**)&actx.srcdata, &actx.srclen);
+  if (err != 0) {
+    log("%s: %s", argv[1], rerror_str(err));
+    return 1;
+  }
+
+  // set R0..R7 to argv[2..9]
+  for (int i = 2; i < MIN(argc, 10); i++) {
+    rerror err = parseu64(argv[i], strlen(argv[i]), 10, &iregs[i-2], 0xffffffffffffffff);
+    if (err != 0) {
+      log("cli argument %s is not an integer number", argv[i]);
+      return 1;
+    }
+  }
+
+  // compile
+  rinstr* iv = NULL;
+  usize icount = rsm_asm(&actx, &iv);
+  if (icount == 0 || errcount)
+    return 1;
+  rsm_fmtprog(buf, sizeof(buf), iv, icount);
   log("assembled some sweet vm code:\n%s", buf);
 
   // eval
-  iregs[0] = 3; // arg 1
   log("evaluating function0(%lld)", (i64)iregs[0]);
   rsm_eval(iregs, iv, icount);
-  log("result: %llu", iregs[0]);
+  log("result R0..R7: %llu %llu %llu %llu %llu %llu %llu %llu",
+    iregs[0], iregs[1], iregs[2], iregs[3], iregs[4], iregs[5], iregs[6], iregs[7]);
 
   return 0;
 }

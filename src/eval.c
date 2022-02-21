@@ -40,7 +40,7 @@ void rsm_eval(u64* iregs, rinstr* inv, u32 incount) {
   logstate_header();
 
   for (;;) {
-    assertf(pc < (isize)incount, "pc=%ld incount=%u", pc, incount);
+    assertf(pc > -1 && pc < (isize)incount, "pc=%ld incount=%u", pc, incount);
     logstate(iregs, inv, pc);
 
     rinstr in = inv[pc++]; // load current instruction and advance pc

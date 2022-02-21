@@ -19,8 +19,12 @@ R_ASSUME_NONNULL_BEGIN
 #define tolower(c) ((c) | 0x20)
 
 usize stru64(char buf[64], u64 v, u32 base);
+rerror parseu64(const char* src, usize srclen, int base, u64* result, u64 cutoff);
 
 void logbin(u32 v);
+
+rerror mmapfile(const char* filename, void** p_put, usize* len_out);
+void unmapfile(void* p, usize len);
 
 // abuf is a string append buffer for implementing snprintf-style functions which
 // writes to a limited buffer and separately keeps track of the number of bytes

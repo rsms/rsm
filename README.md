@@ -20,7 +20,7 @@ Constraints
 ## Building & running
 
 ```
-./build.sh -debug && ./out/rsm
+./build.sh -debug && ./out/rsm factorial.rsm 15
 ```
 
 You'll need the following things to build rsm:

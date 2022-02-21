@@ -953,7 +953,6 @@ static u8 nregno(gstate* g, node* n) {
 }
 
 static usize labelderef(gstate* g, usize referreri, const strslice* name) {
-  dlog("labelderef %.*s", (int)name->len, name->p);
   for (usize i = 0; i < g->llen; i++) {
     labelinfo* li = &g->lv[i];
     if (strsliceeqn(name, li->name, li->namelen)) { // label found
@@ -1119,8 +1118,10 @@ static void genblock(gstate* g, node* block) {
       rinstr in = g->iv[li->i];
       i64 idelta = (i64)(g->ilen - li->i - 1);
       g->iv[li->i] = RSM_SET_Bs(in, idelta);
-      // dlog("patch instruction iv[%lu] label %.*s Cs = %lld",
+
+      // dlog("patch instruction iv[%lu] label %.*s Bs = %lld",
       //   li->i, (int)block->name.len, block->name.p, idelta);
+
       assertf(RSM_GET_OP(in) == rop_BRZ, "TODO handle other ops");
       dlog("TODO splice out from ulv"); // reference is now resolved
     }

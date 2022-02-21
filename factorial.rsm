@@ -1,0 +1,11 @@
+fun factorial (i32) i32 {
+    R1 = R0        // ACC = n (argument 0)
+    R0 = 1         // RES (return value 0)
+    brz R1 end     // if n==0 goto end
+  b1:              // <- [b0] b1
+    R0 = mul R1 R0 // RES = ACC * RES
+    R1 = sub R1 1  // ACC = ACC - 1
+    brnz R1  b1    // if n!=0 goto b1
+  end:             // <- b0 [b1]
+    ret            // RES is at R0
+}

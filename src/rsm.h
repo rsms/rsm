@@ -2,33 +2,44 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 #ifdef __cplusplus
-  #error no C++ support
+  #define RSMAPI extern "C"
+#else
+  #define RSMAPI
 #endif
 #ifndef RSM_NO_INT_DEFS
-typedef _Bool bool;
-#define true  ((bool)1)
-#define false ((bool)0)
-typedef signed char         i8;
-typedef unsigned char       u8;
-typedef signed short        i16;
-typedef unsigned short      u16;
-typedef signed int          i32;
-typedef unsigned int        u32;
-typedef signed long long    i64;
-typedef unsigned long long  u64;
-typedef float               f32;
-typedef double              f64;
-typedef unsigned int        uint;
-typedef signed long         isize;
-typedef unsigned long       usize;
-#ifdef __INTPTR_TYPE__
-  typedef __INTPTR_TYPE__   intptr;
-  typedef __UINTPTR_TYPE__  uintptr;
-#else
-  typedef signed long       intptr;
-  typedef unsigned long     uintptr;
-#endif
+  #ifndef __cplusplus
+    typedef _Bool bool;
+    #define true  ((bool)1)
+    #define false ((bool)0)
+  #endif
+  typedef signed char         i8;
+  typedef unsigned char       u8;
+  typedef signed short        i16;
+  typedef unsigned short      u16;
+  typedef signed int          i32;
+  typedef unsigned int        u32;
+  typedef signed long long    i64;
+  typedef unsigned long long  u64;
+  typedef float               f32;
+  typedef double              f64;
+  typedef unsigned int        uint;
+  typedef signed long         isize;
+  typedef unsigned long       usize;
+  #ifdef __INTPTR_TYPE__
+    typedef __INTPTR_TYPE__   intptr;
+    typedef __UINTPTR_TYPE__  uintptr;
+  #else
+    typedef signed long       intptr;
+    typedef unsigned long     uintptr;
+  #endif
 #endif // RSM_NO_INT_DEFS
+
+#ifndef __has_attribute
+  #define __has_attribute(x)  0
+#endif
+#ifndef __has_feature
+  #define __has_feature(x)  0
+#endif
 
 #ifndef NULL
   #define NULL ((void*)0)
@@ -70,11 +81,6 @@ typedef unsigned long       usize;
   #define RSM_ATTR_MALLOC __attribute__((malloc))
 #else
   #define RSM_ATTR_MALLOC
-#endif
-#if __has_attribute(alloc_size)
-  #define RSM_ATTR_ALLOC_SIZE(args...) __attribute__((alloc_size(args)))
-#else
-  #define RSM_ATTR_ALLOC_SIZE(...)
 #endif
 
 // --------------------------------------------------------------------------------------
@@ -300,16 +306,16 @@ struct rcomp {
 };
 
 // rop_name returns the name of an opcode
-const char* rop_name(rop);
+RSMAPI const char* rop_name(rop);
 
 // rsm_compile compiles assembly source text into vm bytecode.
 // Uses ctx->mem for temporary storage, allocates *resp in resm.
 // ctx can be reused with multiple calls.
 // Returns the number of instructions at *resp on success, or 0 on failure.
-usize rsm_compile(rcomp* ctx, rmem resm, rinstr** resp);
+RSMAPI usize rsm_compile(rcomp* ctx, rmem resm, rinstr** resp);
 
 // rsm_vmexec executes a program, starting with instruction inv[0]
-void rsm_vmexec(u64* iregs, u32* inv, u32 inc);
+RSMAPI void rsm_vmexec(u64* iregs, u32* inv, u32 inc);
 
 // rsm_fmtprog formats an array of instructions ip as "assembly" text to buf.
 // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th
@@ -318,19 +324,19 @@ void rsm_vmexec(u64* iregs, u32* inv, u32 inc);
 // discarded. The output is always null-terminated, unless size is 0.
 // Returns the number of characters that would have been printed if bufcap was
 // unlimited (not including the final `\0').
-usize rsm_fmtprog(char* buf, usize bufcap, rinstr* nullable ip, usize ilen);
-usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in);
+RSMAPI usize rsm_fmtprog(char* buf, usize bufcap, rinstr* nullable ip, usize ilen);
+RSMAPI usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in);
 
 // rmem_mkbufalloc creates an allocator that uses size-RMEM_MK_MIN bytes from buf
-rmem rmem_mkbufalloc(void* buf, usize size);
+RSMAPI rmem rmem_mkbufalloc(void* buf, usize size);
 
 // rmem_mkvmalloc creates an allocator backed by a slab of system-managed virtual memory.
 // If size=0, a very large allocation is created (~4GB).
 // On failure, the returned allocator is {NULL,NULL}.
-rmem rmem_mkvmalloc(usize size);
+RSMAPI rmem rmem_mkvmalloc(usize size);
 
 // rmem_freealloc frees an allocator created with a rmem_mk*alloc function
-void rmem_freealloc(rmem m);
+RSMAPI void rmem_freealloc(rmem m);
 
 // RMEM_MK_MIN is the minimum size for rmem_mk*alloc functions
 #define RMEM_MK_MIN (sizeof(void*)*4)
@@ -340,11 +346,11 @@ static void* nullable rmem_alloc(rmem m, usize size);
 static void* nullable rmem_resize(rmem m, void* p, usize oldsize, usize newsize);
 static void rmem_free(rmem m, void* p, usize size);
 
-RSM_ATTR_MALLOC RSM_ATTR_ALLOC_SIZE(2) RSM_WARN_UNUSED_RESULT
+RSM_ATTR_MALLOC RSM_WARN_UNUSED_RESULT
 inline static void* nullable rmem_alloc(rmem m, usize size) {
   return m.a(m.state, NULL, 0, size);
 }
-RSM_ATTR_MALLOC RSM_ATTR_ALLOC_SIZE(4) RSM_WARN_UNUSED_RESULT
+RSM_ATTR_MALLOC RSM_WARN_UNUSED_RESULT
 inline static void* nullable rmem_resize(rmem m, void* p, usize oldsize, usize newsize) {
   return m.a(m.state, p, oldsize, newsize);
 }

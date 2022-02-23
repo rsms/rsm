@@ -178,6 +178,15 @@ static inline RSM_WARN_UNUSED_RESULT bool __must_check_unlikely(bool unlikely) {
   __builtin_add_overflow(a__, b__, dst__); \
 }))
 
+#define check_mul_overflow(a, b, dst) __must_check_unlikely(({  \
+  __typeof__(a) a__ = (a);                 \
+  __typeof__(b) b__ = (b);                 \
+  __typeof__(dst) dst__ = (dst);           \
+  (void) (&a__ == &b__);                   \
+  (void) (&a__ == dst__);                  \
+  __builtin_mul_overflow(a__, b__, dst__); \
+}))
+
 typedef i32 rerror;
 enum rerror {
   rerr_ok            =   0, // no error
@@ -421,6 +430,28 @@ NORETURN void _panic(const char* file, int line, const char* fun, const char* fm
 usize mem_pagesize();
 void* nullable vmem_alloc(usize nbytes);
 bool vmem_free(void* ptr, usize nbytes);
+
+
+// rarray is a dynamic typed array
+typedef struct rarray rarray;
+struct rarray {
+  u8* v; // u8 so we get -Wincompatible-pointer-types if we try to access .v directly
+  u32 len;
+  u32 cap;
+};
+#define rarray_at(TYPE, a, index)           ( ((TYPE*)(a)->v) + (index) )
+#define rarray_push(TYPE, a, m)             ( (TYPE*)_rarray_push((a), (m), sizeof(TYPE)) )
+#define rarray_remove(TYPE, a, start, len)  _rarray_remove((a), sizeof(TYPE), (start), (len))
+#define rarray_free(TYPE, a, m)  if ((a)->v) rmem_free((m),(a)->v,(usize)(a)->cap*sizeof(TYPE))
+
+bool rarray_grow(rarray* a, rmem, usize elemsize, u32 addl);
+void _rarray_remove(rarray* a, u32 elemsize, u32 start, u32 len);
+inline static void* nullable _rarray_push(rarray* a, rmem m, u32 elemsize) {
+  if (UNLIKELY(a->len == a->cap) && !rarray_grow(a, m, (usize)elemsize, 1))
+    return NULL;
+  return a->v + elemsize*(a->len++);
+}
+
 
 // abuf is a string append buffer for implementing snprintf-style functions which
 // writes to a limited buffer and separately keeps track of the number of bytes

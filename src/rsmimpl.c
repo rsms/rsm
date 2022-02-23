@@ -509,16 +509,33 @@ bool vmem_free(void* ptr, usize nbytes) {
 }
 
 
-// #if defined(__wasm__) && !defined(__wasi__)
-//   __attribute__((visibility("default"))) void log1(const char* _Nonnull s, int len);
+void _rarray_remove(rarray* a, u32 elemsize, u32 start, u32 len) {
+  assert(a->len >= start+len);
+  if (len == 0)
+    return;
+  void* dst = a->v + elemsize*start;
+  void* src = dst + elemsize*len;
+  // 0 1 2 3 4 5 6 7
+  //       |  |
+  // start 3
+  // len 2
+  //
+  memmove(dst, src, elemsize*(a->len - start - len));
+  a->len -= len;
+}
 
-//   static char tmpbuf[4096*16]; // 65kB
-
-//   void logv(const char* _Nonnull format, va_list ap) {
-//     int n = vsnprintf(tmpbuf, sizeof(tmpbuf), format, ap);
-//     log1(tmpbuf, MIN(n, (int)sizeof(tmpbuf)));
-//   }
-// #endif // printf
+bool rarray_grow(rarray* a, rmem m, usize elemsize, u32 addl) {
+  u32 newcap = a->cap ? (u32)MIN((u64)a->cap * 2, U32_MAX) : MAX(addl, 4);
+  usize newsize;
+  if (check_mul_overflow((usize)newcap, elemsize, &newsize))
+    return false;
+  void* p2 = rmem_resize(m, a->v, a->cap*elemsize, newsize);
+  if UNLIKELY(!p2)
+    return false;
+  a->v = p2;
+  a->cap = newcap;
+  return true;
+}
 
 
 

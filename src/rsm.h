@@ -299,18 +299,22 @@ struct rcomp {
   rdiaghandler   diaghandler; // diagnostic report callback
   void* nullable userdata;    // passed along to diaghandler
   // internal fields
-  char _diagmsg[128]; // storage for diag.msg
-  bool _stop;         // negated diaghandler return value
+  char _diagmsg[128];     // storage for diag.msg
+  bool _stop;             // negated diaghandler return value
+  void* nullable _gstate; // reusable internal codegen state
 };
 
 // rop_name returns the name of an opcode
 RSMAPI const char* rop_name(rop);
 
 // rsm_compile compiles assembly source text into vm bytecode.
-// Uses ctx->mem for temporary storage, allocates *resp in resm.
-// ctx can be reused with multiple calls.
+// Uses c->mem for temporary storage, allocates *resp in resm.
+// c can be reused with multiple calls.
 // Returns the number of instructions at *resp on success, or 0 on failure.
-RSMAPI usize rsm_compile(rcomp* ctx, rmem resm, rinstr** resp);
+RSMAPI usize rsm_compile(rcomp* c, rmem resm, rinstr** resp);
+
+// rcomp_dispose frees resources of a compilation session structure
+void rcomp_dispose(rcomp* c);
 
 // rsm_vmexec executes a program, starting with instruction inv[0]
 RSMAPI void rsm_vmexec(u64* iregs, u32* inv, u32 inc);
@@ -341,7 +345,7 @@ RSMAPI void rmem_freealloc(rmem m);
 
 // memory allocation interface
 static void* nullable rmem_alloc(rmem m, usize size);
-static void* nullable rmem_resize(rmem m, void* p, usize oldsize, usize newsize);
+static void* nullable rmem_resize(rmem m, void* nullable p, usize oldsize, usize newsize);
 static void rmem_free(rmem m, void* p, usize size);
 
 RSM_ATTR_MALLOC RSM_WARN_UNUSED_RESULT
@@ -349,7 +353,7 @@ inline static void* nullable rmem_alloc(rmem m, usize size) {
   return m.a(m.state, NULL, 0, size);
 }
 RSM_ATTR_MALLOC RSM_WARN_UNUSED_RESULT
-inline static void* nullable rmem_resize(rmem m, void* p, usize oldsize, usize newsize) {
+inline static void* nullable rmem_resize(rmem m, void* nullable p, usize oldsize, usize newsize) {
   return m.a(m.state, p, oldsize, newsize);
 }
 inline static void rmem_free(rmem m, void* p, usize size) {

@@ -149,30 +149,13 @@ struct labelinfo {
   usize       nrefs; // reference count (lv only)
 };
 struct gstate {
-  rcomp* c; // compilation session/context
-
-  // instructions
-  rinstr*  iv;
-  rmem     imem; // allocator for iv
-  usize    ilen;
-  usize    icap;
-
-  // functions, mapping [function index] => iv offset
-  usize*   fv;
-  usize    flen;
-  usize    fcap;
-
-  // defined labels
-  labelinfo* lv;
-  usize      llen;
-  usize      lcap;
-
-  // undefined label references
-  labelinfo* ulv;
-  usize      ullen;
-  usize      ulcap;
+  rcomp* c;    // compilation session/context
+  rmem   imem; // allocator for iv
+  rarray iv;   // rinstr[]; instructions
+  rarray fv;   // usize[]; functions, mapping [function index] => iv offset
+  rarray lv;   // labelinfo[]; defined labels
+  rarray ulv;  // labelinfo[]; undefined label references
 };
-
 
 
 static const char* kBlock0Name = "b0"; // name of first block
@@ -981,8 +964,8 @@ static u8 nregno(gstate* g, node* n) {
 }
 
 static usize labelderef(gstate* g, node* referrern, usize referreri, const strslice* name) {
-  for (usize i = 0; i < g->llen; i++) {
-    labelinfo* li = &g->lv[i];
+  for (usize i = 0; i < g->lv.len; i++) {
+    labelinfo* li = rarray_at(labelinfo, &g->lv, i);
     if (strsliceeqn(name, li->name, li->namelen)) { // label found
       referreri++;
       li->nrefs++;
@@ -991,8 +974,11 @@ static usize labelderef(gstate* g, node* referrern, usize referreri, const strsl
     }
   }
   // label is not (yet) defined -- record a pending reference
-  assertf(g->ullen < g->ulcap, "TODO grow ulv");
-  labelinfo* li = &g->ulv[g->ullen++];
+  labelinfo* li = rarray_push(labelinfo, &g->ulv, g->c->mem);
+  if UNLIKELY(!li) {
+    errf(g->c, 0, 0, "out of memory");
+    return 0;
+  }
   li->i = referreri;
   li->name = name->p;
   li->namelen = name->len;
@@ -1036,7 +1022,7 @@ static bool getiargs(gstate* g, node* n, i32* argv, u32 wantargc, i64 minval, i6
     argv[argc] = (i32)val;
     return false;
   case T_NAME: // label
-    argv[argc] = labelderef(g, arg, g->ilen - 1, &arg->name);
+    argv[argc] = labelderef(g, arg, g->iv.len - 1, &arg->name);
     return true;
   case T_INT2 ... T_SINT16:
     if UNLIKELY((i64)val > maxval || (i64)val < minval) {
@@ -1072,9 +1058,11 @@ err_argc:
 static void genop(gstate* g, node* n) {
   assert(n->t == T_OP);
   assert(n->ival < RSM_OP_COUNT);
-  assertf(g->ilen < g->icap, "TODO grow iv if needed");
 
-  rinstr* in = &g->iv[g->ilen++]; // allocate instruction
+  rinstr* in = rarray_push(rinstr, &g->iv, g->imem);
+  if UNLIKELY(!in)
+    return errf(g->c, 0, 0, "out of memory");
+
   rop op = (rop)n->ival;
   i32 arg[4]; // ABCD args to RSM_MAKE_* macros
 
@@ -1150,29 +1138,30 @@ static void genassign(gstate* g, node* n) {
 
 static void genblock(gstate* g, node* block, bool islastblock) {
   assert(block->t == T_LABEL);
-  assertf(g->llen < g->lcap, "TODO grow lv if needed");
 
   // record label's name and "position"
-  labelinfo* li = &g->lv[g->llen++];
-  li->i = g->ilen;
+  labelinfo* li = rarray_push(labelinfo, &g->lv, g->c->mem);
+  if UNLIKELY(!li)
+    return errf(g->c, 0, 0, "out of memory");
+
+  li->i = g->iv.len;
   li->name = block->name.p;
   li->namelen = block->name.len;
   li->nrefs = 0;
   li->n = block;
 
   // resolve pending references to this label
-  for (usize i = 0; i < g->ullen; ) {
-    labelinfo* uli = &g->ulv[i];
+  for (usize i = 0; i < g->ulv.len; ) {
+    labelinfo* uli = rarray_at(labelinfo, &g->ulv, i);
     if (!strsliceeqn(&block->name, uli->name, uli->namelen)) {
       i++;
       continue;
     }
     li->nrefs++;
-    rinstr in = g->iv[uli->i]; // instruction waiting for this label
-    i64 idelta = (i64)(g->ilen - uli->i - 1); // jump offset
-    g->iv[uli->i] = RSM_SET_Bs(in, idelta); // update instruction
-    memmove(g->ulv + i, g->ulv + i + 1, sizeof(labelinfo) * (g->ullen - i));
-    g->ullen--;
+    i64 idelta = (i64)(g->iv.len - uli->i - 1); // jump offset
+    rinstr* in = rarray_at(rinstr, &g->iv, uli->i); // instruction waiting for this label
+    *in = RSM_SET_Bs(*in, idelta);  // update instruction
+    rarray_remove(labelinfo, &g->ulv, i, 1); // label reference is now resolved
   }
 
   for (node* cn = block->list.head; cn; cn = cn->next) {
@@ -1197,20 +1186,25 @@ static void genfun(gstate* g, node* fun) {
   node* body = results->next;
   if (!body)
     return;
-  assertf(g->flen < g->fcap, "TODO grow fv if needed");
-  g->fv[g->flen++] = g->ilen; // record function's "position"
-  g->llen = 0; // clear label mappings from any past functions
-  for (node* cn = body->list.head; cn; cn = cn->next) {
+
+  // record function's "position"
+  usize* fpos = rarray_push(usize, &g->fv, g->c->mem);
+  if UNLIKELY(!fpos)
+    return errf(g->c, 0, 0, "out of memory");
+  *fpos = g->iv.len;
+
+  g->lv.len = 0; // clear label mappings from any past functions
+  for (node* cn = body->list.head; cn; cn = cn->next)
     genblock(g, cn, cn->next == NULL);
-  }
+
   // report unresolved labels
-  for (usize i = 0; i < g->ullen; i++) {
-    labelinfo* li = &g->ulv[i];
+  for (usize i = 0; i < g->ulv.len; i++) {
+    labelinfo* li = rarray_at(labelinfo, &g->ulv, i);
     errf(g->c, li->n->line, li->n->col, "undefined label \"%.*s\"", (int)li->namelen, li->name);
   }
   // report unused labels
-  for (usize i = 0; i < g->llen; i++) {
-    labelinfo* li = &g->lv[i];
+  for (usize i = 0; i < g->lv.len; i++) {
+    labelinfo* li = rarray_at(labelinfo, &g->lv, i);
     if (li->nrefs == 0 && li->name != kBlock0Name)
       warnf(g->c, li->n->line, li->n->col, "unused label \"%.*s\"", (int)li->namelen, li->name);
   }
@@ -1247,27 +1241,43 @@ static node* parse(rcomp* c) {
 }
 
 static usize codegen(rcomp* c, node* module, rmem imem, rinstr** resp) {
-  gstate g = { .c=c, .imem=imem };
-
-  g.icap = 4096/sizeof(rinstr);
-  g.iv = rmem_alloc(imem, g.icap*sizeof(rinstr));
-
-  g.fcap = 16;
-  g.fv = rmem_alloc(c->mem, g.fcap*sizeof(usize));
-
-  g.lcap = 16;
-  g.lv = rmem_alloc(c->mem, g.lcap*sizeof(labelinfo));
-
-  g.ulcap = 16;
-  g.ulv = rmem_alloc(c->mem, g.ulcap*sizeof(labelinfo));
-
+  gstate* g = c->_gstate;
+  if (!g) {
+    g = rmem_alloc(c->mem, sizeof(gstate));
+    memset(g, 0, sizeof(gstate));
+    g->c = c;
+    c->_gstate = g;
+  } else {
+    // recycle gstate
+    g->fv.len = 0;
+    g->lv.len = 0;
+    g->ulv.len = 0;
+    g->iv.v = NULL;
+    g->iv.len = 0;
+    g->iv.cap = 0;
+  }
+  g->imem = imem;
+  // preallocate instruction buffer to avoid excessive rarray_grow calls
+  rarray_grow(&g->iv, imem, sizeof(rinstr), 512/sizeof(rinstr));
   assert(module->t == T_LPAREN);
   for (node* cn = module->list.head; cn; cn = cn->next)
-    genfun(&g, cn);
+    genfun(g, cn);
   if UNLIKELY(c->_stop || c->errcount)
     return 0;
-  *resp = g.iv;
-  return g.ilen;
+  *resp = (void*)g->iv.v;
+  return g->iv.len;
+}
+
+void rcomp_dispose(rcomp* c) {
+  gstate* g = c->_gstate;
+  if (!g)
+    return;
+  rarray_free(usize, &g->fv, c->mem);
+  rarray_free(labelinfo, &g->lv, c->mem);
+  rarray_free(labelinfo, &g->ulv, c->mem);
+  #ifdef DEBUG
+  memset(g, 0, sizeof(gstate));
+  #endif
 }
 
 // compiler entry point

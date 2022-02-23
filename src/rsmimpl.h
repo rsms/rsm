@@ -356,6 +356,12 @@ RSM_ASSUME_NONNULL_BEGIN
   void* memcpy(void* restrict dst, const void* restrict src, usize n);
 #endif
 
+#if HAS_LIBC_BUILTIN(__builtin_memmove)
+  #define memmove __builtin_memmove
+#else
+  void* memmove(void* dest, const void* src, usize n);
+#endif
+
 #if HAS_LIBC_BUILTIN(__builtin_memcmp)
   #define memcmp __builtin_memcmp
 #else

@@ -588,6 +588,21 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
   }
 #endif
 
+#if !HAS_LIBC_BUILTIN(__builtin_memmove)
+void* memmove(void* dest, const void* src, usize n) {
+  char *d = dest;
+  const char *s = src;
+  if (d==s) return d;
+  if ((uintptr)s-(uintptr)d-n <= -2*n) return memcpy(d, s, n);
+  if (d<s) {
+    for (; n; n--) *d++ = *s++;
+  } else {
+    while (n) n--, d[n] = s[n];
+  }
+  return dest;
+}
+#endif
+
 #if !HAS_LIBC_BUILTIN(__builtin_memcmp)
   int memcmp(const void* a, const void* b, usize n) {
     const u8* l = a, *r = b;

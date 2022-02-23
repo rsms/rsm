@@ -144,7 +144,9 @@ typedef struct labelinfo labelinfo;
 struct labelinfo {
   const char* name;
   usize       namelen;
-  usize       i; // iv offset (location for lv, referrer for ulv)
+  usize       i;     // iv offset (location for lv, referrer for ulv)
+  node*       n;     // lv: definition, ulv: referrer
+  usize       nrefs; // reference count (lv only)
 };
 struct gstate {
   rcomp* c; // compilation session/context
@@ -978,21 +980,23 @@ static u8 nregno(gstate* g, node* n) {
   return (u8)n->ival;
 }
 
-static usize labelderef(gstate* g, usize referreri, const strslice* name) {
+static usize labelderef(gstate* g, node* referrern, usize referreri, const strslice* name) {
   for (usize i = 0; i < g->llen; i++) {
     labelinfo* li = &g->lv[i];
     if (strsliceeqn(name, li->name, li->namelen)) { // label found
       referreri++;
+      li->nrefs++;
       i64 idelta = referreri > li->i ? (i64)(referreri - li->i) : -(i64)(li->i - referreri);
       return -idelta;
     }
   }
   // label is not (yet) defined -- record a pending reference
-  assertf(g->ullen < g->ulcap, "TODO grow ulv if needed");
+  assertf(g->ullen < g->ulcap, "TODO grow ulv");
   labelinfo* li = &g->ulv[g->ullen++];
   li->i = referreri;
   li->name = name->p;
   li->namelen = name->len;
+  li->n = referrern;
   return 0;
 }
 
@@ -1032,7 +1036,7 @@ static bool getiargs(gstate* g, node* n, i32* argv, u32 wantargc, i64 minval, i6
     argv[argc] = (i32)val;
     return false;
   case T_NAME: // label
-    argv[argc] = labelderef(g, g->ilen - 1, &arg->name);
+    argv[argc] = labelderef(g, arg, g->ilen - 1, &arg->name);
     return true;
   case T_INT2 ... T_SINT16:
     if UNLIKELY((i64)val > maxval || (i64)val < minval) {
@@ -1153,21 +1157,22 @@ static void genblock(gstate* g, node* block, bool islastblock) {
   li->i = g->ilen;
   li->name = block->name.p;
   li->namelen = block->name.len;
+  li->nrefs = 0;
+  li->n = block;
 
-  // resolve any pending references
-  for (usize i = 0; i < g->ullen; i++) {
-    labelinfo* li = &g->ulv[i];
-    if (strsliceeqn(&block->name, li->name, li->namelen)) {
-      rinstr in = g->iv[li->i];
-      i64 idelta = (i64)(g->ilen - li->i - 1);
-      g->iv[li->i] = RSM_SET_Bs(in, idelta);
-
-      // dlog("patch instruction iv[%lu] label %.*s Bs = %lld",
-      //   li->i, (int)block->name.len, block->name.p, idelta);
-
-      assertf(RSM_GET_OP(in) == rop_BRZ, "TODO handle other ops");
-      dlog("TODO splice out from ulv"); // reference is now resolved
+  // resolve pending references to this label
+  for (usize i = 0; i < g->ullen; ) {
+    labelinfo* uli = &g->ulv[i];
+    if (!strsliceeqn(&block->name, uli->name, uli->namelen)) {
+      i++;
+      continue;
     }
+    li->nrefs++;
+    rinstr in = g->iv[uli->i]; // instruction waiting for this label
+    i64 idelta = (i64)(g->ilen - uli->i - 1); // jump offset
+    g->iv[uli->i] = RSM_SET_Bs(in, idelta); // update instruction
+    memmove(g->ulv + i, g->ulv + i + 1, sizeof(labelinfo) * (g->ullen - i));
+    g->ullen--;
   }
 
   for (node* cn = block->list.head; cn; cn = cn->next) {
@@ -1197,6 +1202,17 @@ static void genfun(gstate* g, node* fun) {
   g->llen = 0; // clear label mappings from any past functions
   for (node* cn = body->list.head; cn; cn = cn->next) {
     genblock(g, cn, cn->next == NULL);
+  }
+  // report unresolved labels
+  for (usize i = 0; i < g->ullen; i++) {
+    labelinfo* li = &g->ulv[i];
+    errf(g->c, li->n->line, li->n->col, "undefined label \"%.*s\"", (int)li->namelen, li->name);
+  }
+  // report unused labels
+  for (usize i = 0; i < g->llen; i++) {
+    labelinfo* li = &g->lv[i];
+    if (li->nrefs == 0 && li->name != kBlock0Name)
+      warnf(g->c, li->n->line, li->n->col, "unused label \"%.*s\"", (int)li->namelen, li->name);
   }
 }
 
@@ -1248,6 +1264,8 @@ static usize codegen(rcomp* c, node* module, rmem imem, rinstr** resp) {
   assert(module->t == T_LPAREN);
   for (node* cn = module->list.head; cn; cn = cn->next)
     genfun(&g, cn);
+  if UNLIKELY(c->_stop || c->errcount)
+    return 0;
   *resp = g.iv;
   return g.ilen;
 }

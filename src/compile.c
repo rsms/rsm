@@ -224,22 +224,25 @@ static u32 pcolumn(pstate* p) { // source column of current token
   return (u32)((uintptr)p->tokstart - (uintptr)p->linestart) + 1;
 }
 
-static void errv(rcomp* c, u32 line, u32 col, const char* fmt, va_list ap) {
+static void reportv(rcomp* c, u32 line, u32 col, int code, const char* fmt, va_list ap) {
   if (c->_stop)
     return; // previous call to diaghandler has asked us to stop
-  c->diag.code = 1;
+  c->diag.code = code;
   c->diag.msg = c->_diagmsg;
   c->diag.srcname = c->srcname;
   c->diag.line = line;
   c->diag.col = col;
-  c->errcount++;
+
+  if (code)
+    c->errcount++;
 
   abuf s = abuf_make(c->_diagmsg, sizeof(c->_diagmsg));
   if (line > 0) {
-    abuf_fmt(&s, "%s:%u:%u: error: ", c->srcname, line, col);
+    abuf_fmt(&s, "%s:%u:%u: ", c->srcname, line, col);
   } else {
-    abuf_fmt(&s, "%s: error: ", c->srcname);
+    abuf_fmt(&s, "%s: ", c->srcname);
   }
+  abuf_str(&s, code ? "error: " : "warning: ");
   c->diag.msgshort = s.p;
   abuf_fmtv(&s, fmt, ap);
   abuf_terminate(&s);
@@ -251,7 +254,15 @@ ATTR_FORMAT(printf, 4, 5)
 static void errf(rcomp* comp, u32 line, u32 col, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  errv(comp, line, col, fmt, ap);
+  reportv(comp, line, col, 1, fmt, ap);
+  va_end(ap);
+}
+
+ATTR_FORMAT(printf, 4, 5)
+static void warnf(rcomp* comp, u32 line, u32 col, const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  reportv(comp, line, col, 0, fmt, ap);
   va_end(ap);
 }
 
@@ -259,7 +270,7 @@ ATTR_FORMAT(printf, 2, 3)
 static rtok serr(pstate* p, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  errv(p->c, p->lineno, pcolumn(p), fmt, ap);
+  reportv(p->c, p->lineno, pcolumn(p), 1, fmt, ap);
   va_end(ap);
   return p->tok = T_END;
 }
@@ -269,9 +280,9 @@ static void perr(pstate* p, node* nullable n, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
   if (n) {
-    errv(p->c, n->line, n->col, fmt, ap);
+    reportv(p->c, n->line, n->col, 1, fmt, ap);
   } else {
-    errv(p->c, p->lineno, pcolumn(p), fmt, ap);
+    reportv(p->c, p->lineno, pcolumn(p), 1, fmt, ap);
   }
   va_end(ap);
 }
@@ -985,9 +996,19 @@ static usize labelderef(gstate* g, usize referreri, const strslice* name) {
   return 0;
 }
 
+static void errintsize(
+  rcomp* c, u32 line, u32 col, rop op, i64 minval, i64 maxval, u64 val, bool issigned)
+{
+  if (minval != 0 || issigned) {
+    return errf(c, line, col, "value %lld out of range %lld...%lld for %s",
+      (i64)val, minval, maxval, rop_name(op));
+  }
+  errf(c, line, col, "value %llu out of range 0...%lld for %s", val, maxval, rop_name(op));
+}
+
 // getiargs checks & reads integer arguments for an operation described by AST node n.
 // returns true if the last arg is an immediate value.
-static bool getiargs(gstate* g, node* n, i32* argv, u32 wantargc) {
+static bool getiargs(gstate* g, node* n, i32* argv, u32 wantargc, i64 minval, i64 maxval) {
   assert(n->t == T_OP);
   u32 argc = 0;
 
@@ -1002,29 +1023,28 @@ static bool getiargs(gstate* g, node* n, i32* argv, u32 wantargc) {
     goto err_argc;
   }
 
+  u64 val = arg->ival;
+
   // last arg is either a register, immediate or label (resolved as immediate)
   switch (arg->t) {
   case T_IREG:
-    assert(arg->ival < 32);
-    argv[argc] = (i32)arg->ival;
+    assert(val < 32); // parser checks this; assert to catch bugs, not input
+    argv[argc] = (i32)val;
     return false;
   case T_NAME: // label
     argv[argc] = labelderef(g, g->ilen - 1, &arg->name);
     return true;
   case T_INT2 ... T_SINT16:
-    if UNLIKELY(arg->ival > RSM_MAX_Dw) {
-      u64 maxval = RSM_MAX_Dw;
-      switch (argc) {
-        case 0: maxval = RSM_MAX_Aw; break;
-        case 1: maxval = RSM_MAX_Bw; break;
-        case 2: maxval = RSM_MAX_Cw; break;
-      }
-      if (arg->ival > maxval) {
-        errf(g->c, arg->line, arg->col, "value %llu too large", arg->ival);
-        return false;
-      }
+    if UNLIKELY((i64)val > maxval || (i64)val < minval) {
+      bool issigned = (arg->t - T_SINT16) % 2 == 0;
+      errintsize(g->c, arg->line, arg->col, (rop)n->ival, minval, maxval, val, issigned);
+      return false;
     }
-    argv[argc] = (i32)arg->ival;
+    if UNLIKELY(RSM_OP_IS_BR(n->ival) && val == 0) {
+      warnf(g->c, arg->line, arg->col, "zero jump offset for %s has no effect",
+        rop_name((rop)n->ival));
+    }
+    argv[argc] = (i32)val;
     return true;
   default:
     errf(g->c, arg->line, arg->col,
@@ -1062,16 +1082,16 @@ static void genop(gstate* g, node* n) {
   }
 
   // instruction encoders
-  #define NOIMM(argc, ENC, args...)            \
-    if (getiargs(g, n, arg, argc)) goto noimm; \
+  #define NOIMM(argc, ENC, args...)                   \
+    if (getiargs(g, n, arg, argc, 0, 31)) goto noimm; \
     *in = RSM_MAKE_##ENC(op, args); return;
 
-  #define RoIMM(argc, ENC, ENCi, args...) \
-    if (getiargs(g, n, arg, argc)) {      \
-      *in = RSM_MAKE_##ENCi(op, args);    \
-    } else {                              \
-      *in = RSM_MAKE_##ENC(op, args);     \
-    }                                     \
+  #define RoIMM(argc, ENC, ENCi, minval, maxval, args...) \
+    if (getiargs(g, n, arg, argc, minval, maxval)) {      \
+      *in = RSM_MAKE_##ENCi(op, args);                    \
+    } else {                                              \
+      *in = RSM_MAKE_##ENC(op, args);                     \
+    }                                                     \
     return;
 
   DIAGNOSTIC_IGNORE_PUSH("-Wunused-label")
@@ -1080,18 +1100,18 @@ static void genop(gstate* g, node* n) {
       errf(g->c, n->line, n->col, "%s does not accept any arguments", rop_name(op));
     *in = RSM_MAKE__(op);
     return;
-  make_A:     NOIMM(1, A          , arg[0])
-  make_Au:    RoIMM(1, A, Au      , arg[0])
-  make_As:    RoIMM(1, A, As      , arg[0])
-  make_AB:    NOIMM(2, AB         , arg[0], arg[1])
-  make_ABu:   RoIMM(2, AB, ABu    , arg[0], arg[1])
-  make_ABs:   RoIMM(2, AB, ABs    , arg[0], arg[1])
-  make_ABC:   NOIMM(3, ABC        , arg[0], arg[1], arg[2])
-  make_ABCu:  RoIMM(3, ABC, ABCu  , arg[0], arg[1], arg[2])
-  make_ABCs:  RoIMM(3, ABC, ABCs  , arg[0], arg[1], arg[2])
-  make_ABCD:  NOIMM(4, ABCD       , arg[0], arg[1], arg[2], arg[3])
-  make_ABCDu: RoIMM(4, ABCD, ABCDu, arg[0], arg[1], arg[2], arg[3])
-  make_ABCDs: RoIMM(4, ABCD, ABCDs, arg[0], arg[1], arg[2], arg[3])
+  make_A:     NOIMM(1, A          ,                         arg[0])
+  make_Au:    RoIMM(1, A, Au      , 0,          RSM_MAX_Au, arg[0])
+  make_As:    RoIMM(1, A, As      , RSM_MIN_As, RSM_MAX_As, arg[0])
+  make_AB:    NOIMM(2, AB         ,                         arg[0], arg[1])
+  make_ABu:   RoIMM(2, AB, ABu    , 0,          RSM_MAX_Bu, arg[0], arg[1])
+  make_ABs:   RoIMM(2, AB, ABs    , RSM_MIN_Bs, RSM_MAX_Bs, arg[0], arg[1])
+  make_ABC:   NOIMM(3, ABC        ,                         arg[0], arg[1], arg[2])
+  make_ABCu:  RoIMM(3, ABC, ABCu  , 0,          RSM_MAX_Cu, arg[0], arg[1], arg[2])
+  make_ABCs:  RoIMM(3, ABC, ABCs  , RSM_MIN_Cs, RSM_MAX_Cs, arg[0], arg[1], arg[2])
+  make_ABCD:  NOIMM(4, ABCD       ,                         arg[0], arg[1], arg[2], arg[3])
+  make_ABCDu: RoIMM(4, ABCD, ABCDu, 0,          RSM_MAX_Du, arg[0], arg[1], arg[2], arg[3])
+  make_ABCDs: RoIMM(4, ABCD, ABCDs, RSM_MIN_Ds, RSM_MAX_Ds, arg[0], arg[1], arg[2], arg[3])
   DIAGNOSTIC_IGNORE_POP()
   #undef RoIMM
   #undef NOIMM

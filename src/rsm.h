@@ -135,6 +135,9 @@ _( BRNZ  , ABs  , "brnz"  /* if R(A)!=0 goto instr({R(B),PC+Bs}) */)\
 _( RET   , _    , "ret" /* return */)\
 // end RSM_FOREACH_OP
 
+// opcode test macros. Update when adding affected opcodes
+#define RSM_OP_IS_BR(op) (rop_BRZ <= (op) && (op) <= rop_BRNZ)
+
 // size and position of instruction arguments
 #define RSM_SIZE_OP  8
 #define RSM_SIZE_i   1  /* immediate flag */
@@ -147,10 +150,18 @@ _( RET   , _    , "ret" /* return */)\
 #define RSM_SIZE_Bw  (RSM_SIZE_B + RSM_SIZE_C + RSM_SIZE_D - RSM_SIZE_i)
 #define RSM_SIZE_Aw  (RSM_SIZE_A + RSM_SIZE_B + RSM_SIZE_C + RSM_SIZE_D - RSM_SIZE_i)
 
-#define RSM_MAX_Aw   0x7fffff /* 2^23 - 1  TODO use ILOG2 macro? */
-#define RSM_MAX_Bw   0x3ffff  /* 2^18 - 1 */
-#define RSM_MAX_Cw   0x1fff   /* 2^13 - 1 */
-#define RSM_MAX_Dw   0xff     /* 2^8  - 1 */
+#define RSM_MAX_Au   0x7fffff /* 2^23 - 1  TODO use ILOG2 macro? */
+#define RSM_MAX_Bu   0x3ffff  /* 2^18 - 1 */
+#define RSM_MAX_Cu   0x1fff   /* 2^13 - 1 */
+#define RSM_MAX_Du   0xff     /* 2^8  - 1 */
+#define RSM_MAX_As   (RSM_MAX_Au >> 1)
+#define RSM_MAX_Bs   (RSM_MAX_Bu >> 1)
+#define RSM_MAX_Cs   (RSM_MAX_Cu >> 1)
+#define RSM_MAX_Ds   (RSM_MAX_Du >> 1)
+#define RSM_MIN_As   (-RSM_MAX_As - 1)
+#define RSM_MIN_Bs   (-RSM_MAX_Bs - 1)
+#define RSM_MIN_Cs   (-RSM_MAX_Cs - 1)
+#define RSM_MIN_Ds   (-RSM_MAX_Ds - 1)
 
 #define RSM_POS_A    RSM_SIZE_OP
 #define RSM_POS_Aw   (RSM_POS_A + RSM_SIZE_i)
@@ -178,22 +189,22 @@ _( RET   , _    , "ret" /* return */)\
 #define RSM_GET_A(i)   RSM_GET_ARGN(i, RSM_POS_A, RSM_SIZE_A)
 #define RSM_GET_Ai(i)  RSM_GET_ARGN(i, RSM_POS_A, 1)
 #define RSM_GET_Au(i)  RSM_GET_ARGN(i, RSM_POS_Aw, RSM_SIZE_Aw)
-#define RSM_GET_As(i)  ((int)(RSM_GET_Au(i) - (RSM_MAX_Aw / 2)))
+#define RSM_GET_As(i)  ((int)(RSM_GET_Au(i) - (RSM_MAX_Au / 2)))
 
 #define RSM_GET_B(i)   RSM_GET_ARGN(i, RSM_POS_B, RSM_SIZE_B)
 #define RSM_GET_Bi(i)  RSM_GET_ARGN(i, RSM_POS_B, 1)
 #define RSM_GET_Bu(i)  RSM_GET_ARGN(i, RSM_POS_Bw, RSM_SIZE_Bw)
-#define RSM_GET_Bs(i)  ((int)(RSM_GET_Bu(i) - (RSM_MAX_Bw / 2)))
+#define RSM_GET_Bs(i)  ((int)(RSM_GET_Bu(i) - (RSM_MAX_Bu / 2)))
 
 #define RSM_GET_C(i)   RSM_GET_ARGN(i, RSM_POS_C, RSM_SIZE_C)
 #define RSM_GET_Ci(i)  RSM_GET_ARGN(i, RSM_POS_C, 1)
 #define RSM_GET_Cu(i)  RSM_GET_ARGN(i, RSM_POS_Cw, RSM_SIZE_Cw)
-#define RSM_GET_Cs(i)  ((int)(RSM_GET_Cu(i) - (RSM_MAX_Cw / 2)))
+#define RSM_GET_Cs(i)  ((int)(RSM_GET_Cu(i) - (RSM_MAX_Cu / 2)))
 
 #define RSM_GET_D(i)   RSM_GET_ARGN(i, RSM_POS_D, RSM_SIZE_D)
 #define RSM_GET_Di(i)  RSM_GET_ARGN(i, RSM_POS_D, 1)
 #define RSM_GET_Du(i)  RSM_GET_ARGN(i, RSM_POS_Dw, RSM_SIZE_Dw)
-#define RSM_GET_Ds(i)  ((int)(RSM_GET_Du(i) - (RSM_MAX_Dw / 2)))
+#define RSM_GET_Ds(i)  ((int)(RSM_GET_Du(i) - (RSM_MAX_Du / 2)))
 
 // rinstr RSM_SET_Ar(rinstr, rop op)    -- copy of in with opcode op
 // rinstr RSM_SET_Ar(rinstr, int regno) -- copy of in with A set to register number
@@ -204,10 +215,10 @@ _( RET   , _    , "ret" /* return */)\
 #define RSM_SET_Au(i,v)  RSM_SET_ARGN(i, RSM_POS_Aw, RSM_SIZE_Aw, v)
 #define RSM_SET_B(i,v)   RSM_SET_ARGN(i, RSM_POS_B,  RSM_SIZE_B,  v)
 #define RSM_SET_Bu(i,v)  RSM_SET_ARGN(i, RSM_POS_Bw, RSM_SIZE_Bw, v)
-#define RSM_SET_Bs(i,v)  RSM_SET_Bu(i, ((rinstr)(v)) + (RSM_MAX_Bw / 2))
+#define RSM_SET_Bs(i,v)  RSM_SET_Bu(i, ((rinstr)(v)) + (RSM_MAX_Bu / 2))
 #define RSM_SET_C(i,v)   RSM_SET_ARGN(i, RSM_POS_C,  RSM_SIZE_C,  v)
 #define RSM_SET_Cu(i,v)  RSM_SET_ARGN(i, RSM_POS_Cw, RSM_SIZE_Cw, v)
-#define RSM_SET_Cs(i,v)  RSM_SET_Cu(i, ((rinstr)(v)) + (RSM_MAX_Cw / 2))
+#define RSM_SET_Cs(i,v)  RSM_SET_Cu(i, ((rinstr)(v)) + (RSM_MAX_Cu / 2))
 #define RSM_SET_D(i,v)   RSM_SET_ARGN(i, RSM_POS_D,  RSM_SIZE_D,  v)
 #define RSM_SET_Du(i,v)  RSM_SET_ARGN(i, RSM_POS_Dw, RSM_SIZE_Dw, v)
 
@@ -241,10 +252,10 @@ _( RET   , _    , "ret" /* return */)\
   | (1 << RSM_POS_B) | ( ((rinstr)a) << RSM_POS_Aw ) )
 #define RSM_MAKE__(op) ((rinstr)op)
 
-#define RSM_MAKE_As(op,a)          RSM_MAKE_Au(op,((rinstr)(a)) + (RSM_MAX_Aw / 2))
-#define RSM_MAKE_ABs(op,a,b)       RSM_MAKE_ABu(op,a,((rinstr)(b)) + (RSM_MAX_Bw / 2))
-#define RSM_MAKE_ABCs(op,a,b,c)    RSM_MAKE_ABCu(op,a,b,((rinstr)(c)) + (RSM_MAX_Cw / 2))
-#define RSM_MAKE_ABCDs(op,a,b,c,d) RSM_MAKE_ABCDu(op,a,b,c,((rinstr)(d)) + (RSM_MAX_Dw / 2))
+#define RSM_MAKE_As(op,a)          RSM_MAKE_Au(op,((rinstr)(a)) + (RSM_MAX_Au / 2))
+#define RSM_MAKE_ABs(op,a,b)       RSM_MAKE_ABu(op,a,((rinstr)(b)) + (RSM_MAX_Bu / 2))
+#define RSM_MAKE_ABCs(op,a,b,c)    RSM_MAKE_ABCu(op,a,b,((rinstr)(c)) + (RSM_MAX_Cu / 2))
+#define RSM_MAKE_ABCDs(op,a,b,c,d) RSM_MAKE_ABCDu(op,a,b,c,((rinstr)(d)) + (RSM_MAX_Du / 2))
 
 // rop, rop_* -- opcode
 typedef u8 rop;

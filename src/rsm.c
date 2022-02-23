@@ -63,7 +63,10 @@ EXPORT void* wmresize(void* p, usize newsize, usize oldsize) {
   return rmem_resize(mem, p, newsize, oldsize); }
 EXPORT void wmfree(void* p, usize size) { return rmem_free(mem, p, size); }
 
-static bool diaghandler(const rdiag* d, void* _) { cresult.errmsg = d->msg; return false; }
+static bool diaghandler(const rdiag* d, void* _) {
+  cresult.errmsg = d->msg;
+  return d->code != 1; // stop on error
+}
 
 EXPORT void* wcompile(const char* srcname, const char* srcdata, usize srclen) {
   rcomp comp = {

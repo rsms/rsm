@@ -18,7 +18,11 @@
 #define RDs ( RSM_GET_Di(in) ? FMTs((i64)RSM_GET_Ds(in)) : RD )
 
 // ANSI colors: (\e[3Nm or \e[9Nm) 1 red, 2 green, 3 yellow, 4 blue, 5 magenta, 6 cyan
-#define FMTR(v) abuf_fmt(s, "\t\e[9%cmR%u\e[39m", '1'+((v)%6), (v))
+#ifdef __wasm__
+  #define FMTR(v) abuf_fmt(s, "\tR%u", (v))
+#else
+  #define FMTR(v) abuf_fmt(s, "\t\e[9%cmR%u\e[39m", '1'+((v)%6), (v))
+#endif
 #define FMTu(v) abuf_fmt(s, "\t0x%llx", (v))
 #define FMTs(v) abuf_fmt(s, "\t%lld", (v))
 

@@ -79,7 +79,9 @@ typedef unsigned long       usize;
 #else
   #define FALLTHROUGH
 #endif
-#if __has_attribute(musttail)
+#if __has_attribute(musttail) && !defined(__wasm__)
+  // Note on "!defined(__wasm__)": clang 13 claims to have this attribute for wasm
+  // targets but it's actually not implemented and causes an error.
   #define MUSTTAIL __attribute__((musttail))
 #else
   #define MUSTTAIL
@@ -113,7 +115,7 @@ typedef unsigned long       usize;
 #endif
 
 // _Noreturn abort()
-#ifdef R_WITH_LIBC
+#ifndef RSM_NO_LIBC
   void abort(void); // stdlib.h
 #elif __has_builtin(__builtin_trap)
   #define abort __builtin_trap
@@ -195,12 +197,6 @@ enum rerror {
   rerr_overflow      = -14, // value too large
 };
 
-// libc host-independent functions
-#define memset __builtin_memset
-#define memcpy __builtin_memcpy
-#define memcmp __builtin_memcmp
-#define strlen __builtin_strlen
-#define strcmp __builtin_strcmp
 typedef __builtin_va_list va_list;
 #ifndef va_start
   #define va_start __builtin_va_start
@@ -216,20 +212,27 @@ typedef __builtin_va_list va_list;
 #define panic(fmt, args...) _panic(__FILE__, __LINE__, __FUNCTION__, fmt, ##args)
 
 // void log(const char* fmt, ...)
-#ifdef R_WITH_LIBC
+#ifdef RSM_NO_LIBC
+  #ifdef __wasm__
+    // imported by wasm module
+    // __attribute__((visibility("default"))) void logv(const char* _Nonnull format, va_list);
+    void logv(const char* _Nonnull format, va_list);
+    ATTR_FORMAT(printf, 1, 2) inline static void log(const char* _Nonnull format, ...) {
+      va_list ap;
+      va_start(ap, format);
+      logv(format, ap);
+      va_end(ap);
+    }
+  #else
+    #warning no log() implementation
+    #define log(format, ...) ((void)0)
+    #define logv(format, ap) ((void)0)
+  #endif
+#else
   #include <stdio.h>
   #define log(format, args...) ({ fprintf(stderr, format "\n", ##args); ((void)0); })
   #define logv(format, ap)     ({ vfprintf(stderr, format "\n", (ap)); ((void)0); })
-#else
-  // TODO implemented for no-libc
-  #define log(format, ...) ((void)0)
-  #define logv(format, ap) ((void)0)
 #endif
-
-// void errlog(const char* fmt, ...)
-#define errlog(format, args...) ({                              \
-  log("error: " format " (%s:%d)", ##args, __FILE__, __LINE__); \
-  fflush(stderr); })
 
 // void assert(expr condition)
 #undef assert
@@ -239,9 +242,9 @@ typedef __builtin_va_list va_list;
   #endif
   #undef DEBUG
   #undef NDEBUG
-  #undef R_SAFE
+  #undef RSM_SAFE
   #define DEBUG 1
-  #define R_SAFE 1
+  #define RSM_SAFE 1
 
   #define _assertfail(fmt, args...) \
     _panic(__FILE__, __LINE__, __FUNCTION__, "Assertion failed: " fmt, args)
@@ -285,15 +288,15 @@ typedef __builtin_va_list va_list;
   #define assertnotnull(a)        ({ a; }) /* note: (a) causes "unused" warnings */
 #endif /* !defined(NDEBUG) */
 
-// R_SAFE -- checks enabled in "debug" and "safe" builds (but not in "fast" builds.)
+// RSM_SAFE -- checks enabled in "debug" and "safe" builds (but not in "fast" builds.)
 //
 // void safecheck(EXPR)
 // void safecheckf(EXPR, const char* fmt, ...)
 // typeof(EXPR) safenotnull(EXPR)
 //
-#if defined(R_SAFE)
-  #undef R_SAFE
-  #define R_SAFE 1
+#if defined(RSM_SAFE)
+  #undef RSM_SAFE
+  #define RSM_SAFE 1
   #define _safefail(fmt, args...) _panic(__FILE__, __LINE__, __FUNCTION__, fmt, ##args)
   #define safecheckf(cond, fmt, args...) if UNLIKELY(!(cond)) _safefail(fmt, ##args)
   #ifdef DEBUG
@@ -319,7 +322,10 @@ typedef __builtin_va_list va_list;
 
 // void dlog(const char* fmt, ...)
 #ifdef DEBUG
-  #ifdef R_WITH_LIBC
+  #ifdef RSM_NO_LIBC
+    #define dlog(format, args...) \
+      log("[D] " format " (%s:%d)", ##args, __FILE__, __LINE__)
+  #else
     #include <unistd.h> // isatty
     #define dlog(format, args...) ({                                 \
       if (isatty(2)) log("\e[1;35m▍\e[0m" format " \e[2m%s:%d\e[0m", \
@@ -327,17 +333,55 @@ typedef __builtin_va_list va_list;
       else           log("[D] " format " (%s:%d)",                   \
                          ##args, __FILE__, __LINE__);                \
       fflush(stderr); })
-  #else
-    #define dlog(format, args...) \
-      log("[D] " format " (%s:%d)", ##args, __FILE__, __LINE__)
   #endif
 #else
   #define dlog(format, ...) ((void)0)
 #endif
 
 // --------------------------------------------------------------------------------------
-// internal utility functions, like a string buffer. Not namespaced. See util.c
 RSM_ASSUME_NONNULL_BEGIN
+
+// minimal set of libc functions
+#define HAS_LIBC_BUILTIN(f) (__has_builtin(f) && (!defined(__wasm__) || defined(__wasi__)))
+
+#if HAS_LIBC_BUILTIN(__builtin_memset)
+  #define memset __builtin_memset
+#else
+  void* memset(void* p, int c, usize n);
+#endif
+
+#if HAS_LIBC_BUILTIN(__builtin_memcpy)
+  #define memcpy __builtin_memcpy
+#else
+  void* memcpy(void* restrict dst, const void* restrict src, usize n);
+#endif
+
+#if HAS_LIBC_BUILTIN(__builtin_memcmp)
+  #define memcmp __builtin_memcmp
+#else
+  int memcmp(const void* l, const void* r, usize n);
+#endif
+
+#if HAS_LIBC_BUILTIN(__builtin_strlen)
+  #define strlen __builtin_strlen
+#else
+  usize strlen(const char* s);
+#endif
+
+#if HAS_LIBC_BUILTIN(__builtin_strcmp)
+  #define strcmp __builtin_strcmp
+#else
+  int strcmp(const char* l, const char* r);
+#endif
+
+#if defined(__wasm__) && !defined(__wasi__)
+  int vsnprintf(char *restrict s, usize n, const char *restrict fmt, va_list ap);
+  int snprintf(char* restrict s, usize n, const char* restrict fmt, ...);
+#endif // printf
+
+
+// --------------------------------------------------------------------------------------
+// internal utility functions, like a string buffer. Not namespaced. See util.c
 
 #define UTF8_SELF 0x80 // UTF-8 "self" byte constant
 
@@ -396,16 +440,16 @@ struct abuf {
   char* lastp;
   usize len;
 };
-#define abuf_make(p,size) ({ /* abuf abuf_make(char* buf, usize bufcap)     */\
-  usize z__ = (usize)(size); char* p__ = (p); static char x__;                \
-  UNLIKELY(z__ == 0) ? (abuf){ &x__, &x__, 0 } : (abuf){ p__, p__+z__-1, 0 }; \
+extern char abuf_zeroc;
+#define abuf_make(p,size) ({ /* abuf abuf_make(char* buf, usize bufcap)                   */\
+  usize z__ = (usize)(size); char* p__ = (p);                                               \
+  UNLIKELY(z__ == 0) ? (abuf){ &abuf_zeroc, &abuf_zeroc, 0 } : (abuf){ p__, p__+z__-1, 0 }; \
 })
 
 // append functions
 void abuf_append(abuf* s, const char* p, usize len);
 void abuf_c(abuf* s, char c);
 void abuf_u64(abuf* s, u64 v, u32 base);
-void abuf_f64(abuf* s, f64 v, int ndec);
 void abuf_fill(abuf* s, char c, usize len); // like memset
 void abuf_repr(abuf* s, const char* srcp, usize len);
 void abuf_fmt(abuf* s, const char* fmt, ...) ATTR_FORMAT(printf, 2, 3);

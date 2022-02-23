@@ -1,10 +1,17 @@
 // RSM virtual machine API
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
-#ifdef __cplusplus
+#if defined(__wasm__) && !defined(__wasi__) && defined(__cplusplus)
   #define RSMAPI extern "C"
+#elif defined(__wasm__) && !defined(__wasi__)
+  #define RSMAPI // not exported in pure WASM builds
+#elif defined(__cplusplus)
+  #define RSMAPI extern "C" __attribute__((visibility("default")))
 #else
-  #define RSMAPI
+  #define RSMAPI __attribute__((visibility("default")))
+#endif
+#if !defined(RSM_NO_LIBC) && defined(__wasm__) && !defined(__wasi__)
+  #define RSM_NO_LIBC
 #endif
 #ifndef RSM_NO_INT_DEFS
   #ifndef __cplusplus

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
 
-#ifdef R_WITH_LIBC
+#ifndef RSM_NO_LIBC
   #include <stdio.h>
   #include <fcntl.h>
   #include <errno.h>
@@ -57,11 +57,14 @@
     #endif
     #define HAS_MMAP
   #endif // _WIN32
-#endif // R_WITH_LIBC
+#endif // RSM_NO_LIBC
 #ifndef MEM_PAGESIZE
   // fallback value (should match wasm32)
   #define MEM_PAGESIZE ((usize)4096U)
 #endif
+
+
+char abuf_zeroc = 0;
 
 
 const char* rerror_str(rerror e) {
@@ -86,20 +89,24 @@ const char* rerror_str(rerror e) {
 }
 
 
-static rerror rerror_errno(int e) {
-  switch (e) {
-    case 0: return 0;
-    case EACCES: return rerr_access;
-    case EEXIST: return rerr_exists;
-    case ENOENT: return rerr_not_found;
-    case EBADF:  return rerr_badfd;
-    default: return rerr_invalid;
+#ifndef RSM_NO_LIBC
+  static rerror rerror_errno(int e) {
+    switch (e) {
+      case 0: return 0;
+      case EACCES: return rerr_access;
+      case EEXIST: return rerr_exists;
+      case ENOENT: return rerr_not_found;
+      case EBADF:  return rerr_badfd;
+      default: return rerr_invalid;
+    }
   }
-}
+#endif
 
 
 rerror mmapfile(const char* filename, void** p_put, usize* len_out) {
-  #ifdef R_WITH_LIBC
+  #ifdef RSM_NO_LIBC
+    return rerr_not_supported;
+  #else
     int fd = open(filename, O_RDONLY);
     if (fd < 0)
       return rerror_errno(errno);
@@ -119,20 +126,20 @@ rerror mmapfile(const char* filename, void** p_put, usize* len_out) {
 
     *p_put = p;
     return 0;
-  #else
-    return rerr_not_supported;
   #endif
 }
 
 void unmapfile(void* p, usize len) {
-  #ifdef R_WITH_LIBC
+  #ifndef RSM_NO_LIBC
     munmap(p, len);
   #endif
 }
 
 rerror read_stdin_data(rmem m, usize maxlen, void** p_put, usize* len_out) {
   *len_out = 0;
-  #ifdef R_WITH_LIBC
+  #ifdef RSM_NO_LIBC
+    return rerr_not_supported;
+  #else
     if (isatty(0))
       return rerr_badfd;
     usize cap = 4096;
@@ -153,8 +160,6 @@ rerror read_stdin_data(rmem m, usize maxlen, void** p_put, usize* len_out) {
     *p_put = dst;
     *len_out = len;
     return 0;
-  #else
-    return rerr_not_supported;
   #endif
 }
 
@@ -168,7 +173,7 @@ static char* strrevn(char* s, usize len) {
 }
 
 usize stru64(char buf[64], u64 v, u32 base) {
-  static const char chars[] =
+  static const char* chars =
     "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
   base = MAX(2, MIN(base, 62));
   char* p = buf;
@@ -333,41 +338,42 @@ void abuf_repr(abuf* s, const char* srcp, usize len) {
 }
 
 
-void abuf_f64(abuf* s, f64 v, int ndec) {
-  #ifndef R_WITH_LIBC
-    #warning TODO implement abuf_f64 for non-libc
-    assert(!"not implemented");
-    // TODO: consider using fmt_fp (stdio/vfprintf.c) in musl
-  #else
-    usize cap = abuf_avail(s);
-    int n;
-    if (ndec > -1) {
-      n = snprintf(s->p, cap+1, "%.*f", ndec, v);
-    } else {
-      n = snprintf(s->p, cap+1, "%f", v);
-    }
-    if (UNLIKELY( n <= 0 ))
-      return;
-    if (ndec < 0) {
-      // trim trailing zeros
-      char* p = &s->p[MIN((usize)n, cap) - 1];
-      while (*p == '0') {
-        p--;
-      }
-      if (*p == '.')
-        p++; // avoid "1.00" becoming "1." (instead, let it be "1.0")
-      n = (int)(uintptr)(p - s->p) + 1;
-      s->p[MIN((usize)n, cap)] = 0;
-    }
-    s->p += MIN((usize)n, cap);
-    s->len += n;
-  #endif
-}
+// void abuf_f64(abuf* s, f64 v, int ndec) {
+//   #ifdef RSM_NO_LIBC
+//     #warning TODO implement abuf_f64 for non-libc
+//     assert(!"not implemented");
+//     // TODO: consider using fmt_fp (stdio/vfprintf.c) in musl
+//   #else
+//     usize cap = abuf_avail(s);
+//     int n;
+//     if (ndec > -1) {
+//       n = snprintf(s->p, cap+1, "%.*f", ndec, v);
+//     } else {
+//       n = snprintf(s->p, cap+1, "%f", v);
+//     }
+//     if (UNLIKELY( n <= 0 ))
+//       return;
+//     if (ndec < 0) {
+//       // trim trailing zeros
+//       char* p = &s->p[MIN((usize)n, cap) - 1];
+//       while (*p == '0') {
+//         p--;
+//       }
+//       if (*p == '.')
+//         p++; // avoid "1.00" becoming "1." (instead, let it be "1.0")
+//       n = (int)(uintptr)(p - s->p) + 1;
+//       s->p[MIN((usize)n, cap)] = 0;
+//     }
+//     s->p += MIN((usize)n, cap);
+//     s->len += n;
+//   #endif
+// }
 
 
 void abuf_fmtv(abuf* s, const char* fmt, va_list ap) {
-  #ifndef R_WITH_LIBC
-    assert(!"not implemented");
+  #if defined(RSM_NO_LIBC) && !defined(__wasm__)
+    dlog("abuf_fmtv not implemented");
+    int n = vsnprintf(tmpbuf, sizeof(tmpbuf), format, ap);
   #else
     int n = vsnprintf(s->p, abuf_avail(s), fmt, ap);
     s->len += (usize)n;
@@ -390,7 +396,9 @@ bool abuf_endswith(const abuf* s, const char* str, usize len) {
 
 
 NORETURN void _panic(const char* file, int line, const char* fun, const char* fmt, ...) {
-  #ifdef R_WITH_LIBC
+  #ifdef RSM_NO_LIBC
+    log("panic");
+  #else
     FILE* fp = stderr;
     flockfile(fp);
     fprintf(fp, "\npanic: ");
@@ -417,8 +425,6 @@ NORETURN void _panic(const char* file, int line, const char* fun, const char* fm
     funlockfile(fp);
     fflush(fp);
     fsync(STDERR_FILENO);
-  #else
-    log("panic");
   #endif
   abort();
 }
@@ -501,3 +507,109 @@ bool vmem_free(void* ptr, usize nbytes) {
     return false;
   #endif
 }
+
+
+// #if defined(__wasm__) && !defined(__wasi__)
+//   __attribute__((visibility("default"))) void log1(const char* _Nonnull s, int len);
+
+//   static char tmpbuf[4096*16]; // 65kB
+
+//   void logv(const char* _Nonnull format, va_list ap) {
+//     int n = vsnprintf(tmpbuf, sizeof(tmpbuf), format, ap);
+//     log1(tmpbuf, MIN(n, (int)sizeof(tmpbuf)));
+//   }
+// #endif // printf
+
+
+
+/* --- BEGIN musl code, licensed as followed (MIT) ---
+Copyright © 2005-2020 Rich Felker, et al.
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
+
+#if !HAS_LIBC_BUILTIN(__builtin_memset)
+  void* memset(void* dst, int c, usize n) {
+    u8* s = dst;
+    usize k;
+
+    // Fill head and tail with minimal branching. Each conditional ensures that all
+    // the subsequently used offsets are well-defined and in the dst region.
+
+    if (!n) return dst;
+    s[0] = c;
+    s[n-1] = c;
+    if (n <= 2) return dst;
+    s[1] = c;
+    s[2] = c;
+    s[n-2] = c;
+    s[n-3] = c;
+    if (n <= 6) return dst;
+    s[3] = c;
+    s[n-4] = c;
+    if (n <= 8) return dst;
+
+    // Advance pointer to align it at a 4-byte boundary, and truncate n to a multiple of 4.
+    // The previous code already took care of any head/tail that get cut off by the alignment.
+    k = -(uintptr)s & 3;
+    s += k;
+    n -= k;
+    n &= -4;
+
+    for (; n; n--, s++)
+      *s = c;
+    return dst;
+  }
+#endif
+
+#if !HAS_LIBC_BUILTIN(__builtin_memcpy)
+  void* memcpy(void* restrict dst, const void* restrict src, usize n) {
+    u8* d = dst;
+    const u8* s = src;
+    for (; n; n--)
+      *d++ = *s++;
+    return dst;
+  }
+#endif
+
+#if !HAS_LIBC_BUILTIN(__builtin_memcmp)
+  int memcmp(const void* a, const void* b, usize n) {
+    const u8* l = a, *r = b;
+    for (; n && *l == *r; n--, l++, r++) {}
+    return n ? *l - *r : 0;
+  }
+#endif
+
+#if !HAS_LIBC_BUILTIN(__builtin_strcmp)
+  int strcmp(const char* l, const char* r) {
+    for (; *l==*r && *l; l++, r++);
+    return *(unsigned char *)l - *(unsigned char *)r;
+  }
+#endif
+
+#if !HAS_LIBC_BUILTIN(__builtin_strlen)
+  usize strlen(const char* s) {
+    const char* p = s;
+    for (; *s; s++);
+    return (usize)(uintptr)(s - p);
+  }
+#endif
+
+
+// --- END musl code (resume original rsm code) ---

@@ -21,6 +21,12 @@ Constraints
 the recursive acronym "RSM smol machine" (in case you miss the golden days of PHP), or
 anything you'd like it to mean! Your imagination is really the limit here my friend.
 
+TODO
+- memory (program layout, load & store, grow?)
+- syscalls..? Some way to interface with peripherals/devices, time, file system etc
+- display framebuffer
+- audio
+
 
 ## Building & running
 

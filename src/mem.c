@@ -13,6 +13,7 @@ struct bufalloc {
   usize cap; // memory buffer size in bytes
   bool  ismmap;
 };
+
 static_assert(sizeof(bufalloc) <= RMEM_MK_MIN, "");
 
 inline static bool ba_istail(bufalloc* a, void* p, usize size) {

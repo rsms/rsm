@@ -1,0 +1,2 @@
+# names of functions imported into the wasm module
+log1

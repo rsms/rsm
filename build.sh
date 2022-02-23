@@ -87,26 +87,29 @@ if [ -n "$WATCH" ]; then
   exit 0
 fi
 
+CC_IS_CLANG=false
 if [ -z "$CC" ]; then
   # use clang from known preferred location, if available
   if [ -x /usr/local/opt/llvm/bin/clang ]; then
     export PATH=/usr/local/opt/llvm/bin:$PATH
     export CC=clang
-    CC_IS_CLANG=1
+    CC_IS_CLANG=true
   elif [ -x /opt/homebrew/opt/llvm/bin/clang ]; then
     export PATH=/opt/homebrew/opt/llvm/bin:$PATH
     export CC=clang
-    CC_IS_CLANG=1
+    CC_IS_CLANG=true
   else
     export CC=cc
   fi
 fi
 CC_PATH=$(command -v "$CC" || true)
 [ -f "$CC_PATH" ] || _err "CC (\"$CC\") not found"
-if [ -z "$CC_IS_CLANG" ] && $CC --version 2>/dev/null | head -n1 | grep -q clang; then
-  CC_IS_CLANG=1
+if ! $CC_IS_CLANG && $CC --version 2>/dev/null | head -n1 | grep -q clang; then
+  CC_IS_CLANG=true
 fi
 [ -z "$_WATCHED" ] && echo "using compiler $CC_PATH"
+
+DEBUG=false; [ "$BUILD_MODE" = "debug" ] && DEBUG=true
 
 # check compiler and clear $OUTDIR if compiler changed
 CCONFIG_FILE=$OUTDIR/cconfig.txt
@@ -118,26 +121,36 @@ if [ "$(cat "$CCONFIG_FILE" 2>/dev/null)" != "$CCONFIG" ]; then
   echo "$CCONFIG" > "$CCONFIG_FILE"
 fi
 
+# flags for all targets (in addition to unconditional flags in ninja template)
 CFLAGS=( $CFLAGS )
-LDFLAGS=( $LDFLAGS )
 
-CFLAGS+=( -DR_WITH_LIBC )
+[ "$BUILD_MODE" = "safe" ] && CFLAGS+=( -DRSM_SAFE )
+$DEBUG                     && CFLAGS+=( -O0 -DDEBUG -ferror-limit=6 )
+! $DEBUG                   && CFLAGS+=( -DNDEBUG )
+[ -n "$TESTING_ENABLED" ]  && CFLAGS+=( -DRSM_TESTING_ENABLED )
+! $DEBUG && $CC_IS_CLANG   && CFLAGS+=( -flto )
 
-if [ "$BUILD_MODE" != "debug" ]; then
-  CFLAGS+=( -O3 -mtune=native -DNDEBUG )
-  [ "$BUILD_MODE" = "safe" ] && CFLAGS+=( -DR_SAFE )
-  LDFLAGS+=( -flto )
-  # LDFLAGS+=( -dead_strip )
-else
-  CFLAGS+=( -DDEBUG -ferror-limit=6 )
-  [ -n "$TESTING_ENABLED" ] && CFLAGS+=( -DR_TESTING_ENABLED )
+# target-specific flags (in addition to unconditional flags in ninja template)
+CFLAGS_WASM=( -DRSM_NO_LIBC )
+CFLAGS_HOST=()
+LDFLAGS_HOST=( $LDFLAGS )      # LDFLAGS from env
+LDFLAGS_WASM=( $LDFLAGS_WASM ) # LDFLAGS_WASM from env (note: liker is wasm-ld, not cc)
+
+if ! $DEBUG; then
+  CFLAGS_HOST+=( -O3 -mtune=native )
+  CFLAGS_WASM+=( -Oz )
+  LDFLAGS_WASM+=( --lto-O3 --no-lto-legacy-pass-manager )
+  # LDFLAGS_WASM+=( -z stack-size=$[128 * 1024] ) # larger stack, smaller heap
+  # LDFLAGS_WASM+=( --compress-relocations --strip-debug )
+  # LDFLAGS_HOST+=( -dead_strip )
+  $CC_IS_CLANG && LDFLAGS_HOST+=( -flto )
 fi
 
 # enable llvm address and UD sanitizer in debug builds
-if [ -n "$CC_IS_CLANG" -a "$BUILD_MODE" = "debug" ]; then
+if $DEBUG && $CC_IS_CLANG; then
   # See https://clang.llvm.org/docs/AddressSanitizer.html
   # See https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html
-  CFLAGS+=(
+  CFLAGS_HOST+=(
     -fsanitize=address,undefined \
     \
     -fsanitize-address-use-after-scope \
@@ -149,12 +162,9 @@ if [ -n "$CC_IS_CLANG" -a "$BUILD_MODE" = "debug" ]; then
     \
     -fno-omit-frame-pointer \
     -fno-optimize-sibling-calls \
-    \
-    -flto \
   )
-  LDFLAGS+=(
+  LDFLAGS_HOST+=(
     -fsanitize=address,undefined \
-    -flto \
   )
 fi
 
@@ -164,6 +174,7 @@ builddir = $OUTDIR
 objdir = \$builddir/$BUILD_MODE
 
 cflags = $
+  -std=c11 $
   -g $
   -fcolor-diagnostics $
   -feliminate-unused-debug-types $
@@ -177,23 +188,37 @@ cflags = $
   -Werror=format-insufficient-args $
   -Wcovered-switch-default ${CFLAGS[@]}
 
-cflags_c = $
-  -std=c11
+cflags_host = ${CFLAGS_HOST[@]}
 
-cflags_cxx = $
-  -std=c++14 $
-  -fvisibility-inlines-hidden $
-  -fno-exceptions $
-  -fno-rtti
+cflags_wasm = $
+  --target=wasm32 $
+  --no-standard-libraries $
+  -fvisibility=hidden ${CFLAGS_WASM[@]}
 
-ldflags = -g ${LDFLAGS[@]}
+ldflags_host = ${LDFLAGS_HOST[@]}
+
+ldflags_wasm = $
+  -allow-undefined-file etc/wasm.syms $
+  --no-entry $
+  --no-gc-sections $
+  --export-dynamic $
+  --import-memory ${LDFLAGS_WASM[@]}
 
 rule link
-  command = $CC \$ldflags -o \$out \$in
+  command = $CC \$ldflags_host -o \$out \$in
+  description = link \$out
+
+rule link_wasm
+  command = wasm-ld \$ldflags_wasm \$in -o \$out
   description = link \$out
 
 rule cc
-  command = $CC -MMD -MF \$out.d \$cflags \$cflags_c -c \$in -o \$out
+  command = $CC -MMD -MF \$out.d \$cflags \$cflags_host -c \$in -o \$out
+  depfile = \$out.d
+  description = compile \$in
+
+rule cc_wasm
+  command = $CC -MMD -MF \$out.d \$cflags \$cflags_wasm -c \$in -o \$out
   depfile = \$out.d
   description = compile \$in
 
@@ -202,12 +227,15 @@ _END
 
 _objfile() { echo \$objdir/${1//\//.}.o; }
 _gen_obj_build_rules() {
+  local FLAVOR=$1 ; shift
   local OBJECT
+  local CC_RULE=cc
+  [ "$FLAVOR" = wasm ] && CC_RULE=cc_wasm
   for SOURCE in "$@"; do
-    OBJECT=$(_objfile "$SOURCE")
+    OBJECT=$(_objfile "$FLAVOR-$SOURCE")
     case "$SOURCE" in
       *.c|*.m)
-        echo "build $OBJECT: cc $SOURCE" >> build.ninja
+        echo "build $OBJECT: $CC_RULE $SOURCE" >> build.ninja
         ;;
       *) _err "don't know how to compile this file type ($SOURCE)"
     esac
@@ -216,16 +244,21 @@ _gen_obj_build_rules() {
 }
 
 if [ -n "$TESTING_ENABLED" ]; then
-  R_SOURCES=( $(find src -name '*.c') )
+  SOURCES=( $(find src -name '*.c') )
 else
-  R_SOURCES=( $(find src -name '*.c' -not -name '*_test.c' -not -name 'test.c') )
+  SOURCES=( $(find src -name '*.c' -not -name '*_test.c' -not -name 'test.c') )
 fi
 
-R_OBJECTS=( $(_gen_obj_build_rules "${R_SOURCES[@]}") )
+HOST_OBJECTS=( $(_gen_obj_build_rules "host" "${SOURCES[@]}") )
+WASM_OBJECTS=( $(_gen_obj_build_rules "wasm" "${SOURCES[@]}") )
 echo >> build.ninja
 
 echo "build rsm: phony \$builddir/rsm" >> build.ninja
-echo "build \$builddir/rsm: link ${R_OBJECTS[@]}" >> build.ninja
+echo "build \$builddir/rsm: link ${HOST_OBJECTS[@]}" >> build.ninja
+echo >> build.ninja
+
+echo "build rsm.wasm: phony \$builddir/rsm.wasm" >> build.ninja
+echo "build \$builddir/rsm.wasm: link_wasm ${WASM_OBJECTS[@]}" >> build.ninja
 echo >> build.ninja
 
 echo "default rsm" >> build.ninja

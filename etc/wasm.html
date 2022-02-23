@@ -1,0 +1,49 @@
+<html lang="en">
+<head><meta charset="utf-8"><title>rsm</title>
+<script type="module">
+// API
+//   interface VMCode { filename: string; length: number }
+//   interface RSMInstance {
+//     compile(source :string, filename? :string) :VMCode
+//       // Compiles RSM assembly to VM bytecode. Throws errors.
+//     vmexec(vmcode :VMCode, ...args :int[]) :int[8]
+//       // Takes up to 8 arguments (R0...R7), returns state of R0...R7
+//     vmfree(vmcode :VMCode) :void
+//       // Frees memory occupied by vmcode. After this call, vmcode.length==0
+//     log :(msg:string)=>void
+//       // Called by wasm module with log messages. Defaults to console.log
+//   }
+//   createRSMInstance(urlorp :string|Promise<ArrayBuffer>, nmempages? :number) :RSMInstance
+//     // Creates a new RSM WASM module instance and initializes it.
+//     // nmempages specifies the number of memory pages to allocate for the wasm instance.
+//     // (One page is 65536 B, 64 ikB.)
+//
+import { createRSMInstance } from "./rsm.js"
+(async() => {
+
+let rsm = await createRSMInstance("../out/rsm.wasm?" + Date.now())
+console.log("rsm",rsm)
+let vmcode = rsm.compile(`
+fun factorial (i32) i32 {
+    R1 = R0       // ACC = argument 0
+    R0 = 1        // RES
+    brz R1 end    // if n==0 goto end
+  b1:             // <- [b0] b1
+    R0 = R1 * R0  // RES = ACC * RES
+    R1 = R1 - 1   // ACC = ACC - 1
+    brnz R1  b1   // if n!=0 goto b1
+  end:            // <- b0 [b1]
+    ret           // RES is at R0
+}`)
+console.log("compiled", vmcode)
+console.log("running program\n" + rsm.vmfmt(vmcode))
+let result = rsm.vmexec(vmcode, 6)
+console.log("program ended. Register state:", result)
+rsm.vmfree(vmcode)
+
+})()
+</script>
+</head>
+<body>
+</body>
+</html>

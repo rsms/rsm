@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
 
-#ifdef DEBUG
+#if defined(DEBUG) && !defined(RSM_NO_LIBC)
+  #include <stdio.h>
+
   static void logstate_header() {
     fprintf(stderr, "\e[2m");
     for (int i = 0; i < 6; i++)

@@ -1012,9 +1012,17 @@ static bool getiargs(gstate* g, node* n, i32* argv, u32 wantargc) {
     argv[argc] = labelderef(g, g->ilen - 1, &arg->name);
     return true;
   case T_INT2 ... T_SINT16:
-    if UNLIKELY(arg->ival > RSM_MAX_Bw) {
-      errf(g->c, arg->line, arg->col, "value %llu too large", arg->ival);
-      return false;
+    if UNLIKELY(arg->ival > RSM_MAX_Dw) {
+      u64 maxval = RSM_MAX_Dw;
+      switch (argc) {
+        case 0: maxval = RSM_MAX_Aw; break;
+        case 1: maxval = RSM_MAX_Bw; break;
+        case 2: maxval = RSM_MAX_Cw; break;
+      }
+      if (arg->ival > maxval) {
+        errf(g->c, arg->line, arg->col, "value %llu too large", arg->ival);
+        return false;
+      }
     }
     argv[argc] = (i32)arg->ival;
     return true;

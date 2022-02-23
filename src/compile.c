@@ -1272,12 +1272,13 @@ void rcomp_dispose(rcomp* c) {
   gstate* g = c->_gstate;
   if (!g)
     return;
-  rarray_free(usize, &g->fv, c->mem);
   rarray_free(labelinfo, &g->lv, c->mem);
   rarray_free(labelinfo, &g->ulv, c->mem);
+  rarray_free(usize, &g->fv, c->mem);
   #ifdef DEBUG
   memset(g, 0, sizeof(gstate));
   #endif
+  rmem_free(c->mem, g, sizeof(gstate));
 }
 
 // compiler entry point

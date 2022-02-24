@@ -10,23 +10,30 @@ B=out/sinspect/$IF-stripped-prev.s
 D=out/sinspect/$IF.s.diff
 PF=out/sinspect/$IF.sh
 
-echo "$S2 ($IF)"
+echo "$S2"
 
 [ -x /usr/local/opt/llvm/bin/clang ] && export PATH=/usr/local/opt/llvm/bin:$PATH
-[ -f $S2 ] && cp $S2 $B
+CCDEF=cc ; command -v clang >/dev/null && CCDEF=clang
+CC=${CC:-$CCDEF}
 
-clang -Oz -std=c11 -S -o $S "$@"
+# copy previous, compile new
+[ -f $S2 ] && cp $S2 $B
+$CC -Oz -std=c11 -S -o $S "$@"
 
 eval "$(cat "$PF" 2>/dev/null)" || true
 
 IGN_PAT='^\s*[;\.#]'
 LABEL_PAT='^[0-9A-Za-z_]+\:'
+ARCH=$(uname -m)
+case "$(command -v $CC)" in
+  */clang) ARCH=$(clang -print-effective-triple | cut -d- -f1) ;;
+esac
 
-case "$(clang -print-effective-triple | cut -d- -f1)" in
+case "$ARCH" in
 arm64)  BR_PAT='^\s*B(?:cc|L|LR|R)|CBN?Z|RET|TBN?Z\b' ;;
 x86_64) BR_PAT='^\s*J(?:A|BE?|CXZ|E|GE?|LE?|NB|NE|NO|NP|NS|O|P|S|Z)\b' ;;
 *)
-  echo "don't know how to find stats for $(clang -print-effective-triple | cut -d- -f1)" >&2
+  echo "don't know how to find stats for $ARCH" >&2
   exit 1
 esac
 

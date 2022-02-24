@@ -66,6 +66,6 @@ _report() {
 }
 
 _report "instructions" $NINSTR $PREV_NINSTR
-_report "braches"      $NBR    $PREV_NBR
+_report "branches"     $NBR    $PREV_NBR
 _report "labels"       $NLABEL $PREV_NLABEL
 _report "file size"    $NBYTE  $PREV_NBYTE

@@ -137,7 +137,7 @@ LDFLAGS_HOST=( $LDFLAGS )      # LDFLAGS from env
 LDFLAGS_WASM=( $LDFLAGS_WASM ) # LDFLAGS_WASM from env (note: liker is wasm-ld, not cc)
 
 if ! $DEBUG; then
-  CFLAGS_HOST+=( -O3 -mtune=native )
+  CFLAGS_HOST+=( -O3 -mtune=native -fomit-frame-pointer )
   CFLAGS_WASM+=( -Oz )
   LDFLAGS_WASM+=( --lto-O3 --no-lto-legacy-pass-manager )
   # LDFLAGS_WASM+=( -z stack-size=$[128 * 1024] ) # larger stack, smaller heap

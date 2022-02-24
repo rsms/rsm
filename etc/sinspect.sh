@@ -2,17 +2,22 @@
 set -e
 if [ $1 = "-w" ]; then shift; exec autorun -no-banner "$1" -- "$0" "$@"; fi
 
-S=out/sinspect.s
-S2=out/sinspect-stripped.s
-B=out/sinspect-stripped-prev.s
-D=out/sinspect.s.diff
+mkdir -p out/sinspect
+IF=$(basename "$1")
+S=out/sinspect/$IF-verbatim.s
+S2=out/sinspect/$IF.s
+B=out/sinspect/$IF-stripped-prev.s
+D=out/sinspect/$IF.s.diff
+PF=out/sinspect/$IF.sh
+
+echo "$S2 ($IF)"
 
 [ -x /usr/local/opt/llvm/bin/clang ] && export PATH=/usr/local/opt/llvm/bin:$PATH
 [ -f $S2 ] && cp $S2 $B
 
 clang -Oz -std=c11 -S -o $S "$@"
 
-eval "$(cat out/sinspect_prev 2>/dev/null)" || true
+eval "$(cat "$PF" 2>/dev/null)" || true
 
 IGN_PAT='^\s*[;\.#]'
 LABEL_PAT='^[0-9A-Za-z_]+\:'
@@ -32,7 +37,7 @@ NINSTR=$(grep -Ev "$LABEL_PAT" $S2 | wc -l | awk '{print $1}')
 NLABEL=$(grep -E "$LABEL_PAT" $S2 | wc -l | awk '{print $1}')
 NBR=$(grep -Ei "$BR_PAT" $S2 | wc -l | awk '{print $1}')
 
-cat <<END > out/sinspect_prev
+cat <<END > "$PF"
 PREV_NBYTE=$NBYTE
 PREV_NINSTR=$NINSTR
 PREV_NBR=$NBR

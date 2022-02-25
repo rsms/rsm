@@ -147,13 +147,19 @@ typedef unsigned long       usize;
     ((sizeof(x)/sizeof(0[x])) / ((usize)(!(sizeof(x) % sizeof(0[x])))))
 #endif
 
-#define MAX(a,b) \
-  ({__typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a > _b ? _a : _b; })
+#ifndef offsetof
+  #if __has_builtin(__builtin_offsetof)
+    #define offsetof __builtin_offsetof
+  #else
+    #define offsetof(st, m) ((usize)&(((st*)0)->m))
+  #endif
+#endif
+
+#define MAX(a,b) ({__typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a > _b ? _a : _b; })
   // turns into CMP + CMOV{L,G} on x86_64
   // turns into CMP + CSEL on arm64
 
-#define MIN(a,b) \
-  ({__typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a < _b ? _a : _b; })
+#define MIN(a,b) ({__typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a < _b ? _a : _b; })
   // turns into CMP + CMOV{L,G} on x86_64
   // turns into CMP + CSEL on arm64
 
@@ -300,6 +306,7 @@ typedef __builtin_va_list va_list;
 // RSM_SAFE -- checks enabled in "debug" and "safe" builds (but not in "fast" builds.)
 //
 // void safecheck(EXPR)
+// EXPR safecheckx(EXPR)
 // void safecheckf(EXPR, const char* fmt, ...)
 // typeof(EXPR) safenotnull(EXPR)
 //
@@ -310,6 +317,10 @@ typedef __builtin_va_list va_list;
   #define safecheckf(cond, fmt, args...) if UNLIKELY(!(cond)) _safefail(fmt, ##args)
   #ifdef DEBUG
     #define safecheck(cond) if UNLIKELY(!(cond)) _safefail("safecheck (%s)", #cond)
+    #define safecheckexpr(expr, expect) ({                                        \
+      __typeof__(expr) val__ = (expr);                                            \
+      safecheckf(val__ == expect, "unexpected value (%s != %s)", #expr, #expect); \
+      val__; })
     #define safenotnull(a) ({                                                \
       __typeof__(a) val__ = (a);                                             \
       ATTR_UNUSED const void* valp__ = val__; /* build bug on non-pointer */ \
@@ -317,15 +328,18 @@ typedef __builtin_va_list va_list;
       val__; })
   #else
     #define safecheck(cond) if UNLIKELY(!(cond)) _safefail("safecheck")
+    #define safecheckexpr(expr, expect) ({ \
+      __typeof__(expr) val__ = (expr); safecheck(val__ == expect); val__; })
     #define safenotnull(a) ({                                                \
       __typeof__(a) val__ = (a);                                             \
       ATTR_UNUSED const void* valp__ = val__; /* build bug on non-pointer */ \
-      safecheckf(val__ != NULL, "unexpected NULL");                          \
+      safecheckf(val__ != NULL, "NULL");                                     \
       val__; })
   #endif
 #else
-  #define safecheck(cond)                ((void)0)
   #define safecheckf(cond, fmt, args...) ((void)0)
+  #define safecheck(cond)                ((void)0)
+  #define safecheckexpr(expr, expect)    (expr) /* intentionally complain if not used */
   #define safenotnull(a)                 ({ a; }) /* note: (a) causes "unused" warnings */
 #endif
 
@@ -440,9 +454,13 @@ struct rarray {
   u32 cap;
 };
 #define rarray_at(TYPE, a, index)           ( ((TYPE*)(a)->v) + (index) )
-#define rarray_push(TYPE, a, m)             ( (TYPE*)_rarray_push((a), (m), sizeof(TYPE)) )
-#define rarray_remove(TYPE, a, start, len)  _rarray_remove((a), sizeof(TYPE), (start), (len))
-#define rarray_free(TYPE, a, m)  if ((a)->v) rmem_free((m),(a)->v,(usize)(a)->cap*sizeof(TYPE))
+#define rarray_push(TYPE, a, m)             ((TYPE*)rarray_zpush(sizeof(TYPE),(a),(m)))
+#define rarray_remove(TYPE, a, start, len)  rarray_zremove(sizeof(TYPE),(a),(start),(len))
+#define rarray_free(TYPE, a, m)             rarray_zfree(sizeof(TYPE),(a),(m))
+
+#define rarray_zpush(esize, a, m)             _rarray_push((a), (m), esize)
+#define rarray_zremove(esize, a, start, len)  _rarray_remove((a), esize, (start), (len))
+#define rarray_zfree(esize, a, m)  if ((a)->v) rmem_free((m),(a)->v,(usize)(a)->cap*esize)
 
 bool rarray_grow(rarray* a, rmem, usize elemsize, u32 addl);
 void _rarray_remove(rarray* a, u32 elemsize, u32 start, u32 len);
@@ -453,10 +471,71 @@ inline static void* nullable _rarray_push(rarray* a, rmem m, u32 elemsize) {
 }
 
 
+// smap is a byte string to pointer map, implemented as a hash map
+typedef struct smap    smap;    // string-keyed map
+typedef struct smapent smapent; // smap entry
+typedef u8             maplf;  // load factor
+struct smapent {
+  const char* nullable key; // NULL if this entry is empty
+  usize                keylen;
+  uintptr              value;
+};
+struct smap {
+  u32   cap;  // capacity of entries
+  u32   len;  // number of items currently stored in the map (count)
+  u32   gcap; // growth watermark cap
+  maplf lf;   // growth watermark load factor (shift value; 1|2|3|4)
+  smapent* nullable entries;
+  rmem mem;
+};
+enum maplf {
+  MAPLF_1 = 1, // grow when 50% full
+  MAPLF_2 = 2, // grow when 75% full
+  MAPLF_3 = 3, // grow when 88% full
+  MAPLF_4 = 4, // grow when 94% full
+} RSM_END_ENUM(maplf)
+
+// smap_make initializes a new map m.
+// hint can be 0 and provides a hint as to how many items will initially be stored.
+// Returns m on success, NULL on memory allocation failure or overflow from large hint.
+smap* nullable smap_make(smap* m, rmem, u32 hint, maplf);
+void smap_dispose(smap* m); // free m->entries. m is invalid; use smap_make to reuse
+void smap_clear(smap* m);   // removes all items. m remains valid
+
+// smap_assign assigns to the map, returning the location for its value,
+// or NULL if memory allocation during growth failed. May return an existing item's value.
+uintptr* nullable smap_assign(smap* m, const char* key, usize keylen);
+
+// smap_lookup retrieves the value for key; NULL if not found.
+uintptr* nullable smap_lookup(smap* m, const char* key, usize keylen);
+
+// smap_del removes an entry for key, returning the location of its value if an entry was
+// found and deleted, or NULL if key is not in the map.
+uintptr* nullable smap_del(smap* m, const char* key, usize keylen);
+
+// smap_itstart and smap_itnext iterates over a map.
+// You can change the value of an entry during iteration but must not change the key.
+// Any mutation to the map during iteration will invalidate the iterator.
+// Example use:
+//   for (smapent* e = smap_itstart(m); smap_itnext(m, &e); )
+//     log("%.*s => %lx", (int)e->keylen, e->key, e->value);
+inline static smapent* nullable smap_itstart(smap* m) { return m->entries; }
+bool smap_itnext(smap* m, smapent** ep);
+
+// smap_perfectsize returns the number of bytes used for smap.entries assuming no
+// collisions and a map that contains hint entries.
+usize smap_perfectsize(u32 hint, maplf lf);
+
+
 // abuf is a string append buffer for implementing snprintf-style functions which
 // writes to a limited buffer and separately keeps track of the number of bytes
 // that are appended independent of the buffer's limit.
-//
+typedef struct abuf abuf;
+struct abuf {
+  char* p;
+  char* lastp;
+  usize len;
+};
 // Here is a template for use with functions that uses abuf:
 //
 // // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th
@@ -471,12 +550,6 @@ inline static void* nullable _rarray_push(rarray* a, rmem m, u32 elemsize) {
 //   return abuf_terminate(&s);
 // }
 //
-typedef struct abuf abuf;
-struct abuf {
-  char* p;
-  char* lastp;
-  usize len;
-};
 extern char abuf_zeroc;
 #define abuf_make(p,size) ({ /* abuf abuf_make(char* buf, usize bufcap)                   */\
   usize z__ = (usize)(size); char* p__ = (p);                                               \

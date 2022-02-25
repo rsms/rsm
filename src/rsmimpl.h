@@ -522,10 +522,6 @@ uintptr* nullable smap_del(smap* m, const char* key, usize keylen);
 inline static smapent* nullable smap_itstart(smap* m) { return m->entries; }
 bool smap_itnext(smap* m, smapent** ep);
 
-// smap_perfectsize returns the number of bytes used for smap.entries assuming no
-// collisions and a map that contains hint entries.
-usize smap_perfectsize(u32 hint, maplf lf);
-
 
 // abuf is a string append buffer for implementing snprintf-style functions which
 // writes to a limited buffer and separately keeps track of the number of bytes

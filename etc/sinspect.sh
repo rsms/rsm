@@ -13,6 +13,7 @@ PF=out/sinspect/$IF.sh
 echo "$S2"
 
 [ -x /usr/local/opt/llvm/bin/clang ] && export PATH=/usr/local/opt/llvm/bin:$PATH
+[ -x /opt/homebrew/opt/llvm/bin/clang ] && export PATH=/opt/homebrew/opt/llvm/bin:$PATH
 CCDEF=cc ; command -v clang >/dev/null && CCDEF=clang
 CC=${CC:-$CCDEF}
 
@@ -22,11 +23,11 @@ $CC -Oz -std=c11 -S -o $S "$@"
 
 eval "$(cat "$PF" 2>/dev/null)" || true
 
-IGN_PAT='^\s*[;\.#]'
-LABEL_PAT='^[0-9A-Za-z_]+:'
+IGN_PAT='^(?:\s*[;#]|\s+\.)'
+LABEL_PAT='^\.?[0-9A-Za-z_]+:'
 ARCH=$(uname -m)
 case "$(command -v $CC)" in
-  */clang) ARCH=$(clang -print-effective-triple | cut -d- -f1) ;;
+  */clang) ARCH=$(clang -print-effective-triple "$@" | cut -d- -f1) ;;
 esac
 
 case "$ARCH" in

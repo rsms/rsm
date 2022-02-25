@@ -30,8 +30,8 @@ case "$(command -v $CC)" in
 esac
 
 case "$ARCH" in
-arm64)  BR_PAT='^\s*B(?:cc|L|LR|R)|CBN?Z|RET|TBN?Z\b' ;;
-x86_64) BR_PAT='^\s*J(?:A|BE?|CXZ|E|GE?|LE?|NB|NE|NO|NP|NS|O|P|S|Z)\b' ;;
+arm64)  BR_PAT='^\s*B|Bcc|BLR?|CBN?Z|TBN?Z\b' ;; # excludes "BR"
+x86_64) BR_PAT='^\s*J[A-LN-Z][A-Z]*\b' ;; # excludes "JMP"
 *)
   echo "don't know how to find stats for $ARCH" >&2
   exit 1

@@ -4,7 +4,7 @@
 // Implemented with open addressing and linear probing.
 // This code has been written, tested and tuned for a balance between small (mc) code size,
 // a clear and simple implementation and lastly performance. The entire implementation is
-// just shy of 300 x86_64 instructions (20 branches), 270 arm64 instructions (35 branches.)
+// about 300 x86_64 instructions (20 branches), 270 arm64 instructions (35 branches.)
 //
 #include "rsmimpl.h"
 
@@ -87,7 +87,7 @@ static bool smap_grow(smap* m) {
   // rehash
   for (u32 i = 0; i < m->cap; i++) {
     smapent ent = m->entries[i];
-    if (ent.key)
+    if (ent.key && ent.key != DELMARK)
       smap_relocate(new_entries, newcap, &ent);
   }
   rmem_free(m->mem, m->entries, m->cap*sizeof(smapent));
@@ -130,15 +130,19 @@ uintptr* nullable smap_lookup(smap* m, const char* key, usize keylen) {
   return NULL;
 }
 
-uintptr* nullable smap_del(smap* m, const char* key, usize keylen) {
+bool smap_del(smap* m, const char* key, usize keylen) {
   void* vp = smap_lookup(m, key, keylen);
   if UNLIKELY(vp == NULL)
     return NULL;
+  if (m->len == 1) {
+    smap_clear(m); // clear all DELMARK entries
+    return true;
+  }
   smapent* ent = vp - offsetof(smapent,value);
   m->len--;
   ent->key = DELMARK;
   ent->keylen = 0;
-  return &ent->value;
+  return true;
 }
 
 bool smap_itnext(smap* m, smapent** ep) {

@@ -474,7 +474,7 @@ inline static void* nullable _rarray_push(rarray* a, rmem m, u32 elemsize) {
 // smap is a byte string to pointer map, implemented as a hash map
 typedef struct smap    smap;    // string-keyed map
 typedef struct smapent smapent; // smap entry
-typedef u8             maplf;  // load factor
+typedef u8             maplf;   // load factor
 struct smapent {
   const char* nullable key; // NULL if this entry is empty
   usize                keylen;
@@ -509,9 +509,8 @@ uintptr* nullable smap_assign(smap* m, const char* key, usize keylen);
 // smap_lookup retrieves the value for key; NULL if not found.
 uintptr* nullable smap_lookup(smap* m, const char* key, usize keylen);
 
-// smap_del removes an entry for key, returning the location of its value if an entry was
-// found and deleted, or NULL if key is not in the map.
-uintptr* nullable smap_del(smap* m, const char* key, usize keylen);
+// smap_del removes an entry for key, returning whether an entry was deleted or not
+bool smap_del(smap* m, const char* key, usize keylen);
 
 // smap_itstart and smap_itnext iterates over a map.
 // You can change the value of an entry during iteration but must not change the key.

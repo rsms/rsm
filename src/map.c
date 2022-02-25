@@ -1,47 +1,33 @@
-// hash map
+// compact hash map
 // SPDX-License-Identifier: Apache-2.0
+//
+// Implemented with open addressing and linear probing.
+// This code has been written, tested and tuned for a balance between small (mc) code size,
+// a clear and simple implementation and lastly performance. The entire implementation is
+// just shy of 300 x86_64 instructions (20 branches), 270 arm64 instructions (35 branches.)
+//
 #include "rsmimpl.h"
 
 #define DELMARK ((const char*)1) /* assume no key is ever at address 0x1 */
 
-// string hash function (FNV1a)
-#if 1 // for when smap.cap uses u32
-  #define FNV_BASE  0x811c9dc5
-  #define FNV_PRIME 0x01000193 // pow(2,24) + pow(2,8) + 0x93
-#else // for when smap.cap uses u64
-  #define FNV_BASE  0xcbf29ce484222325ul
-  #define FNV_PRIME 0x100000001b3lu // pow(2,40) + pow(2,8) + 0xb3
-#endif
-
-static u32 strhash(const void* data, usize len) {
-  u32 hash = FNV_BASE;
+static u32 strhash(const void* data, usize len) { // FNV1a
+  u32 hash = 0x811c9dc5;
   for (const u8* p = data, *end = data + len; p != end; ++p)
-    hash = (*p ^ hash) * FNV_PRIME;
+    hash = (*p ^ hash) * 0x01000193;
   return hash;
 }
 
-inline static bool smapenteq(const smapent* ent, const char* key, usize keylen) {
+inline static bool streq(const smapent* ent, const char* key, usize keylen) {
   return ent->keylen == keylen && memcmp(ent->key, key, keylen) == 0;
 }
 
-static const double captab[] = {
-  /* MAPLF_1 */ (1.0 / 0.5),
-  /* MAPLF_2 */ (1.0 / 0.75),
-  /* MAPLF_3 */ (1.0 / 0.875),
-  /* MAPLF_4 */ (1.0 / 0.9375),
-};
+// captab maps MAPLF_1...4 to multipliers for cap -> gcap
+static const double captab[] = { 1.0/0.5, 1.0/0.75, 1.0/0.875, 1.0/0.9375, };
 
 static u32 perfectcap(u32 hint, maplf lf) {
   // TODO: figure out a way to compute optimal cap that is just shy of the
   // gcap growth threshold of hint using integer math instead of fp.
   return ALIGN2( (u32)((double)(ALIGN2(hint, 2)+1) * captab[lf-1]), 2);
-}
-
-usize smap_perfectsize(u32 hint, maplf lf) {
-  usize nbytes;
-  if (check_mul_overflow((usize)perfectcap(hint, lf), sizeof(smapent), &nbytes))
-    return 0;
-  return nbytes;
 }
 
 smap* nullable smap_make(smap* m, rmem mem, u32 hint, maplf lf) {
@@ -53,8 +39,7 @@ smap* nullable smap_make(smap* m, rmem mem, u32 hint, maplf lf) {
   // i.e. cap-(cap>>lf) == (u32)((double)cap*0.75)
   m->lf = lf;
   m->gcap = m->cap - (m->cap >> m->lf);
-
-  usize nbytes = smap_perfectsize(hint, lf);
+  usize nbytes;
   if (check_mul_overflow((usize)m->cap, sizeof(smapent), &nbytes))
     return NULL;
   m->entries = rmem_alloc(mem, nbytes);
@@ -80,7 +65,7 @@ static void smap_relocate(smapent* entries, u32 cap, smapent* ent) {
   u32 hash = strhash(ent->key, ent->keylen);
   u32 index = hash & (cap - 1);
   while (entries[index].key) {
-    if (smapenteq(&entries[index], ent->key, ent->keylen))
+    if (streq(&entries[index], ent->key, ent->keylen))
       break;
     if (++index == cap)
       index = 0;
@@ -120,7 +105,7 @@ uintptr* nullable smap_assign(smap* m, const char* key, usize keylen) {
   u32 hash = strhash(key, keylen);
   u32 index = hash & (m->cap - 1);
   while (m->entries[index].key) {
-    if (smapenteq(&m->entries[index], key, keylen))
+    if (streq(&m->entries[index], key, keylen))
       return &m->entries[index].value;
     if (m->entries[index].key == DELMARK) // recycle deleted slot
       break;
@@ -137,7 +122,7 @@ uintptr* nullable smap_lookup(smap* m, const char* key, usize keylen) {
   u32 hash = strhash(key, keylen);
   u32 index = hash & (m->cap - 1);
   while (m->entries[index].key) {
-    if (smapenteq(&m->entries[index], key, keylen))
+    if (streq(&m->entries[index], key, keylen))
       return &m->entries[index].value;
     if (++index == m->cap)
       index = 0;
@@ -169,9 +154,18 @@ bool smap_itnext(smap* m, smapent** ep) {
   return false;
 }
 
+// // smap_perfectsize returns the number of bytes used for smap.entries assuming no
+// // collisions and a map that contains hint entries.
+// usize smap_perfectsize(u32 hint, maplf lf) {
+//   usize nbytes;
+//   if (check_mul_overflow((usize)perfectcap(hint, lf), sizeof(smapent), &nbytes))
+//     return 0;
+//   return nbytes;
+// }
+
 
 // --------------------------------------
-// test function
+// test & development function (rest of this file)
 #if 0 && defined(DEBUG)
 
 #include <stdlib.h>

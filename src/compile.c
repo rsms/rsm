@@ -67,6 +67,17 @@ enum rtok {
   rtok_COUNT
 } RSM_END_ENUM(rtok)
 
+// kwcount -- total number of keywords
+enum {
+  #define _(token, ...) _kwcount_t_##token,
+  RSM_FOREACH_KEYWORD_TOKEN(_)
+  #undef _
+  #define _(op, ...) _kwcount_o_##op,
+  RSM_FOREACH_OP(_)
+  #undef _
+  kwcount
+};
+
 typedef u8 precedence;
 enum precedence {
   PREC_LOWEST,
@@ -159,6 +170,8 @@ struct gstate {
 
 
 static const char* kBlock0Name = "b0"; // name of first block
+static smap kwmap = {0};
+
 
 // istypetok returns true if t represents (or begins the description of) a type
 static bool istypetok(rtok t) {
@@ -323,23 +336,13 @@ static rtok sname(pstate* p) {
   p->insertsemi = true;
   usize len = toklen(p);
 
-  // map keywords to T_ tokens
-  #define _(token, kw)                                            \
-    if (len == strlen(kw) && memcmp((kw), p->tokstart, len) == 0) \
-      return p->tok = token;
-  RSM_FOREACH_KEYWORD_TOKEN(_)
-  #undef _
-
-  // map operations to T_OP token
-  #define _(op, enc, asmname, ...) \
-    if (len == strlen(asmname) && memcmp(asmname, p->tokstart, len) == 0) { \
-      p->ival = rop_##op;                                                   \
-      return p->tok = T_OP;                                                 \
-    }
-  RSM_FOREACH_OP(_)
-  #undef _
-
-  // okay, its just a symbolic name
+  // lookup keyword
+  uintptr* vp = smap_lookup(&kwmap, p->tokstart, len);
+  if (!vp) // not a keyword, just a symbolic name
+    return p->tok;
+  p->tok = *vp & 0xff;
+  if (*vp > 0xff)
+    p->ival = (u64)(*vp >> sizeof(rtok)*8);
   return p->tok;
 }
 
@@ -1281,11 +1284,43 @@ void rcomp_dispose(rcomp* c) {
   rmem_free(c->mem, g, sizeof(gstate));
 }
 
+static void init_kwmap() {
+  static u8 memory[672 + RMEM_MK_MIN]; // smap_perfectsize(kwcount, MAPLF_4)
+  rmem mem = rmem_mkbufalloc(memory, sizeof(memory));
+  ATTR_UNUSED void* mp = smap_make(&kwmap, mem, kwcount, MAPLF_4);
+  assertf(mp!=NULL, "not enough memory for kwmap");
+  uintptr* vp;
+  #define _(token, kw)                                       \
+    vp = assertnotnull(smap_assign(&kwmap, kw, strlen(kw))); \
+    *vp = token;
+  RSM_FOREACH_KEYWORD_TOKEN(_)
+  #undef _
+  #define _(op, enc, kw, ...)                                \
+    vp = assertnotnull(smap_assign(&kwmap, kw, strlen(kw))); \
+    *vp = T_OP | ((uintptr)rop_##op << sizeof(rtok)*8);
+  RSM_FOREACH_OP(_)
+  #undef _
+
+  // check memory use
+  #if DEBUG
+    void* memend = rmem_alloc(mem,1);
+    if (memend) {
+      dlog("kwmap consumes only %zu B memory. trim down 'memory'",
+        (usize)(rmem_alloc(mem,1) - (void*)memory) - 1);
+    } else {
+      dlog("kwmap consumes all %zu B of memory. perfect.", sizeof(memory));
+    }
+  #endif
+}
+
 // compiler entry point
 usize rsm_compile(rcomp* c, rmem resm, rinstr** resp) {
   c->_stop = false;
   c->errcount = 0;
   dlog("assembling \"%s\"", c->srcname);
+
+  if (kwmap.entries == NULL)
+    init_kwmap();
 
   node* module = parse(c);
   if UNLIKELY(c->_stop || c->errcount)

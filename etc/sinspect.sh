@@ -23,14 +23,14 @@ $CC -Oz -std=c11 -S -o $S "$@"
 eval "$(cat "$PF" 2>/dev/null)" || true
 
 IGN_PAT='^\s*[;\.#]'
-LABEL_PAT='^[0-9A-Za-z_]+\:'
+LABEL_PAT='^[0-9A-Za-z_]+:'
 ARCH=$(uname -m)
 case "$(command -v $CC)" in
   */clang) ARCH=$(clang -print-effective-triple | cut -d- -f1) ;;
 esac
 
 case "$ARCH" in
-arm64)  BR_PAT='^\s*B|Bcc|BLR?|CBN?Z|TBN?Z\b' ;; # excludes "BR"
+arm64)  BR_PAT='^\s*(?:B(?:\.\w+)?|Bcc|BLR|CBN?Z|TBN?Z)\s+[^_]' ;; # excludes "BR"
 x86_64) BR_PAT='^\s*J[A-LN-Z][A-Z]*\b' ;; # excludes "JMP"
 *)
   echo "don't know how to find stats for $ARCH" >&2

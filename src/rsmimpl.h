@@ -171,6 +171,25 @@ typedef unsigned long       usize;
 #define IS_ALIGN2(x, a)       (((x) & ((__typeof__(x))(a) - 1)) == 0)
 #define _ALIGN2_MASK(x, mask) (((x) + (mask)) & ~(mask))
 
+// rsm_ctz returns the number of trailing 0-bits in x,
+// starting at the least significant bit position. If x is 0, the result is undefined.
+#define rsm_ctz(x) _Generic((x), \
+  u32:   __builtin_ctz,       \
+  usize: __builtin_ctzl,      \
+  u64:   __builtin_ctzll)(x)
+
+// __fls finds the last (most-significant) bit set
+#define __fls(x) (x ? sizeof(x) * 8 - __builtin_clz(x) : 0)
+
+// ILOG2 calculates the log of base 2
+#define ILOG2(n) ( __builtin_constant_p(n) ? ((n) < 2 ? 0 : 63 - __builtin_clzll(n)) \
+                                           : __fls(n) )
+
+// CEIL_POW2 rounds up n to nearest power of two. Result is undefined when n is 0.
+#define CEIL_POW2(n) ( \
+  __builtin_constant_p(n) ? ( ((n) == 1) ? 1 : (1UL << (ILOG2((n) - 1) + 1)) ) \
+                          : (1UL << __fls(n - 1)) )
+
 static inline RSM_WARN_UNUSED_RESULT bool __must_check_unlikely(bool unlikely) {
   return UNLIKELY(unlikely);
 }
@@ -408,6 +427,9 @@ RSM_ASSUME_NONNULL_BEGIN
   int snprintf(char* restrict s, usize n, const char* restrict fmt, ...);
 #endif // printf
 
+// rsm_qsort is qsort_r aka qsort_s
+void rsm_qsort(void* base, usize nmemb, usize size,
+  int(*cmp)(const void* x, const void* y, void* ctx), void* ctx);
 
 // --------------------------------------------------------------------------------------
 // internal utility functions, like a string buffer. Not namespaced. See util.c

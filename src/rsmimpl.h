@@ -496,15 +496,24 @@ inline static void* nullable _rarray_push(rarray* a, rmem m, u32 elemsize) {
 u32 fastrand();
 void fastrand_seed(u64 seed); // (re)sets the seed of fastrand
 
+// hashcode is the storage type for hash functions
+#if defined(__wasm__)
+  typedef u64 hashcode;
+  #define HASHCODE_MAX U64_MAX
+#else
+  typedef usize hashcode;
+  #define HASHCODE_MAX USIZE_MAX
+#endif
+
 // hash computes a hash code for data p of size bytes length
-static usize hash(const void* p, usize size, usize seed);
-usize hash_2(const void* p, usize seed); // 2 bytes (eg. i16, u16)
-usize hash_4(const void* p, usize seed); // 4 bytes (eg. i32, u32)
-usize hash_8(const void* p, usize seed); // 8 bytes (eg. i64, u64)
-usize hash_f32(const f32* p, usize seed); // f32, supports ±0 and NaN
-usize hash_f64(const f64* p, usize seed); // f64, supports ±0 and NaN
-usize hash_mem(const void* p, usize size, usize seed); // size bytes at p
-inline static usize hash(const void* p, usize size, usize seed) {
+static hashcode hash(const void* p, usize size, hashcode seed);
+hashcode hash_2(const void* p, hashcode seed); // 2 bytes (eg. i16, u16)
+hashcode hash_4(const void* p, hashcode seed); // 4 bytes (eg. i32, u32)
+hashcode hash_8(const void* p, hashcode seed); // 8 bytes (eg. i64, u64)
+hashcode hash_f32(const f32* p, hashcode seed); // f32, supports ±0 and NaN
+hashcode hash_f64(const f64* p, hashcode seed); // f64, supports ±0 and NaN
+hashcode hash_mem(const void* p, usize size, hashcode seed); // size bytes at p
+inline static hashcode hash(const void* p, usize size, hashcode seed) {
   switch (size) {
     case 2:  return hash_2(p, seed);
     case 4:  return hash_4(p, seed);
@@ -535,7 +544,7 @@ struct smap {
   u32      len;  // number of items currently stored in the map (count)
   u32      gcap; // growth watermark cap
   maplf    lf;   // growth watermark load factor (shift value; 1|2|3|4)
-  usize    hash0; // hash seed
+  hashcode hash0; // hash seed
   smapent* entries;
   rmem     mem;
 };

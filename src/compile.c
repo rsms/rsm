@@ -171,6 +171,7 @@ struct gstate {
 
 static const char* kBlock0Name = "b0"; // name of first block
 
+#if HASHCODE_MAX >= 0xFFFFFFFFFFFFFFFFu
 static const smapent kwmap_entries[64] = {
  {"i8",2,35},{"sub",3,781},{0},{"i16",3,36},{0},{0},{0},{"shl",3,2573},{0},{0},
  {0},{0},{0},{0},{"cmplt",5,3597},{0},{0},{0},{"shru",4,3085},{0},{"ret",3,4621},
@@ -179,9 +180,12 @@ static const smapent kwmap_entries[64] = {
  {"i1",2,34},{"xor",3,2317},{0},{"cmpeq",5,3341},{0},{0},{"and",3,1805},{0},
  {"loadk",5,269},{"mul",3,1037},{0},{"i32",3,37},{0},{"or",2,2061},{0},
  {"cmpgt",5,3853},{0},{0},{"add",3,525},{0},{0},{0},{"brz",3,4109},{0},{0}};
-static const struct{u32 cap,len,gcap;maplf lf;usize hash0;const smapent* ep;}
+static const struct{u32 cap,len,gcap;maplf lf;hashcode hash0;const smapent* ep;}
 kwmap_data={64,25,48,2,0x5cf93335,kwmap_entries};
 static const smap* kwmap = (const smap*)&kwmap_data;
+#else /* can't use static map; check_kwmap will build one */
+static const smap* kwmap;
+#endif
 
 
 // istypetok returns true if t represents (or begins the description of) a type
@@ -1294,14 +1298,19 @@ void rcomp_dispose(rcomp* c) {
 }
 
 static void check_kwmap() {
-  #ifdef DEBUG
+#if HASHCODE_MAX < 0xFFFFFFFFFFFFFFFFu || defined(DEBUG)
   static bool didcheck = false; if (didcheck) return; didcheck = true;
-  // build new map with all keywords
-  static u8 memory[4096];
+
+  // build kwmap with all keywords
+  static u8 memory[2048];
   static smap kwmap2 = {0}; smap* m = &kwmap2;
   rmem mem = rmem_mkbufalloc(memory, sizeof(memory));
   assertnotnull(smap_make(m, mem, kwcount, MAPLF_2));
-  m->hash0 = kwmap->hash0;
+  #if HASHCODE_MAX < 0xFFFFFFFFFFFFFFFFu
+    m->hash0 = fastrand();
+  #else
+    m->hash0 = kwmap->hash0;
+  #endif
   uintptr* vp;
   #define _(token, kw) \
     vp = assertnotnull(smap_assign(m, kw, strlen(kw))); \
@@ -1313,6 +1322,11 @@ static void check_kwmap() {
     *vp = (T_OP | ((uintptr)rop_##op << (sizeof(rtok)*8)));
   RSM_FOREACH_OP(_)
   #undef _
+  #if HASHCODE_MAX < 0xFFFFFFFFFFFFFFFFu
+    kwmap = m; // use m since we have no static map
+  #endif
+#endif
+#if defined(DEBUG) && HASHCODE_MAX >= 0xFFFFFFFFFFFFFFFFu
   // check to see if keywords has changed; if kwmap is outdated
   for (const smapent* e = smap_itstart(m); smap_itnext(m, &e); )
     if (smap_lookup(kwmap, e->key, e->keylen) == NULL) goto differ;
@@ -1323,8 +1337,8 @@ differ:   // kwmap is outdated -- optimize and print replacement C code
   dlog("————————————————————————————————————————————————————————");
   dlog("kwmap needs updating — running smap_optimize...");
   usize score = smap_optimize(m, 5000000, mem);
-  dlog("new kwmap hash0 0x%lx, score %zu, cap %u, len %u, gcap %u",
-    m->hash0, score, m->cap, m->len, m->gcap);
+  dlog("new kwmap hash0 0x%llx, score %zu, cap %u, len %u, gcap %u",
+    (u64)m->hash0, score, m->cap, m->len, m->gcap);
   char buf[4096];
   smap_cfmt(buf, sizeof(buf), m, "kwmap");
   log("————————————————————————————————————————————————————————");
@@ -1335,7 +1349,7 @@ differ:   // kwmap is outdated -- optimize and print replacement C code
   dlog("  Before committing kwmap update,\n"
        "   run smap_optimize(m,5000000,mem) to find an ideal layout.\n");
   kwmap = m; // use fresh map
-  #endif // DEBUG
+#endif // DEBUG
 }
 
 // compiler entry point

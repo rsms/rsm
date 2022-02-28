@@ -55,7 +55,7 @@ void smap_clear(smap* m) {
   memset(m->entries, 0, m->cap*sizeof(smapent));
 }
 
-static void smap_relocate(usize hash0, smapent* entries, u32 cap, smapent* ent) {
+static void smap_relocate(hashcode hash0, smapent* entries, u32 cap, smapent* ent) {
   usize index = hash_mem(ent->key, ent->keylen, hash0) & (cap - 1);
   while (entries[index].key) {
     if (streq(&entries[index], ent->key, ent->keylen))
@@ -263,7 +263,7 @@ static usize smap_score(const smap* m) {
 }
 
 #ifdef DEBUG
-static void dump_smap(
+ATTR_UNUSED static void dump_smap(
   const smap* m, const smap* nullable beforem,
   const smapent** nullable highlightv, usize highlightc,
   int cmp);
@@ -274,10 +274,10 @@ usize smap_optimize(smap* m, usize iterations, rmem mem) {
   if (entries == NULL)
     return USIZE_MAX;
   memcpy(entries, m->entries, m->cap*sizeof(smapent));
-  usize best_hash0 = m->hash0;
+  hashcode best_hash0 = m->hash0;
   usize best_score = USIZE_MAX-1;
 
-  #if DEBUG
+  #if defined(DEBUG) && !defined(__wasm__)
   smap m_orig = *m;
   m_orig.entries = entries;
   usize score_orig = smap_score(m);
@@ -303,7 +303,7 @@ usize smap_optimize(smap* m, usize iterations, rmem mem) {
     iterations--;
     m->hash0 = iterations ? fastrand() : best_hash0; // try a new seed or finalize w/ best
 
-    #ifdef DEBUG
+    #if defined(DEBUG) && !defined(__wasm__)
     if (iterations % 1000 == 0) {
       int t = (int)( (1.0f - ((float)iterations / iterations_total)) * 100.0f );
       fprintf(stderr, "\r\e[0K" "smap_optimize %.*s%.*s %u%%",
@@ -326,7 +326,7 @@ usize smap_optimize(smap* m, usize iterations, rmem mem) {
     }
   }
 
-  #if DEBUG
+  #if defined(DEBUG) && !defined(__wasm__)
   log("smap_optimize result: (score orig=%zu, best=%zu)\n"
     "───┬───────────────────┬───────────────────\n"
     "idx│  before           │  after\n"
@@ -362,10 +362,10 @@ usize smap_cfmt(char* buf, usize bufcap, const smap* m, const char* name) {
   s.p--; s.len--; // undo last ","
   abuf_fmt(&s,
     "};\n"
-    "static const struct{u32 cap,len,gcap;maplf lf;usize hash0;const smapent* ep;}\n"
-    "%s_data={%u,%u,%u,%u,0x%lx,%s_entries};\n"
+    "static const struct{u32 cap,len,gcap;maplf lf;hashcode hash0;const smapent* ep;}\n"
+    "%s_data={%u,%u,%u,%u,0x%llx,%s_entries};\n"
     "static const smap* %s = (const smap*)&%s_data;",
-    name, m->cap, m->len, m->gcap, m->lf, m->hash0, name, name, name
+    name, m->cap, m->len, m->gcap, m->lf, (u64)m->hash0, name, name, name
   );
   return abuf_terminate(&s);
 }
@@ -394,7 +394,7 @@ static void dump_smapent(
   }
 
   u32 index = (u32)(e - m->entries);
-  usize h = hash_mem(e->key, e->keylen, m->hash0);
+  hashcode h = hash_mem(e->key, e->keylen, m->hash0);
   usize ideal_index = h & (m->cap - 1);
 
   usize highlight = 0xffffffff;
@@ -411,7 +411,7 @@ static void dump_smapent(
 
   printf("  %-5s", e->key);
   if (include_hash)
-    printf(sizeof(usize) > 4 ? "  0x%016lx" : "  0x%08lx", h);
+    printf(sizeof(hashcode) > 4 ? "  0x%016lx" : "  0x%08lx", h);
 
   if (ideal_index != index) {
     if (highlight != 0xffffffff) {
@@ -474,8 +474,8 @@ static void smap_test() {
 
   // // log hash values
   // for (usize i = 0; i < nsamples; i++) {
-  //   usize h = hash_mem(samples[i], strlen(samples[i]), m.hash0);
-  //   printf("%8lx %4zu %-5s\n", h, h % 8, samples[i]);
+  //   hashcode h = hash_mem(samples[i], strlen(samples[i]), m.hash0);
+  //   printf("%8llx %4llu %-5s\n", (u64)h, (u64)h % 8, samples[i]);
   // }
 
   dlog("insert all");

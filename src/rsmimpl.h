@@ -470,6 +470,34 @@ inline static void* nullable _rarray_push(rarray* a, rmem m, u32 elemsize) {
   return a->v + elemsize*(a->len++);
 }
 
+// fastrand updates the PRNG and returns the next "random" number
+u32 fastrand();
+void fastrand_seed(u64 seed); // (re)sets the seed of fastrand
+
+// hash computes a hash code for data p of size bytes length
+static usize hash(const void* p, usize size, usize seed);
+usize hash_2(const void* p, usize seed); // 2 bytes (eg. i16, u16)
+usize hash_4(const void* p, usize seed); // 4 bytes (eg. i32, u32)
+usize hash_8(const void* p, usize seed); // 8 bytes (eg. i64, u64)
+usize hash_f32(const f32* p, usize seed); // f32, supports ±0 and NaN
+usize hash_f64(const f64* p, usize seed); // f64, supports ±0 and NaN
+usize hash_mem(const void* p, usize size, usize seed); // size bytes at p
+inline static usize hash(const void* p, usize size, usize seed) {
+  switch (size) {
+    case 2:  return hash_2(p, seed);
+    case 4:  return hash_4(p, seed);
+    case 8:  return hash_8(p, seed);
+    default: return hash_mem(p, size, seed);
+  }
+}
+
+// uintptr hash_ptr(const void* p, uintptr seed)
+// Must be a macro rather than inline function so that we can take its address.
+#if UINTPTR_MAX >= 0xFFFFFFFFFFFFFFFFu
+  #define hash_ptr hash_8
+#else
+  #define hash_ptr hash_4
+#endif
 
 // smap is a byte string to pointer map, implemented as a hash map
 typedef struct smap    smap;    // string-keyed map

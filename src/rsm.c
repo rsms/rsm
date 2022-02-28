@@ -189,6 +189,7 @@ ATTR_UNUSED static void test_stuff() {
 
 
 RSMAPI int main(int argc, const char** argv) {
+  fastrand_seed(0xfacebeef); // TODO: use time or something actually random
   test_stuff();
 
   for (int i = 0; i < argc; i++) {

@@ -129,8 +129,8 @@ ATTR_UNUSED static void test_stuff() {
   //   end:             // <- b0 [b1]
   //     ret            // RES is at r0
   //
-  ip[pc++] = RSM_MAKE_AB(rop_MOVE, 1, 0); // r1 = r0
-  ip[pc++] = RSM_MAKE_ABu(rop_MOVE, 0, 1); // r0 = 1
+  ip[pc++] = RSM_MAKE_AB(rop_COPY, 1, 0); // r1 = r0
+  ip[pc++] = RSM_MAKE_ABu(rop_COPY, 0, 1); // r0 = 1
   ip[pc++] = RSM_MAKE_ABs(rop_BRZ, 1, 3); // brz r1 end -- PC+3=end (TODO patch marker)
   u32 b1 = pc; // b1:
   ip[pc++] = RSM_MAKE_ABC(rop_MUL, 0, 1, 0); // r0 = mul r1 r0

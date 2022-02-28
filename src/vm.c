@@ -51,7 +51,7 @@ void rsm_vmexec(u64* iregs, rinstr* inv, u32 incount) {
     u8 ar = RSM_GET_A(in); // argument Ar, which almost every instruction needs
     switch ((enum rop)RSM_GET_OP(in)) {
 
-    case rop_MOVE:  { RA = RBu; break; }
+    case rop_COPY:  { RA = RBu; break; }
     case rop_LOADK: { dlog("TODO"); break; }
 
     case rop_ADD:   { RA = RB + RCu; break; }

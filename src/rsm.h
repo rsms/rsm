@@ -110,7 +110,7 @@ typedef u32 rinstr;
 //   ABCDs   R(A), R(B), R(C), R(D) or immediate signed value
 // Changing instruction encoding? Remember to also update eval.c and genop in asm.c
 #define RSM_FOREACH_OP(_) /* _(name, arguments, asmname, semantics) */ \
-_( MOVE  , ABu  , "move"  /* R(A) = {R(B),B}  TODO: rename */)\
+_( COPY  , ABu  , "copy"  /* R(A) = {R(B),B} aka "move" */)\
 _( LOADK , ABu  , "loadk" /* R(A) = K(B) -- load constant  */)\
 \
 _( ADD   , ABCu , "add"   /* R(A) = R(B) + {R(C),C}                                */)\

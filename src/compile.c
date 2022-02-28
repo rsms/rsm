@@ -172,15 +172,15 @@ struct gstate {
 static const char* kBlock0Name = "b0"; // name of first block
 
 static const smapent kwmap_entries[64] = {
- {"cmplt",5,3597},{"loadk",5,269},{0},{"shru",4,3085},{"or",2,2061},{0},
- {"add",3,525},{0},{0},{0},{"sub",3,781},{0},{"brz",3,4109},{0},{0},{"i32",3,37},
- {0},{"xor",3,2317},{0},{"i64",3,38},{0},{"mod",3,1549},{"ret",3,4621},{0},{0},
- {"brnz",4,4365},{0},{0},{0},{0},{"cmpeq",5,3341},{0},{"i8",2,35},{0},
- {"shl",3,2573},{0},{0},{"div",3,1293},{0},{0},{"cmpgt",5,3853},{0},{0},{0},{0},
- {"i16",3,36},{0},{"i1",2,34},{0},{0},{0},{"fun",3,33},{0},{0},{0},
- {"shrs",4,2829},{0},{"mul",3,1037},{0},{"and",3,1805},{0},{0},{"move",4,13},{0}};
+ {"i8",2,35},{"sub",3,781},{0},{"i16",3,36},{0},{0},{0},{"shl",3,2573},{0},{0},
+ {0},{0},{0},{0},{"cmplt",5,3597},{0},{0},{0},{"shru",4,3085},{0},{"ret",3,4621},
+ {0},{"copy",4,13},{0},{"i64",3,38},{0},{"div",3,1293},{0},{"brnz",4,4365},
+ {"mod",3,1549},{0},{0},{"shrs",4,2829},{0},{0},{0},{"fun",3,33},{0},{0},
+ {"i1",2,34},{"xor",3,2317},{0},{"cmpeq",5,3341},{0},{0},{"and",3,1805},{0},
+ {"loadk",5,269},{"mul",3,1037},{0},{"i32",3,37},{0},{"or",2,2061},{0},
+ {"cmpgt",5,3853},{0},{0},{"add",3,525},{0},{0},{0},{"brz",3,4109},{0},{0}};
 static const struct{u32 cap,len,gcap;maplf lf;usize hash0;const smapent* ep;}
-kwmap_data={64,25,32,1,0xe28f3e3d,kwmap_entries};
+kwmap_data={64,25,48,2,0x5cf93335,kwmap_entries};
 static const smap* kwmap = (const smap*)&kwmap_data;
 
 
@@ -1127,7 +1127,7 @@ static void genassign(gstate* g, node* n) {
   assert(n->t == T_EQ);
   // convert to op
   n->t = T_OP;
-  n->ival = rop_MOVE;
+  n->ival = rop_COPY;
   node* lhs = assertnotnull(n->list.head);
   node* rhs = assertnotnull(lhs->next);
   assertnull(rhs->next); // n must only have two operands
@@ -1140,7 +1140,7 @@ static void genassign(gstate* g, node* n) {
   } else {
     // a = b  ⟶  move a b
     assert(rhs->t != T_OP);
-    n->ival = rop_MOVE;
+    n->ival = rop_COPY;
   }
 
   return genop(g, n);
@@ -1297,9 +1297,9 @@ static void check_kwmap() {
   #ifdef DEBUG
   static bool didcheck = false; if (didcheck) return; didcheck = true;
   // build new map with all keywords
-  u8 memory[4096];
+  static u8 memory[4096];
+  static smap kwmap2 = {0}; smap* m = &kwmap2;
   rmem mem = rmem_mkbufalloc(memory, sizeof(memory));
-  smap kwmap2 = {0}; smap* m = &kwmap2;
   assertnotnull(smap_make(m, mem, kwcount, MAPLF_2));
   m->hash0 = kwmap->hash0;
   uintptr* vp;
@@ -1322,7 +1322,7 @@ static void check_kwmap() {
 differ:   // kwmap is outdated -- optimize and print replacement C code
   dlog("————————————————————————————————————————————————————————");
   dlog("kwmap needs updating — running smap_optimize...");
-  usize score = smap_optimize(m, 100000, mem);
+  usize score = smap_optimize(m, 5000000, mem);
   dlog("new kwmap hash0 0x%lx, score %zu, cap %u, len %u, gcap %u",
     m->hash0, score, m->cap, m->len, m->gcap);
   char buf[4096];
@@ -1332,6 +1332,9 @@ differ:   // kwmap is outdated -- optimize and print replacement C code
   log("————————————————————————————————————————————————————————\n"
        "\n%s\n\n"
        "—————————————————————————————————————————————————————————", buf);
+  dlog("  Before committing kwmap update,\n"
+       "   run smap_optimize(m,5000000,mem) to find an ideal layout.\n");
+  kwmap = m; // use fresh map
   #endif // DEBUG
 }
 

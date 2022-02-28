@@ -531,18 +531,19 @@ struct smapent {
   uintptr              value;
 };
 struct smap {
-  u32   cap;  // capacity of entries
-  u32   len;  // number of items currently stored in the map (count)
-  u32   gcap; // growth watermark cap
-  maplf lf;   // growth watermark load factor (shift value; 1|2|3|4)
-  smapent* nullable entries;
-  rmem mem;
+  u32      cap;  // capacity of entries
+  u32      len;  // number of items currently stored in the map (count)
+  u32      gcap; // growth watermark cap
+  maplf    lf;   // growth watermark load factor (shift value; 1|2|3|4)
+  usize    hash0; // hash seed
+  smapent* entries;
+  rmem     mem;
 };
 enum maplf {
-  MAPLF_1 = 1, // grow when 50% full
-  MAPLF_2 = 2, // grow when 75% full
-  MAPLF_3 = 3, // grow when 88% full
-  MAPLF_4 = 4, // grow when 94% full
+  MAPLF_1 = 1, // grow when 50% full; recommended for maps w/ balanced hit & miss lookups
+  MAPLF_2 = 2, // grow when 75% full; recommended for maps of mostly hit lookups
+  MAPLF_3 = 3, // grow when 88% full; miss (no match) lookups are expensive
+  MAPLF_4 = 4, // grow when 94% full; miss lookups are very expensive
 } RSM_END_ENUM(maplf)
 
 // smap_make initializes a new map m.
@@ -557,7 +558,7 @@ void smap_clear(smap* m);   // removes all items. m remains valid
 uintptr* nullable smap_assign(smap* m, const char* key, usize keylen);
 
 // smap_lookup retrieves the value for key; NULL if not found.
-uintptr* nullable smap_lookup(smap* m, const char* key, usize keylen);
+uintptr* nullable smap_lookup(const smap* m, const char* key, usize keylen);
 
 // smap_del removes an entry for key, returning whether an entry was deleted or not
 bool smap_del(smap* m, const char* key, usize keylen);
@@ -568,8 +569,18 @@ bool smap_del(smap* m, const char* key, usize keylen);
 // Example use:
 //   for (smapent* e = smap_itstart(m); smap_itnext(m, &e); )
 //     log("%.*s => %lx", (int)e->keylen, e->key, e->value);
-inline static smapent* nullable smap_itstart(smap* m) { return m->entries; }
-bool smap_itnext(smap* m, smapent** ep);
+inline static const smapent* nullable smap_itstart(const smap* m) { return m->entries; }
+bool smap_itnext(const smap* m, const smapent** ep);
+
+// smap_optimize tries to improve the key distribution of m by trying different
+// hash seeds. Returns the best smap_score or USIZE_MAX if rmem_alloc(mem) failed,
+// leaving m with at least as good key distribution as before the call.
+// mem is used to allocate temporary space for m's entries;
+// space needed is m->entries*sizeof(smapent). Applies smap_compact(m) before returning.
+usize smap_optimize(smap* m, usize iterations, rmem mem);
+
+// smap_cfmt prints C code for a constant static representation of m
+usize smap_cfmt(char* buf, usize bufcap, const smap* m, const char* name);
 
 
 // abuf is a string append buffer for implementing snprintf-style functions which

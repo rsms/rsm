@@ -170,7 +170,18 @@ struct gstate {
 
 
 static const char* kBlock0Name = "b0"; // name of first block
-static smap kwmap = {0};
+
+static const smapent kwmap_entries[64] = {
+ {"cmplt",5,3597},{"loadk",5,269},{0},{"shru",4,3085},{"or",2,2061},{0},
+ {"add",3,525},{0},{0},{0},{"sub",3,781},{0},{"brz",3,4109},{0},{0},{"i32",3,37},
+ {0},{"xor",3,2317},{0},{"i64",3,38},{0},{"mod",3,1549},{"ret",3,4621},{0},{0},
+ {"brnz",4,4365},{0},{0},{0},{0},{"cmpeq",5,3341},{0},{"i8",2,35},{0},
+ {"shl",3,2573},{0},{0},{"div",3,1293},{0},{0},{"cmpgt",5,3853},{0},{0},{0},{0},
+ {"i16",3,36},{0},{"i1",2,34},{0},{0},{0},{"fun",3,33},{0},{0},{0},
+ {"shrs",4,2829},{0},{"mul",3,1037},{0},{"and",3,1805},{0},{0},{"move",4,13},{0}};
+static const struct{u32 cap,len,gcap;maplf lf;usize hash0;const smapent* ep;}
+kwmap_data={64,25,32,1,0xe28f3e3d,kwmap_entries};
+static const smap* kwmap = (const smap*)&kwmap_data;
 
 
 // istypetok returns true if t represents (or begins the description of) a type
@@ -265,12 +276,12 @@ static void warnf(rcomp* comp, u32 line, u32 col, const char* fmt, ...) {
 }
 
 ATTR_FORMAT(printf, 2, 3)
-static rtok serr(pstate* p, const char* fmt, ...) {
+static void serr(pstate* p, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
   reportv(p->c, p->lineno, pcolumn(p), 1, fmt, ap);
   va_end(ap);
-  return p->tok = T_END;
+  p->tok = T_END;
 }
 
 ATTR_FORMAT(printf, 3, 4)
@@ -285,11 +296,11 @@ static void perr(pstate* p, node* nullable n, const char* fmt, ...) {
   va_end(ap);
 }
 
-static rtok scomment(pstate* p) { // line comment "// ... <LF>"
+static void scomment(pstate* p) { // line comment "// ... <LF>"
   p->tokstart += 2; // exclude "//"
   while (*p->inp && *p->inp != '\n')
     p->inp++;
-  return p->tok = T_COMMENT;
+  p->tok = T_COMMENT;
 }
 
 static bool utf8chomp(pstate* p) {
@@ -308,42 +319,41 @@ static bool utf8chomp(pstate* p) {
   return false;
 }
 
-static rtok snameunicode(pstate* p) {
-  while (*p->inp) {
-    u8 b = (u8)*p->inp;
-    if (b < UTF8_SELF) {
-      if (!isname(*p->inp))
-        break;
+static void snameunicode(pstate* p) {
+  while (p->inp < p->inend) {
+    if ((u8)*p->inp >= UTF8_SELF) {
+      if (!utf8chomp(p))
+        return serr(p, "invalid UTF8 sequence");
+    } else if (isname(*p->inp)) {
       p->inp++;
-      continue;
+    } else {
+      if (*p->inp == ':') {
+        p->inp++;
+        p->tok = T_LABEL;
+      }
+      return;
     }
-    if (!utf8chomp(p))
-      return serr(p, "invalid UTF8 sequence");
   }
-  return p->tok = T_NAME;
 }
 
-static rtok sname(pstate* p) {
+static void sname(pstate* p) {
   p->tok = T_NAME;
   while (p->inp < p->inend && isname(*p->inp))
     p->inp++;
   if (p->inp < p->inend && (u8)*p->inp >= UTF8_SELF)
-    snameunicode(p);
+    return snameunicode(p);
   if (p->inp < p->inend && *p->inp == ':') {
     p->inp++;
-    return p->tok = T_LABEL;
+    p->tok = T_LABEL;
+    return;
   }
   p->insertsemi = true;
-  usize len = toklen(p);
-
-  // lookup keyword
-  uintptr* vp = smap_lookup(&kwmap, p->tokstart, len);
-  if (!vp) // not a keyword, just a symbolic name
-    return p->tok;
+  uintptr* vp = smap_lookup(kwmap, p->tokstart, toklen(p)); // look up keyword
+  if (!vp)
+    return;
   p->tok = *vp & 0xff;
   if (*vp > 0xff)
     p->ival = (u64)(*vp >> sizeof(rtok)*8);
-  return p->tok;
 }
 
 static rerror snumber1(pstate* p, int base) {
@@ -391,27 +401,23 @@ end:
   return err;
 }
 
-static rtok snumber(pstate* p, int base) {
+static void snumber(pstate* p, int base) {
   rerror err = snumber1(p, base);
   if (err) switch (err) {
     case rerr_not_supported: return serr(p, "floating-point literal not supported");
     case rerr_overflow:      return serr(p, "integer literal too large");
     default:                 return serr(p, "invalid integer literal");
   }
-  return p->tok;
 }
 
-static rtok sreg(pstate* p) {
+static void sreg(pstate* p) {
   assert(p->isneg == false); // or snumber1 will return a garbage token
   rerror err = snumber1(p, 10);
-  if (err || p->ival > 31)
-    goto invalid;
-  return p->tok;
-invalid:
-  return serr(p, "invalid register");
+  if UNLIKELY(err || p->ival > 31)
+    return serr(p, "invalid register");
 }
 
-static rtok sadvance(pstate* p) { // scan the next token
+static void sadvance(pstate* p) { // scan the next token
   const char* linestart = p->linestart;
   while (p->inp < p->inend && isspace(*p->inp)) {
     if (*p->inp == '\n') {
@@ -424,17 +430,17 @@ static rtok sadvance(pstate* p) { // scan the next token
   p->tokstart = p->inp;
   if (linestart != p->linestart && p->insertsemi) {
     p->insertsemi = false;
-    return p->tok = T_SEMI;
+    p->tok = T_SEMI; return;
   }
 
   if UNLIKELY(p->inp == p->inend || p->c->_stop) {
     p->tokstart--;
     if (p->insertsemi) {
       p->insertsemi = false;
-      return p->tok = T_SEMI;
+      p->tok = T_SEMI; return;
     }
     p->tokstart = p->inp;
-    return p->tok = T_END;
+    p->tok = T_END; return;
   }
 
   assert(p->isneg == false); // make sure we don't have a bug in snumber
@@ -444,31 +450,31 @@ static rtok sadvance(pstate* p) { // scan the next token
   // dlog("0x%02x %c", c, isprint(c) ? c : ' ');
 
   switch (c) {
-    case '(': return p->tok = T_LPAREN;
-    case ')': p->insertsemi = true; return p->tok = T_RPAREN;
-    case '{': return p->tok = T_LBRACE;
-    case '}': p->insertsemi = true; return p->tok = T_RBRACE;
-    case '=': return p->tok = T_EQ;
-    case ';': return p->tok = T_SEMI;
-    case ',': return p->tok = T_COMMA;
-    case '+': return p->tok = T_PLUS;
-    case '*': return p->tok = T_STAR;
-    case '%': return p->tok = T_PERC;
-    case '&': return p->tok = T_AMP;
-    case '|': return p->tok = T_PIPE;
-    case '^': return p->tok = T_HAT;
+    case '(': p->tok = T_LPAREN; return;
+    case ')': p->insertsemi = true; p->tok = T_RPAREN; return;
+    case '{': p->tok = T_LBRACE; return;
+    case '}': p->insertsemi = true; p->tok = T_RBRACE; return;
+    case '=': p->tok = T_EQ; return;
+    case ';': p->tok = T_SEMI; return;
+    case ',': p->tok = T_COMMA; return;
+    case '+': p->tok = T_PLUS; return;
+    case '*': p->tok = T_STAR; return;
+    case '%': p->tok = T_PERC; return;
+    case '&': p->tok = T_AMP; return;
+    case '|': p->tok = T_PIPE; return;
+    case '^': p->tok = T_HAT; return;
     case '<':
-      if (*p->inp != '<') return p->tok = T_LT;
-      p->inp++;           return p->tok = T_LT2;
+      if (*p->inp != '<') { p->tok = T_LT; return; }
+      p->inp++;             p->tok = T_LT2; return;
     case '>':
-      if (*p->inp != '>') return p->tok = T_GT;
+      if (*p->inp != '>')   p->tok = T_GT; return;
       p->inp++;
-      if (*p->inp != '>') return p->tok = T_GT2;
-      p->inp++;           return p->tok = T_GT3;
+      if (*p->inp != '>') { p->tok = T_GT2; return; }
+      p->inp++;             p->tok = T_GT3; return;
 
     // number or "-"
     case '-': // "-" | "-" numlit
-      if (!isdigit(*p->inp)) return p->tok = T_MINUS;
+      if (!isdigit(*p->inp)) { p->tok = T_MINUS; return; }
       p->inp++;
       p->isneg = true;
       FALLTHROUGH;
@@ -485,12 +491,13 @@ static rtok sadvance(pstate* p) { // scan the next token
         // return scomment(p); // alt 1: produce comments
         scomment(p); MUSTTAIL return sadvance(p); // alt 2: ignore comments
       }
-      return p->tok = T_SLASH;
+      p->tok = T_SLASH; return;
     case 'R': p->tok = T_IREG; return sreg(p);
     case 'F': p->tok = T_FREG; return sreg(p);
     default: // anything else is the start of a name
       if ((u8)c >= UTF8_SELF) {
         p->inp--;
+        p->tok = T_NAME;
         return snameunicode(p);
       }
       if UNLIKELY(!isalnum(c) && c != '_' && c != '$')
@@ -1203,13 +1210,15 @@ static void genfun(gstate* g, node* fun) {
   // report unresolved labels
   for (usize i = 0; i < g->ulv.len; i++) {
     labelinfo* li = rarray_at(labelinfo, &g->ulv, i);
-    errf(g->c, li->n->line, li->n->col, "undefined label \"%.*s\"", (int)li->namelen, li->name);
+    errf(g->c, li->n->line, li->n->col, "undefined label \"%.*s\"",
+      (int)li->namelen, li->name);
   }
   // report unused labels
   for (usize i = 0; i < g->lv.len; i++) {
     labelinfo* li = rarray_at(labelinfo, &g->lv, i);
     if (li->nrefs == 0 && li->name != kBlock0Name)
-      warnf(g->c, li->n->line, li->n->col, "unused label \"%.*s\"", (int)li->namelen, li->name);
+      warnf(g->c, li->n->line, li->n->col, "unused label \"%.*s\"",
+        (int)li->namelen, li->name);
   }
 }
 
@@ -1284,43 +1293,54 @@ void rcomp_dispose(rcomp* c) {
   rmem_free(c->mem, g, sizeof(gstate));
 }
 
-static void init_kwmap() {
-  static u8 memory[672 + RMEM_MK_MIN]; // smap_perfectsize(kwcount, MAPLF_4)
+static void check_kwmap() {
+  #ifdef DEBUG
+  static bool didcheck = false; if (didcheck) return; didcheck = true;
+  // build new map with all keywords
+  u8 memory[4096];
   rmem mem = rmem_mkbufalloc(memory, sizeof(memory));
-  ATTR_UNUSED void* mp = smap_make(&kwmap, mem, kwcount, MAPLF_4);
-  assertf(mp!=NULL, "not enough memory for kwmap");
+  smap kwmap2 = {0}; smap* m = &kwmap2;
+  assertnotnull(smap_make(m, mem, kwcount, MAPLF_2));
+  m->hash0 = kwmap->hash0;
   uintptr* vp;
-  #define _(token, kw)                                       \
-    vp = assertnotnull(smap_assign(&kwmap, kw, strlen(kw))); \
+  #define _(token, kw) \
+    vp = assertnotnull(smap_assign(m, kw, strlen(kw))); \
     *vp = token;
   RSM_FOREACH_KEYWORD_TOKEN(_)
   #undef _
-  #define _(op, enc, kw, ...)                                \
-    vp = assertnotnull(smap_assign(&kwmap, kw, strlen(kw))); \
-    *vp = T_OP | ((uintptr)rop_##op << sizeof(rtok)*8);
+  #define _(op, enc, kw, ...) \
+    vp = assertnotnull(smap_assign(m, kw, strlen(kw))); \
+    *vp = (T_OP | ((uintptr)rop_##op << (sizeof(rtok)*8)));
   RSM_FOREACH_OP(_)
   #undef _
-
-  // check memory use
-  #if DEBUG
-    void* memend = rmem_alloc(mem,1);
-    if (memend) {
-      dlog("kwmap consumes only %zu B memory. trim down 'memory'",
-        (usize)(rmem_alloc(mem,1) - (void*)memory) - 1);
-    } else {
-      dlog("kwmap consumes all %zu B of memory. perfect.", sizeof(memory));
-    }
-  #endif
+  // check to see if keywords has changed; if kwmap is outdated
+  for (const smapent* e = smap_itstart(m); smap_itnext(m, &e); )
+    if (smap_lookup(kwmap, e->key, e->keylen) == NULL) goto differ;
+  for (const smapent* e = smap_itstart(kwmap); smap_itnext(kwmap, &e); )
+    if (smap_lookup(m, e->key, e->keylen) == NULL) goto differ;
+  return; // kwmap is good
+differ:   // kwmap is outdated -- optimize and print replacement C code
+  dlog("————————————————————————————————————————————————————————");
+  dlog("kwmap needs updating — running smap_optimize...");
+  usize score = smap_optimize(m, 100000, mem);
+  dlog("new kwmap hash0 0x%lx, score %zu, cap %u, len %u, gcap %u",
+    m->hash0, score, m->cap, m->len, m->gcap);
+  char buf[4096];
+  smap_cfmt(buf, sizeof(buf), m, "kwmap");
+  log("————————————————————————————————————————————————————————");
+  log("  Please update %s with the following code:", __FILE__);
+  log("————————————————————————————————————————————————————————\n"
+       "\n%s\n\n"
+       "—————————————————————————————————————————————————————————", buf);
+  #endif // DEBUG
 }
 
 // compiler entry point
 usize rsm_compile(rcomp* c, rmem resm, rinstr** resp) {
+  check_kwmap();
   c->_stop = false;
   c->errcount = 0;
   dlog("assembling \"%s\"", c->srcname);
-
-  if (kwmap.entries == NULL)
-    init_kwmap();
 
   node* module = parse(c);
   if UNLIKELY(c->_stop || c->errcount)

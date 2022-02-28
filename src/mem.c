@@ -14,7 +14,7 @@ struct bufalloc {
   bool  ismmap;
 };
 
-static_assert(sizeof(bufalloc) <= RMEM_MK_MIN, "");
+static_assert(sizeof(bufalloc) == RMEM_MK_MIN, "");
 
 inline static bool ba_istail(bufalloc* a, void* p, usize size) {
   return a->buf + a->len == p + size;
@@ -28,7 +28,6 @@ inline static usize ba_avail(bufalloc* a) { // available capacity
 static void* nullable ba_alloc(void* state, void* nullable p, usize oldsize, usize newsize) {
   bufalloc* a = state;
   if UNLIKELY(p != NULL) {
-    assert(oldsize > 0);
     if LIKELY(newsize == 0) {
       // free -- ba_alloc(s,p,>0,0)
       if (ba_istail(a, p, oldsize))
@@ -36,6 +35,7 @@ static void* nullable ba_alloc(void* state, void* nullable p, usize oldsize, usi
       return NULL; // ignored by caller
     }
     // resize -- ba_alloc(s,p,>0,>0)
+    assert(oldsize > 0);
     if UNLIKELY(newsize <= oldsize) {
       // shrink
       if (ba_istail(a, p, oldsize))

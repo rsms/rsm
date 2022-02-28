@@ -66,54 +66,61 @@ static void* nullable ba_alloc(void* state, void* nullable p, usize oldsize, usi
   return p2;
 }
 
-static rmem ba_make(void* buf, usize size, bool ismmap) {
-  assert(size >= RMEM_MK_MIN);
-  bufalloc* a = buf;
+static rmem ba_make(void* ap, void* buf, usize size, bool ismmap) {
+  bufalloc* a = ap;
   a->buf = buf;
   a->cap = size;
-  a->len = ALIGN2(sizeof(*a), RMEM_ALIGN);
+  a->len = 0;
   a->ismmap = ismmap;
   return (rmem){&ba_alloc, a};
 }
 
+static void* rmem_align(void* buf, usize* sizep) {
+  uintptr addr = ALIGN2((uintptr)buf, RMEM_ALIGN);
+  if LIKELY(addr == (uintptr)buf)
+    return buf;
+  usize offs = (usize)(addr - (uintptr)buf);
+  assertf(offs >= *sizep, "unaligned address with too small size");
+  *sizep = (offs > *sizep) ? 0 : *sizep - offs;
+  return (void*)addr;
+}
+
+rmem rmem_initbufalloc(void* astate[4], void* buf, usize size) {
+  assert(ALIGN2((uintptr)astate, RMEM_ALIGN) == (uintptr)astate); // must be aligned
+  buf = rmem_align(buf, &size);
+  return ba_make((void*)astate, buf, size, false);
+}
+
 rmem rmem_mkbufalloc(void* buf, usize size) {
-  uintptr addr = ALIGN2_FLOOR((uintptr)buf, RMEM_ALIGN);
-  if UNLIKELY(addr != (uintptr)buf) {
-    if (addr - (uintptr)buf > size) {
-      size = 0;
-    } else {
-      size -= addr - (uintptr)buf;
-    }
-    buf = (void*)addr;
-  }
-  return ba_make(buf, size, false);
+  buf = rmem_align(buf, &size);
+  assert(size >= RMEM_MK_MIN);
+  return ba_make(buf, buf + sizeof(bufalloc), size - sizeof(bufalloc), false);
 }
 
 rmem rmem_mkvmalloc(usize size) {
   usize pagesize = mem_pagesize();
-
   if (size == 0) { // "I just want a huge allocation"
     size = U32_MAX + (pagesize - (U32_MAX % pagesize));
     for (;;) {
       void* buf = vmem_alloc(size);
       if LIKELY(buf != NULL)
-        return ba_make(buf, size, true);
+        return ba_make(buf, buf + sizeof(bufalloc), size - sizeof(bufalloc), true);
       if (size <= 0xffff) // we weren't able to allocate 16kB; give up
         return (rmem){0,0};
       // try again with half the size
       size >>= 1;
     }
   }
-
-  // caller requsted minimum size; round up to pagesize
+  // caller requested minimum size; round up to pagesize
+  assert(RMEM_MK_MIN < pagesize); // we assume pagesize is (much) larger than RMEM_MK_MIN
+  assert(ALIGN2(pagesize, RMEM_ALIGN) == pagesize); // we assume pagesize is RMEM_ALIGNed
   usize rem = size % pagesize;
   if (rem)
     size += pagesize - rem;
   void* buf = vmem_alloc(size);
-  if LIKELY(buf != NULL)
-    return ba_make(buf, size, true);
-
-  return (rmem){0,0};
+  if UNLIKELY(buf == NULL)
+    return (rmem){0,0};
+  return ba_make(buf, buf + sizeof(bufalloc), size - sizeof(bufalloc), true);
 }
 
 void rmem_freealloc(rmem m) {

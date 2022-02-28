@@ -329,8 +329,16 @@ RSMAPI void rsm_vmexec(u64* iregs, u32* inv, u32 inc);
 RSMAPI usize rsm_fmtprog(char* buf, usize bufcap, rinstr* nullable ip, usize ilen);
 RSMAPI usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in);
 
-// rmem_mkbufalloc creates an allocator that uses size-RMEM_MK_MIN bytes from buf
+// RMEM_MK_MIN is the minimum size for rmem_mk*alloc functions
+#define RMEM_MK_MIN (sizeof(void*)*4)
+
+// rmem_mkbufalloc creates an allocator that uses size-RMEM_MK_MIN bytes from buf.
+// The address buf and size may be adjusted to pointer-size alignment.
 RSMAPI rmem rmem_mkbufalloc(void* buf, usize size);
+
+// rmem_initbufalloc initializes an allocator that uses size bytes from buf in astate.
+// The address buf and size may be adjusted to pointer-size alignment.
+RSMAPI rmem rmem_initbufalloc(void* astate[4], void* buf, usize size);
 
 // rmem_mkvmalloc creates an allocator backed by a slab of system-managed virtual memory.
 // If size=0, a very large allocation is created (~4GB).
@@ -339,9 +347,6 @@ RSMAPI rmem rmem_mkvmalloc(usize size);
 
 // rmem_freealloc frees an allocator created with a rmem_mk*alloc function
 RSMAPI void rmem_freealloc(rmem m);
-
-// RMEM_MK_MIN is the minimum size for rmem_mk*alloc functions
-#define RMEM_MK_MIN (sizeof(void*)*4)
 
 // memory allocation interface
 static void* nullable rmem_alloc(rmem m, usize size);

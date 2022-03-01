@@ -113,24 +113,29 @@ typedef u32 rinstr;
 _( COPY  , ABu  , "copy"  /* R(A) = {R(B),B} aka "move" */)\
 _( LOADK , ABu  , "loadk" /* R(A) = K(B) -- load constant  */)\
 \
-_( ADD   , ABCu , "add"   /* R(A) = R(B) + {R(C),C}                                */)\
-_( SUB   , ABCu , "sub"   /* R(A) = R(B) - {R(C),C}                                */)\
-_( MUL   , ABCu , "mul"   /* R(A) = R(B) * {R(C),C}                                */)\
-_( DIV   , ABCu , "div"   /* R(A) = R(B) / {R(C),C}                                */)\
-_( MOD   , ABCu , "mod"   /* R(A) = R(B) % {R(C),C}                                */)\
-_( AND   , ABCu , "and"   /* R(A) = R(B) & {R(C),C}                                */)\
-_( OR    , ABCu , "or"    /* R(A) = R(B) | {R(C),C}                                */)\
-_( XOR   , ABCu , "xor"   /* R(A) = R(B) ^ {R(C),C}                                */)\
-_( SHL   , ABCu , "shl"   /* R(A) = R(B) << {R(C),C}                               */)\
-_( SHRS  , ABCs , "shrs"  /* R(A) = R(B) >> {R(C),C} sign-replicating (arithmetic) */)\
-_( SHRU  , ABCu , "shru"  /* R(A) = R(B) >> {R(C),C} zero-replicating (logical)    */)\
+_( ADD   , ABCu , "add"   /* R(A) = R(B) + {R(C),Cu}                                */)\
+_( SUB   , ABCu , "sub"   /* R(A) = R(B) - {R(C),Cu}                                */)\
+_( MUL   , ABCu , "mul"   /* R(A) = R(B) * {R(C),Cu}                                */)\
+_( DIV   , ABCu , "div"   /* R(A) = R(B) / {R(C),Cu}                                */)\
+_( MOD   , ABCu , "mod"   /* R(A) = R(B) % {R(C),Cu}                                */)\
+_( AND   , ABCu , "and"   /* R(A) = R(B) & {R(C),Cu}                                */)\
+_( OR    , ABCu , "or"    /* R(A) = R(B) | {R(C),Cu}                                */)\
+_( XOR   , ABCu , "xor"   /* R(A) = R(B) ^ {R(C),Cu}                                */)\
+_( SHL   , ABCu , "shl"   /* R(A) = R(B) << {R(C),Cu}                               */)\
+_( SHRS  , ABCs , "shrs"  /* R(A) = R(B) >> {R(C),Cs} sign-replicating (arithmetic) */)\
+_( SHRU  , ABCu , "shru"  /* R(A) = R(B) >> {R(C),Cu} zero-replicating (logical)    */)\
 \
-_( CMPEQ , ABCu , "cmpeq" /* R(A) = R(B) == {R(C),C} */)\
-_( CMPLT , ABCu , "cmplt" /* R(A) = R(B) < {R(C),C}  */)\
-_( CMPGT , ABCu , "cmpgt" /* R(A) = R(B) > {R(C),C}  */)\
+_( CMPEQ , ABCu , "cmpeq" /* R(A) = R(B) == {R(C),Cu} */)\
+_( CMPLT , ABCu , "cmplt" /* R(A) = R(B) < {R(C),Cu}  */)\
+_( CMPGT , ABCu , "cmpgt" /* R(A) = R(B) > {R(C),Cu}  */)\
 \
-_( BRZ   , ABs  , "brz"   /* if R(A)==0 goto instr({R(B),PC+Bs}) */)\
-_( BRNZ  , ABs  , "brnz"  /* if R(A)!=0 goto instr({R(B),PC+Bs}) */)\
+_( BRZ   , ABs  , "brz"   /* if R(A)==0 goto PC+{R(B),Bs} */)\
+_( BRNZ  , ABs  , "brnz"  /* if R(A)!=0 goto PC+{R(B),Bs} */)\
+\
+_( CALL  , Au   , "call"  /* R0...R7 = call PC={R(A),Au} (R0...R7) */)\
+_( SCALL , Au   , "scall" /* R0...R7 = system_call {R(A),Au} (R0...R7) */)\
+  /* TODO: would be nice to be able to pass multiple imms to SCALL \
+     e.g. "scall PUTC 'h'"; a new encoding AuBu maybe? */          \
 \
 _( RET   , _    , "ret" /* return */)\
 // end RSM_FOREACH_OP
@@ -150,7 +155,7 @@ _( RET   , _    , "ret" /* return */)\
 #define RSM_SIZE_Bw  (RSM_SIZE_B + RSM_SIZE_C + RSM_SIZE_D - RSM_SIZE_i)
 #define RSM_SIZE_Aw  (RSM_SIZE_A + RSM_SIZE_B + RSM_SIZE_C + RSM_SIZE_D - RSM_SIZE_i)
 
-#define RSM_MAX_Au   0x7fffff /* 2^23 - 1  TODO use ILOG2 macro? */
+#define RSM_MAX_Au   0x7fffff /* 2^23 - 1 */
 #define RSM_MAX_Bu   0x3ffff  /* 2^18 - 1 */
 #define RSM_MAX_Cu   0x1fff   /* 2^13 - 1 */
 #define RSM_MAX_Du   0xff     /* 2^8  - 1 */
@@ -213,6 +218,7 @@ _( RET   , _    , "ret" /* return */)\
 #define RSM_SET_OP(i,v)  RSM_SET_ARGN(i, 0,          RSM_SIZE_OP, v)
 #define RSM_SET_A(i,v)   RSM_SET_ARGN(i, RSM_POS_A,  RSM_SIZE_A,  v)
 #define RSM_SET_Au(i,v)  RSM_SET_ARGN(i, RSM_POS_Aw, RSM_SIZE_Aw, v)
+#define RSM_SET_As(i,v)  RSM_SET_Au(i, ((rinstr)(v)) + (RSM_MAX_Au / 2))
 #define RSM_SET_B(i,v)   RSM_SET_ARGN(i, RSM_POS_B,  RSM_SIZE_B,  v)
 #define RSM_SET_Bu(i,v)  RSM_SET_ARGN(i, RSM_POS_Bw, RSM_SIZE_Bw, v)
 #define RSM_SET_Bs(i,v)  RSM_SET_Bu(i, ((rinstr)(v)) + (RSM_MAX_Bu / 2))
@@ -249,7 +255,7 @@ _( RET   , _    , "ret" /* return */)\
 #define RSM_MAKE_A(op,a) ( ((rinstr)op) \
   | ( ((rinstr)a) << RSM_POS_Aw ) )
 #define RSM_MAKE_Au(op,a) ( ((rinstr)op) \
-  | (1 << RSM_POS_B) | ( ((rinstr)a) << RSM_POS_Aw ) )
+  | (1 << RSM_POS_A) | ( ((rinstr)a) << RSM_POS_Aw ) )
 #define RSM_MAKE__(op) ((rinstr)op)
 
 #define RSM_MAKE_As(op,a)          RSM_MAKE_Au(op,((rinstr)(a)) + (RSM_MAX_Au / 2))
@@ -317,7 +323,7 @@ RSMAPI usize rsm_compile(rcomp* c, rmem resm, rinstr** resp);
 void rcomp_dispose(rcomp* c);
 
 // rsm_vmexec executes a program, starting with instruction inv[0]
-RSMAPI void rsm_vmexec(u64* iregs, u32* inv, u32 inc);
+RSMAPI void rsm_vmexec(u64* iregs, u32* inv, usize inlen);
 
 // rsm_fmtprog formats an array of instructions ip as "assembly" text to buf.
 // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th

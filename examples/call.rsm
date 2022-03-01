@@ -1,0 +1,9 @@
+fun main() {
+  R0 = 3
+  R1 = 4
+  call foo
+}
+fun foo(x i32, y i32) i32 {
+  R0 = R0 * R1
+  ret
+}

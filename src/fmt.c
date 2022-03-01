@@ -2,43 +2,37 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
 
-#define RA  FMTR(RSM_GET_A(in))
-#define RB  FMTR(RSM_GET_B(in))
-#define RC  FMTR(RSM_GET_C(in))
-#define RD  FMTR(RSM_GET_D(in))
+static void _fr(abuf* s, u32 v) {
+  assert(v < 32);
+  #ifdef __wasm__
+    abuf_fmt(s, "\tR%u", v);
+  #else
+    // ANSI colors: (\e[3Nm or \e[9Nm) 1 red, 2 green, 3 yellow, 4 blue, 5 magenta, 6 cyan
+    abuf_fmt(s, "\t\e[9%cmR%u\e[39m", '1'+((v)%6), v); assert(v < 32);
+  #endif
+}
+static void _fu(abuf* s, u32 v) { abuf_fmt(s, "\t0x%x", v); }
+static void _fs(abuf* s, u32 v) { abuf_fmt(s, "\t%d", (i32)v); }
 
-#define RAu ( RSM_GET_Ai(in) ? FMTu((u64)RSM_GET_Au(in)) : RA )
-#define RBu ( RSM_GET_Bi(in) ? FMTu((u64)RSM_GET_Bu(in)) : RB )
-#define RCu ( RSM_GET_Ci(in) ? FMTu((u64)RSM_GET_Cu(in)) : RC )
-#define RDu ( RSM_GET_Di(in) ? FMTu((u64)RSM_GET_Du(in)) : RD )
+#define fr(N) _fr(s, RSM_GET_##N(in))
+#define fu(N) (RSM_GET_##N##i(in) ? _fu(s, RSM_GET_##N##u(in)) : _fr(s, RSM_GET_##N##u(in)))
+#define fs(N) (RSM_GET_##N##i(in) ? _fs(s, RSM_GET_##N##s(in)) : _fr(s, RSM_GET_##N##s(in)))
 
-#define RAs ( RSM_GET_Ai(in) ? FMTs((i64)RSM_GET_As(in)) : RA )
-#define RBs ( RSM_GET_Bi(in) ? FMTs((i64)RSM_GET_Bs(in)) : RB )
-#define RCs ( RSM_GET_Ci(in) ? FMTs((i64)RSM_GET_Cs(in)) : RC )
-#define RDs ( RSM_GET_Di(in) ? FMTs((i64)RSM_GET_Ds(in)) : RD )
-
-// ANSI colors: (\e[3Nm or \e[9Nm) 1 red, 2 green, 3 yellow, 4 blue, 5 magenta, 6 cyan
-#ifdef __wasm__
-  #define FMTR(v) abuf_fmt(s, "\tR%u", (v))
-#else
-  #define FMTR(v) abuf_fmt(s, "\t\e[9%cmR%u\e[39m", '1'+((v)%6), (v))
-#endif
-#define FMTu(v) abuf_fmt(s, "\t0x%llx", (v))
-#define FMTs(v) abuf_fmt(s, "\t%lld", (v))
-
+DIAGNOSTIC_IGNORE_PUSH("-Wunused-function")
 static void fi__(abuf* s, rinstr in)     { }
-static void fi_A(abuf* s, rinstr in)     { RA; }
-// static void fi_Au(abuf* s, rinstr in)    { RAu; }
-// static void fi_As(abuf* s, rinstr in)    { RAs; }
-static void fi_AB(abuf* s, rinstr in)    { fi_A(s, in);   RB; }
-static void fi_ABu(abuf* s, rinstr in)   { fi_A(s, in);   RBu; }
-static void fi_ABs(abuf* s, rinstr in)   { fi_A(s, in);   RBs; }
-// static void fi_ABC(abuf* s, rinstr in)   { fi_AB(s, in);  RC; }
-static void fi_ABCu(abuf* s, rinstr in)  { fi_AB(s, in);  RCu; }
-static void fi_ABCs(abuf* s, rinstr in)  { fi_AB(s, in);  RCs; }
-// static void fi_ABCD(abuf* s, rinstr in)  { fi_ABC(s, in); RD; }
-// static void fi_ABCDu(abuf* s, rinstr in) { fi_ABC(s, in); RDu; }
-// static void fi_ABCDs(abuf* s, rinstr in) { fi_ABC(s, in); RDs; }
+static void fi_A(abuf* s, rinstr in)     { fr(A); }
+static void fi_Au(abuf* s, rinstr in)    { fu(A); }
+static void fi_As(abuf* s, rinstr in)    { fs(A); }
+static void fi_AB(abuf* s, rinstr in)    { fr(A); fr(B); }
+static void fi_ABu(abuf* s, rinstr in)   { fr(A); fu(B); }
+static void fi_ABs(abuf* s, rinstr in)   { fr(A); fs(B); }
+static void fi_ABC(abuf* s, rinstr in)   { fr(A); fr(B); fr(C); }
+static void fi_ABCu(abuf* s, rinstr in)  { fr(A); fr(B); fu(C); }
+static void fi_ABCs(abuf* s, rinstr in)  { fr(A); fr(B); fs(C); }
+static void fi_ABCD(abuf* s, rinstr in)  { fr(A); fr(B); fr(C); fr(D); }
+static void fi_ABCDu(abuf* s, rinstr in) { fr(A); fr(B); fr(C); fu(D); }
+static void fi_ABCDs(abuf* s, rinstr in) { fr(A); fr(B); fr(C); fs(D); }
+DIAGNOSTIC_IGNORE_POP()
 
 static void fmtinstr1(abuf* s, rinstr in) {
   abuf_str(s, rop_name(RSM_GET_OP(in)));

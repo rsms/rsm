@@ -62,8 +62,7 @@ if [ -f $B ]; then
   # fi
   # diff -w -d -q $B $S2 >/dev/null ||
   #   diff -U 1 -w -d --suppress-common-lines $B $S2 > $D || cat $D | $DIFF_FILTER
-  diff -w -d -q $B $S2 >/dev/null ||
-    diff -U 1 -w -d --suppress-common-lines $B $S2 > $D || true
+  diff -U 1 -w -d --suppress-common-lines $B $S2 > $D || true
 fi
 
 # ANSI colors: (\e[3Nm or \e[9Nm) 1 red, 2 green, 3 yellow, 4 blue, 5 magenta, 6 cyan

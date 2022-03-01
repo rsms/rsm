@@ -118,6 +118,7 @@ struct pstate {
 typedef struct node     node;
 typedef struct nlist    nlist;
 typedef struct strslice strslice;
+typedef struct srcpos   srcpos;
 struct nlist {
   node* nullable head;
   node* nullable tail;
@@ -126,10 +127,13 @@ struct strslice {
   const char* p;
   usize len;
 };
+struct srcpos {
+  u32 line, col;
+};
 struct node {
-  node* nullable next;      // list link
-  rtok           t;         // type
-  u32            line, col; // source postion
+  node* nullable next; // list link
+  rtok           t;    // type
+  srcpos         pos;
   union { // field used depends on value of t
     u64      ival;
     strslice name;
@@ -149,23 +153,40 @@ struct parselet {
   precedence     prec;
 };
 
-// codegen state
-typedef struct gstate    gstate;
-typedef struct labelinfo labelinfo;
-struct labelinfo {
+// codegen
+typedef struct gstate gstate;
+typedef struct gfun   gfun;
+typedef struct gblock gblock;
+typedef struct gref   gref;
+struct gstate {
+  rcomp*         c;      // compilation session/context
+  rmem           imem;   // allocator for iv
+  rarray         iv;     // rinstr[]; instructions
+  rarray         ufv;    // gref[]; pending undefined function references
+  rarray         funs;   // gfun[]; functions
+  // rarray         pubtab; // u32[]; table of exported functions (indices)
+  smap           funm;   // name => funs_index
+  gfun* nullable fn;     // current function
+};
+struct gfun {
   const char* name;
   usize       namelen;
-  usize       i;     // iv offset (location for lv, referrer for ulv)
-  node*       n;     // lv: definition, ulv: referrer
-  usize       nrefs; // reference count (lv only)
+  usize       i;      // first instruction = iv[starti]
+  usize       nrefs;  // reference count (lv only)
+  rarray      blocks; // gblock[]
+  u32         fi;     // function table index (value that fits in Au)
+  rarray      ulv;    // gref[]; pending undefined references (temporary)
 };
-struct gstate {
-  rcomp* c;    // compilation session/context
-  rmem   imem; // allocator for iv
-  rarray iv;   // rinstr[]; instructions
-  rarray fv;   // usize[]; functions, mapping [function index] => iv offset
-  rarray lv;   // labelinfo[]; defined labels
-  rarray ulv;  // labelinfo[]; undefined label references
+struct gblock {
+  const char* name;
+  usize       namelen;
+  usize       i;     // first instruction = iv[starti]
+  usize       nrefs; // reference count
+  srcpos      pos;
+};
+struct gref {
+  usize i; // referrer's iv offset
+  node* n; // referrer
 };
 
 
@@ -173,15 +194,16 @@ static const char* kBlock0Name = "b0"; // name of first block
 
 #if HASHCODE_MAX >= 0xFFFFFFFFFFFFFFFFu
 static const smapent kwmap_entries[64] = {
- {"i8",2,35},{"sub",3,781},{0},{"i16",3,36},{0},{0},{0},{"shl",3,2573},{0},{0},
- {0},{0},{0},{0},{"cmplt",5,3597},{0},{0},{0},{"shru",4,3085},{0},{"ret",3,4621},
- {0},{"copy",4,13},{0},{"i64",3,38},{0},{"div",3,1293},{0},{"brnz",4,4365},
- {"mod",3,1549},{0},{0},{"shrs",4,2829},{0},{0},{0},{"fun",3,33},{0},{0},
- {"i1",2,34},{"xor",3,2317},{0},{"cmpeq",5,3341},{0},{0},{"and",3,1805},{0},
- {"loadk",5,269},{"mul",3,1037},{0},{"i32",3,37},{0},{"or",2,2061},{0},
- {"cmpgt",5,3853},{0},{0},{"add",3,525},{0},{0},{0},{"brz",3,4109},{0},{0}};
+ {"i16",3,36},{"brz",3,4109},{0},{0},{"i32",3,37},{0},{0},{"brnz",4,4365},{0},
+ {"or",2,2061},{0},{"ret",3,5133},{0},{"cmpeq",5,3341},{0},{"sub",3,781},{0},
+ {"fun",3,33},{0},{"i1",2,34},{"shl",3,2573},{0},{"scall",5,4877},
+ {"loadk",5,269},{0},{"cmplt",5,3597},{0},{"div",3,1293},{0},{0},{"i64",3,38},
+ {0},{0},{"mod",3,1549},{0},{0},{"shrs",4,2829},{"and",3,1805},{0},
+ {"call",4,4621},{0},{0},{"shru",4,3085},{0},{0},{"mul",3,1037},{0},{0},
+ {"xor",3,2317},{0},{"i8",2,35},{0},{"cmpgt",5,3853},{0},{0},{"add",3,525},
+ {"copy",4,13},{0},{0},{0},{0},{0},{0},{0}};
 static const struct{u32 cap,len,gcap;maplf lf;hashcode hash0;const smapent* ep;}
-kwmap_data={64,25,48,2,0x5cf93335,kwmap_entries};
+kwmap_data={64,27,48,2,0x1636428,kwmap_entries};
 static const smap* kwmap = (const smap*)&kwmap_data;
 #else /* can't use static map; check_kwmap will build one */
 static const smap* kwmap;
@@ -237,21 +259,21 @@ static u32 pcolumn(pstate* p) { // source column of current token
   return (u32)((uintptr)p->tokstart - (uintptr)p->linestart) + 1;
 }
 
-static void reportv(rcomp* c, u32 line, u32 col, int code, const char* fmt, va_list ap) {
+static void reportv(rcomp* c, srcpos pos, int code, const char* fmt, va_list ap) {
   if (c->_stop)
     return; // previous call to diaghandler has asked us to stop
   c->diag.code = code;
   c->diag.msg = c->_diagmsg;
   c->diag.srcname = c->srcname;
-  c->diag.line = line;
-  c->diag.col = col;
+  c->diag.line = pos.line;
+  c->diag.col = pos.col;
 
   if (code)
     c->errcount++;
 
   abuf s = abuf_make(c->_diagmsg, sizeof(c->_diagmsg));
-  if (line > 0) {
-    abuf_fmt(&s, "%s:%u:%u: ", c->srcname, line, col);
+  if (pos.line > 0) {
+    abuf_fmt(&s, "%s:%u:%u: ", c->srcname, pos.line, pos.col);
   } else {
     abuf_fmt(&s, "%s: ", c->srcname);
   }
@@ -263,19 +285,19 @@ static void reportv(rcomp* c, u32 line, u32 col, int code, const char* fmt, va_l
   c->_stop = !c->diaghandler(&c->diag, c->userdata);
 }
 
-ATTR_FORMAT(printf, 4, 5)
-static void errf(rcomp* comp, u32 line, u32 col, const char* fmt, ...) {
+ATTR_FORMAT(printf, 3, 4)
+static void errf(rcomp* comp, srcpos pos, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  reportv(comp, line, col, 1, fmt, ap);
+  reportv(comp, pos, 1, fmt, ap);
   va_end(ap);
 }
 
-ATTR_FORMAT(printf, 4, 5)
-static void warnf(rcomp* comp, u32 line, u32 col, const char* fmt, ...) {
+ATTR_FORMAT(printf, 3, 4)
+static void warnf(rcomp* comp, srcpos pos, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  reportv(comp, line, col, 0, fmt, ap);
+  reportv(comp, pos, 0, fmt, ap);
   va_end(ap);
 }
 
@@ -283,7 +305,7 @@ ATTR_FORMAT(printf, 2, 3)
 static void serr(pstate* p, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  reportv(p->c, p->lineno, pcolumn(p), 1, fmt, ap);
+  reportv(p->c, (srcpos){p->lineno, pcolumn(p)}, 1, fmt, ap);
   va_end(ap);
   p->tok = T_END;
 }
@@ -293,9 +315,9 @@ static void perr(pstate* p, node* nullable n, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
   if (n) {
-    reportv(p->c, n->line, n->col, 1, fmt, ap);
+    reportv(p->c, n->pos, 1, fmt, ap);
   } else {
-    reportv(p->c, p->lineno, pcolumn(p), 1, fmt, ap);
+    reportv(p->c, (srcpos){p->lineno, pcolumn(p)}, 1, fmt, ap);
   }
   va_end(ap);
 }
@@ -602,8 +624,8 @@ static node* mknode(pstate* p) {
   node* n = rmem_alloc(p->c->mem, sizeof(node));
   memset(n, 0, sizeof(node));
   n->t = p->tok;
-  n->line = p->lineno;
-  n->col = pcolumn(p);
+  n->pos.line = p->lineno;
+  n->pos.col = pcolumn(p);
   return n;
 }
 
@@ -968,46 +990,65 @@ static const char* tokname(rtok t) {
 
 // --- codegen functions
 
+
+#define GARRAY_PUSH_OR_RET(T, arrayp, ERRRET...) ({                                 \
+  T* vp__ = rarray_push(T, (arrayp), g->c->mem);                                    \
+  if UNLIKELY(!vp__) { errf(g->c, (srcpos){0,0}, "out of memory"); return ERRRET; } \
+  vp__; })
+
+static u32 refgfun(gstate* g, node* referrer, usize referreri) {
+  uintptr* vp = smap_lookup(&g->funm, referrer->name.p, referrer->name.len);
+  if (vp) {
+    // using function instruction index means we can address
+    // 2^23 = 8,388,608 instructions (2^23*4 = 33,554,432 bytes) with Au imm
+    // and much more by putting a larger instruction index in R(A).
+    gfun* fn = rarray_at(gfun, &g->funs, *vp);
+    if (fn->i > RSM_MAX_Au)
+      panic("too large call distance"); // TODO generate R(A)=dist instrs
+    return fn->i;
+  }
+  gref* ref = GARRAY_PUSH_OR_RET(gref, &g->ufv, 0);
+  ref->i = referreri;
+  ref->n = referrer;
+  return 0;
+}
+
+static i32 refgblock(gstate* g, node* referrer, usize referreri) {
+  // find label
+  for (u32 i = 0; i < g->fn->blocks.len; i++) {
+    gblock* b = rarray_at(gblock, &g->fn->blocks, i);
+    if (strsliceeqn(&referrer->name, b->name, b->namelen)) {
+      // label found
+      referreri++;
+      b->nrefs++;
+      i32 idelta = referreri > b->i ? (i32)(referreri - b->i) : -(i32)(b->i - referreri);
+      return -idelta;
+    }
+  }
+  // label not found -- record a pending reference
+  gref* ref = GARRAY_PUSH_OR_RET(gref, &g->fn->ulv, 0);
+  ref->i = referreri;
+  ref->n = referrer;
+  return 0;
+}
+
 static u8 nregno(gstate* g, node* n) {
   if UNLIKELY(n->t != T_IREG && n->t != T_FREG) {
-    errf(g->c, n->line, n->col, "expected register, got %s", tokname(n->t));
+    errf(g->c, n->pos, "expected register, got %s", tokname(n->t));
     return 0;
   }
   assert(n->ival < 32); // parser checks this, so no real error checking needed
   return (u8)n->ival;
 }
 
-static usize labelderef(gstate* g, node* referrern, usize referreri, const strslice* name) {
-  for (usize i = 0; i < g->lv.len; i++) {
-    labelinfo* li = rarray_at(labelinfo, &g->lv, i);
-    if (strsliceeqn(name, li->name, li->namelen)) { // label found
-      referreri++;
-      li->nrefs++;
-      i64 idelta = referreri > li->i ? (i64)(referreri - li->i) : -(i64)(li->i - referreri);
-      return -idelta;
-    }
-  }
-  // label is not (yet) defined -- record a pending reference
-  labelinfo* li = rarray_push(labelinfo, &g->ulv, g->c->mem);
-  if UNLIKELY(!li) {
-    errf(g->c, 0, 0, "out of memory");
-    return 0;
-  }
-  li->i = referreri;
-  li->name = name->p;
-  li->namelen = name->len;
-  li->n = referrern;
-  return 0;
-}
-
 static void errintsize(
-  rcomp* c, u32 line, u32 col, rop op, i64 minval, i64 maxval, u64 val, bool issigned)
+  rcomp* c, srcpos pos, rop op, i64 minval, i64 maxval, u64 val, bool issigned)
 {
   if (minval != 0 || issigned) {
-    return errf(c, line, col, "value %lld out of range %lld...%lld for %s",
+    return errf(c, pos, "value %lld out of range %lld...%lld for %s",
       (i64)val, minval, maxval, rop_name(op));
   }
-  errf(c, line, col, "value %llu out of range 0...%lld for %s", val, maxval, rop_name(op));
+  errf(c, pos, "value %llu out of range 0...%lld for %s", val, maxval, rop_name(op));
 }
 
 // getiargs checks & reads integer arguments for an operation described by AST node n.
@@ -1035,34 +1076,36 @@ static bool getiargs(gstate* g, node* n, i32* argv, u32 wantargc, i64 minval, i6
     assert(val < 32); // parser checks this; assert to catch bugs, not input
     argv[argc] = (i32)val;
     return false;
-  case T_NAME: // label
-    argv[argc] = labelderef(g, arg, g->iv.len - 1, &arg->name);
+  case T_NAME:
+    if ((rop)n->ival == rop_CALL) {
+      argv[argc] = refgfun(g, arg, g->iv.len - 1);
+    } else {
+      argv[argc] = refgblock(g, arg, g->iv.len - 1);
+    }
     return true;
   case T_INT2 ... T_SINT16:
     if UNLIKELY((i64)val > maxval || (i64)val < minval) {
       bool issigned = (arg->t - T_SINT16) % 2 == 0;
-      errintsize(g->c, arg->line, arg->col, (rop)n->ival, minval, maxval, val, issigned);
+      errintsize(g->c, arg->pos, (rop)n->ival, minval, maxval, val, issigned);
       return false;
     }
     if UNLIKELY(RSM_OP_IS_BR(n->ival) && val == 0) {
-      warnf(g->c, arg->line, arg->col, "zero jump offset for %s has no effect",
-        rop_name((rop)n->ival));
+      warnf(g->c, arg->pos, "zero jump offset for %s has no effect", rop_name((rop)n->ival));
     }
     argv[argc] = (i32)val;
     return true;
   default:
-    errf(g->c, arg->line, arg->col,
-      "expected register or immediate integer, got %s", tokname(arg->t));
+    errf(g->c, arg->pos, "expected register or immediate integer, got %s", tokname(arg->t));
     argv[argc] = 0;
     return false;
   }
 
 err_argc:
   if (argc < wantargc) {
-    errf(g->c, n->line, n->col, "not enough arguments for %s; want %u, got %u",
+    errf(g->c, n->pos, "not enough arguments for %s; want %u, got %u",
       rop_name((rop)n->ival), wantargc, argc);
   } else {
-    errf(g->c, n->line, n->col, "too many arguments for %s; want %u, got %u",
+    errf(g->c, n->pos, "too many arguments for %s; want %u, got %u",
       rop_name((rop)n->ival), wantargc, argc);
   }
   return false;
@@ -1073,10 +1116,7 @@ static void genop(gstate* g, node* n) {
   assert(n->t == T_OP);
   assert(n->ival < RSM_OP_COUNT);
 
-  rinstr* in = rarray_push(rinstr, &g->iv, g->imem);
-  if UNLIKELY(!in)
-    return errf(g->c, 0, 0, "out of memory");
-
+  rinstr* in = GARRAY_PUSH_OR_RET(rinstr, &g->iv);
   rop op = (rop)n->ival;
   i32 arg[4]; // ABCD args to RSM_MAKE_* macros
 
@@ -1103,7 +1143,7 @@ static void genop(gstate* g, node* n) {
   DIAGNOSTIC_IGNORE_PUSH("-Wunused-label")
   make__:
     if UNLIKELY(n->list.head)
-      errf(g->c, n->line, n->col, "%s does not accept any arguments", rop_name(op));
+      errf(g->c, n->pos, "%s does not accept any arguments", rop_name(op));
     *in = RSM_MAKE__(op);
     return;
   make_A:     NOIMM(1, A          ,                         arg[0])
@@ -1123,7 +1163,7 @@ static void genop(gstate* g, node* n) {
   #undef NOIMM
 
 noimm: // the operation does not accept an immediate-value as the last argument
-  errf(g->c, n->line, n->col, "last argument for %s must be a register", rop_name(op));
+  errf(g->c, n->pos, "last argument for %s must be a register", rop_name(op));
 }
 
 
@@ -1150,79 +1190,116 @@ static void genassign(gstate* g, node* n) {
   return genop(g, n);
 }
 
+static void resolveblockrefs(gstate* g, rarray* refs, gblock* b) {
+  for (u32 i = 0; i < refs->len; ) {
+    gref* ref = rarray_at(gref, refs, i);
+    assert(assertnotnull(ref->n)->t == T_NAME);
+    if (!strsliceeqn(&ref->n->name, b->name, b->namelen)) { i++; continue; }
+    b->nrefs++;
+    rinstr* in = rarray_at(rinstr, &g->iv, ref->i); // referring instruction
+
+    i32 idelta = (i32)(b->i - ref->i - 1); // jump offset
+    *in = RSM_SET_Bs(*in, idelta);  // update instruction
+
+    rarray_remove(gblock, refs, i, 1);
+  }
+}
+
+static void resolvefunrefs(gstate* g, rarray* refs, gfun* fn) {
+  for (u32 i = 0; i < refs->len; ) {
+    gref* ref = rarray_at(gref, refs, i);
+    assert(assertnotnull(ref->n)->t == T_NAME);
+    if (!strsliceeqn(&ref->n->name, fn->name, fn->namelen)) { i++; continue; }
+    fn->nrefs++;
+    rinstr* in = rarray_at(rinstr, &g->iv, ref->i); // referring instruction
+
+    assert(RSM_GET_OP(*in) == rop_CALL);
+    *in = RSM_SET_Au(*in, fn->i);  // update instruction
+
+    rarray_remove(gblock, refs, i, 1);
+  }
+}
+
 static void genblock(gstate* g, node* block, bool islastblock) {
   assert(block->t == T_LABEL);
+  assertnotnull(g->fn);
 
-  // record label's name and "position"
-  labelinfo* li = rarray_push(labelinfo, &g->lv, g->c->mem);
-  if UNLIKELY(!li)
-    return errf(g->c, 0, 0, "out of memory");
+  // register block
+  gblock* b = GARRAY_PUSH_OR_RET(gblock, &g->fn->blocks);
+  b->i = g->iv.len;
+  b->name = block->name.p;
+  b->namelen = block->name.len;
+  b->nrefs = 0;
+  b->pos = block->pos;
 
-  li->i = g->iv.len;
-  li->name = block->name.p;
-  li->namelen = block->name.len;
-  li->nrefs = 0;
-  li->n = block;
-
-  // resolve pending references to this label
-  for (usize i = 0; i < g->ulv.len; ) {
-    labelinfo* uli = rarray_at(labelinfo, &g->ulv, i);
-    if (!strsliceeqn(&block->name, uli->name, uli->namelen)) {
-      i++;
-      continue;
-    }
-    li->nrefs++;
-    i64 idelta = (i64)(g->iv.len - uli->i - 1); // jump offset
-    rinstr* in = rarray_at(rinstr, &g->iv, uli->i); // instruction waiting for this label
-    *in = RSM_SET_Bs(*in, idelta);  // update instruction
-    rarray_remove(labelinfo, &g->ulv, i, 1); // label reference is now resolved
-  }
+  // resolve pending references
+  resolveblockrefs(g, &g->fn->ulv, b);
 
   for (node* cn = block->list.head; cn; cn = cn->next) {
     switch (cn->t) {
       case T_OP: genop(g, cn); break;
       case T_EQ: genassign(g, cn); break;
-      default: errf(g->c, cn->line, cn->col, "invalid block element %s", tokname(cn->t));
+      default:
+        errf(g->c, cn->pos, "invalid block element %s", tokname(cn->t));
     }
     if (islastblock && cn->next == NULL && (cn->t != T_OP || cn->ival != rop_RET)) {
-      // make sure the last instruction of the last block of a function is "ret".
-      // TODO: either synthesize a ret (and maybe emit a warning)
-      errf(g->c, cn->line, cn->col,
-        "function does not end with a %s instruction", rop_name(rop_RET));
+      // make sure the last instruction of the last block of a function is "ret"
+      rinstr* in = GARRAY_PUSH_OR_RET(rinstr, &g->iv);
+      *in = RSM_MAKE__(rop_RET);
     }
   }
 }
 
 static void genfun(gstate* g, node* fun) {
   assert(fun->t == T_FUN);
+
+  // register function
+  gfun* fn = rarray_push(gfun, &g->funs, g->c->mem);
+  uintptr* vp = smap_assign(&g->funm, fun->name.p, fun->name.len);
+  if UNLIKELY(vp == NULL || fn == NULL)
+    return errf(g->c, (srcpos){0,0}, "out of memory");
+  *vp = (uintptr)g->funs.len - 1;
+  fn->name = fun->name.p;
+  fn->namelen = fun->name.len;
+  fn->i = g->iv.len;
+  fn->nrefs = 0;
+  fn->blocks = (rarray){0};
+  fn->fi = g->funs.len - 1; // TODO only exported functions' table index
+  fn->ulv = (rarray){0};
+
+  // resolve pending references
+  resolvefunrefs(g, &g->ufv, fn);
+
+  // get body by traversing the function node's linked list
   node* params = fun->list.head;
   node* results = params->next;
   node* body = results->next;
-  if (!body)
+  if (!body) // just a function declaration
     return;
 
-  // record function's "position"
-  usize* fpos = rarray_push(usize, &g->fv, g->c->mem);
-  if UNLIKELY(!fpos)
-    return errf(g->c, 0, 0, "out of memory");
-  *fpos = g->iv.len;
+  // reuse ulv storage from previously-generated function
+  if (g->fn != NULL) {
+    fn->ulv.v   = g->fn->ulv.v;
+    fn->ulv.cap = g->fn->ulv.cap;
+  }
+  g->fn = fn;
 
-  g->lv.len = 0; // clear label mappings from any past functions
+  // generate function body
   for (node* cn = body->list.head; cn; cn = cn->next)
     genblock(g, cn, cn->next == NULL);
 
   // report unresolved labels
-  for (usize i = 0; i < g->ulv.len; i++) {
-    labelinfo* li = rarray_at(labelinfo, &g->ulv, i);
-    errf(g->c, li->n->line, li->n->col, "undefined label \"%.*s\"",
-      (int)li->namelen, li->name);
+  for (u32 i = 0; i < fn->ulv.len; i++) {
+    gref* ref = rarray_at(gref, &fn->ulv, i);
+    node* n = ref->n;
+    errf(g->c, n->pos, "undefined label \"%.*s\"", (int)n->name.len, n->name.p);
   }
+
   // report unused labels
-  for (usize i = 0; i < g->lv.len; i++) {
-    labelinfo* li = rarray_at(labelinfo, &g->lv, i);
-    if (li->nrefs == 0 && li->name != kBlock0Name)
-      warnf(g->c, li->n->line, li->n->col, "unused label \"%.*s\"",
-        (int)li->namelen, li->name);
+  for (u32 i = 0; i < fn->blocks.len; i++) {
+    gblock* b = rarray_at(gblock, &fn->blocks, i);
+    if (b->nrefs == 0 && b->name != kBlock0Name)
+      warnf(g->c, b->pos, "unused label \"%.*s\"", (int)b->namelen, b->name);
   }
 }
 
@@ -1250,11 +1327,12 @@ static node* parse(rcomp* c) {
     #ifdef LOG_AST
       char buf[4096];
       fmtnode(buf, sizeof(buf), n);
-      log("input:%u:%u: parsed top-level statement:\n%s", n->line, n->col, buf);
+      log("input:%u:%u: parsed top-level statement:\n%s", n->pos.line, n->pos.col, buf);
     #endif
   }
   return module;
 }
+
 
 static usize codegen(rcomp* c, node* module, rmem imem, rinstr** resp) {
   gstate* g = c->_gstate;
@@ -1263,49 +1341,72 @@ static usize codegen(rcomp* c, node* module, rmem imem, rinstr** resp) {
     memset(g, 0, sizeof(gstate));
     g->c = c;
     c->_gstate = g;
+    smap_make(&g->funm, c->mem, 16, MAPLF_2);
   } else {
     // recycle gstate
-    g->fv.len = 0;
-    g->lv.len = 0;
-    g->ulv.len = 0;
-    g->iv.v = NULL;
-    g->iv.len = 0;
-    g->iv.cap = 0;
+    g->ufv.len = 0;
+    g->funs.len = 0;
+    g->iv.v = NULL; g->iv.len = 0; g->iv.cap = 0;
+    assertf(g->funm.mem.state == c->mem.state, "allocator changed");
+    smap_clear(&g->funm);
   }
   g->imem = imem;
   // preallocate instruction buffer to avoid excessive rarray_grow calls
   rarray_grow(&g->iv, imem, sizeof(rinstr), 512/sizeof(rinstr));
   assert(module->t == T_LPAREN);
+
+  // generate functions
   for (node* cn = module->list.head; cn; cn = cn->next)
     genfun(g, cn);
   if UNLIKELY(c->_stop || c->errcount)
     return 0;
+
+  // report unresolved function references
+  for (u32 i = 0; i < g->ufv.len; i++) {
+    gref* ref = rarray_at(gref, &g->ufv, i);
+    node* n = ref->n;
+    errf(g->c, n->pos, "undefined function \"%.*s\"", (int)n->name.len, n->name.p);
+  }
+
   *resp = (void*)g->iv.v;
   return g->iv.len;
 }
+
 
 void rcomp_dispose(rcomp* c) {
   gstate* g = c->_gstate;
   if (!g)
     return;
-  rarray_free(labelinfo, &g->lv, c->mem);
-  rarray_free(labelinfo, &g->ulv, c->mem);
-  rarray_free(usize, &g->fv, c->mem);
+
+  if (g->fn)
+    rarray_free(gref, &g->fn->ulv, c->mem);
+
+  for (u32 i = 0; i < g->funs.len; i++) {
+    gfun* fn = rarray_at(gfun, &g->funs, i);
+    rarray_free(gblock, &fn->blocks, c->mem);
+  }
+
+  rarray_free(usize, &g->ufv, c->mem);
+  rarray_free(usize, &g->funs, c->mem);
+  smap_dispose(&g->funm);
+
   #ifdef DEBUG
   memset(g, 0, sizeof(gstate));
   #endif
+
   rmem_free(c->mem, g, sizeof(gstate));
 }
+
 
 static void check_kwmap() {
 #if HASHCODE_MAX < 0xFFFFFFFFFFFFFFFFu || defined(DEBUG)
   static bool didcheck = false; if (didcheck) return; didcheck = true;
 
   // build kwmap with all keywords
-  static u8 memory[2048];
+  static u8 memory[1568];
   static smap kwmap2 = {0}; smap* m = &kwmap2;
   rmem mem = rmem_mkbufalloc(memory, sizeof(memory));
-  assertnotnull(smap_make(m, mem, kwcount, MAPLF_2));
+  assertnotnull(smap_make(m, mem, kwcount, MAPLF_2)); // increase sizeof(memory)
   #if HASHCODE_MAX < 0xFFFFFFFFFFFFFFFFu
     m->hash0 = fastrand();
   #else
@@ -1334,20 +1435,26 @@ static void check_kwmap() {
     if (smap_lookup(m, e->key, e->keylen) == NULL) goto differ;
   return; // kwmap is good
 differ:   // kwmap is outdated -- optimize and print replacement C code
-  dlog("————————————————————————————————————————————————————————");
-  dlog("kwmap needs updating — running smap_optimize...");
-  usize score = smap_optimize(m, 5000000, mem);
-  dlog("new kwmap hash0 0x%llx, score %zu, cap %u, len %u, gcap %u",
-    (u64)m->hash0, score, m->cap, m->len, m->gcap);
-  char buf[4096];
-  smap_cfmt(buf, sizeof(buf), m, "kwmap");
-  log("————————————————————————————————————————————————————————");
-  log("  Please update %s with the following code:", __FILE__);
-  log("————————————————————————————————————————————————————————\n"
-       "\n%s\n\n"
-       "—————————————————————————————————————————————————————————", buf);
-  dlog("  Before committing kwmap update,\n"
-       "   run smap_optimize(m,5000000,mem) to find an ideal layout.\n");
+  #if 1 /* generator disabled */
+    dlog("————————————————————————————————————————————————————————");
+    dlog("kwmap needs updating — find me and enable the generator");
+    dlog("————————————————————————————————————————————————————————");
+  #else /* generator enabled */
+    dlog("————————————————————————————————————————————————————————");
+    dlog("generating kwmap, running smap_optimize...");
+    u8 tmpmemory[sizeof(memory)];
+    rmem tmpmem = rmem_mkbufalloc(tmpmemory, sizeof(tmpmemory));
+    double score = smap_optimize(m, 5000000, tmpmem);
+    dlog("new kwmap hash0 0x%llx, score %f, cap %u, len %u, gcap %u",
+      (u64)m->hash0, score, m->cap, m->len, m->gcap);
+    char buf[4096];
+    smap_cfmt(buf, sizeof(buf), m, "kwmap");
+    log("————————————————————————————————————————————————————————");
+    log("  Please update %s with the following code:", __FILE__);
+    log("————————————————————————————————————————————————————————\n"
+        "\n%s\n\n"
+        "—————————————————————————————————————————————————————————", buf);
+  #endif // generator
   kwmap = m; // use fresh map
 #endif // DEBUG
 }

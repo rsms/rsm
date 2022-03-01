@@ -138,7 +138,7 @@ ATTR_UNUSED static void test_stuff() {
   ip[pc]   = RSM_MAKE_ABs(rop_BRNZ, 1, -(pc+1-b1)); // brnz r1 b1 (TODO sign)
   pc++;
   // end:
-  ip[pc++] = RSM_MAKE_A(rop_RET, 0); // ret
+  ip[pc++] = RSM_MAKE__(rop_RET); // ret
 
   // print function
   dlog("function size: %lu B", pc*sizeof(rinstr));

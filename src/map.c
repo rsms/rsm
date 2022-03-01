@@ -234,8 +234,8 @@ static bool smap_compact(smap* m, rmem mem) {
 
 // smap_score returns the sum of every collision scan distance,
 // or 0 if m has perfect distribution.
-static usize smap_score(const smap* m) {
-  usize score = 0;
+static double smap_score(const smap* m) {
+  double score = 0;
   for (const smapent* e = smap_itstart(m); smap_itnext(m, &e); ) {
     // cost             = scan_distance + nomatch_overscan
     // scan_distance    = abs(ideal_position - actual_position)
@@ -248,7 +248,7 @@ static usize smap_score(const smap* m) {
     usize ideal_i = hash_mem(e->key, e->keylen, m->hash0) & (m->cap - 1);
     usize actual_i = (usize)(e - m->entries); // actual position
     usize scan_dist = ideal_i > actual_i ? ideal_i - actual_i : actual_i - ideal_i;
-    score += scan_dist*2;
+    score += (double)scan_dist;
 
     // nomatch_overscan -- If a non-matching key hashes to this slot,
     // what is the cost of realizing it's not a match?
@@ -256,7 +256,7 @@ static usize smap_score(const smap* m) {
       const smapent* e = &m->entries[i % m->cap];
       if (e->key == NULL || e->key == DELMARK)
         break;
-      score++;
+      score += 0.5;
     }
   }
   return score;
@@ -269,18 +269,18 @@ ATTR_UNUSED static void dump_smap(
   int cmp);
 #endif
 
-usize smap_optimize(smap* m, usize iterations, rmem mem) {
+double smap_optimize(smap* m, usize iterations, rmem mem) {
   smapent* entries = rmem_alloc(mem, m->cap*sizeof(smapent));
   if (entries == NULL)
-    return USIZE_MAX;
+    return -1.0;
   memcpy(entries, m->entries, m->cap*sizeof(smapent));
   hashcode best_hash0 = m->hash0;
-  usize best_score = USIZE_MAX-1;
+  double best_score = -1.0;
 
   #if defined(DEBUG) && !defined(__wasm__)
   smap m_orig = *m;
   m_orig.entries = entries;
-  usize score_orig = smap_score(m);
+  double score_orig = smap_score(m);
   usize iterations_total = iterations;
   #endif
 
@@ -293,11 +293,11 @@ usize smap_optimize(smap* m, usize iterations, rmem mem) {
     }
     if (iterations == 0) // done trying
       break;
-    usize score = smap_score(m);
-    if (score < best_score) {
+    double score = smap_score(m);
+    if (score < best_score || best_score < 0.0) {
       best_score = score;
       best_hash0 = m->hash0;
-      if (score == 0) // perfect score
+      if (score == 0.0) // perfect score
         break;
     }
     iterations--;
@@ -316,7 +316,7 @@ usize smap_optimize(smap* m, usize iterations, rmem mem) {
   // compact
   if (best_score != 0) {
     smap_compact(m, mem);
-    usize score = smap_score(m);
+    double score = smap_score(m);
     if (score > best_score) { // undo
       for (u32 i = 0; i < m->cap; i++) {
         smapent* e = &entries[i];
@@ -327,7 +327,7 @@ usize smap_optimize(smap* m, usize iterations, rmem mem) {
   }
 
   #if defined(DEBUG) && !defined(__wasm__)
-  log("smap_optimize result: (score orig=%zu, best=%zu)\n"
+  log("smap_optimize result: (score orig=%f, best=%f)\n"
     "───┬───────────────────┬───────────────────\n"
     "idx│  before           │  after\n"
     "───┼───────────────────┼───────────────────", score_orig, best_score);

@@ -1,17 +1,124 @@
 
-Data layout
+ROM image layout
 
-Executable image / ROM
+Example:
+  Source code:
+    import console.putch
+    data c = 0x63
+    fun _helper() i32
+      R0 = c
+      ret
+    fun upcase(i32) i32
+      R0 = R0 - 0x20
+      ret
+    fun main()
+      call _helper
+      call upcase
+      call console.putch
+      ret
 
-   0x0  "RSM0"      table           table ...
-    ┌─────────────┬────────────────┬──────···
-    │ 52 53 4D 00 │ type size data │
-    └─────────────┴────────────────┴──────···
+  VM code:
+    0  loadk  R0  0x00     // _helper
+    1  ret
+    2  mul    R0  R0  R2   // upcase
+    3  ret
+    4  call   -4           // main
+    5  call   -3
+    6  icall   0
+    7  ret
 
-  Tables
-    00 constants
+  Encoding:
 
-    01 vm code
+         0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+       ┌─────────────────────────────────────────────────
+  0000 │ 52 53 4d 00                                        "RSM" version 0
+     … │             00 01                                  types section, 10 bytes
+     … │                   02                               2 types
+     … │                      00 00                         type 0  ()->()
+     … │                            01 03 01 03             type 1  (i32)->(i32)
+     … │                                        01 03 00    type 2  (i32)->()
+  0010 │ 01 10                                              import section, 16 bytes
+     … │       01                                           1 import
+     … │          07 63 6f 6e 73 6f 6c 65 01                "console", 1 function
+     … │                                     05 70 75 74    5 "put …
+  0020 │ 63 68 02                                           … ch" (i32)->()
+     … │          02 11                                     export section, 17 bytes
+     … │                02                                  2 exports
+     … │                   06 75 70 63 61 73 65 01 02       "upcase" (i32)->(i32) code[2]
+     … │                                              04    4 …
+  0030 │ 6d 61 69 6e 00 04                                  … "main" ()->() code[4]
+     … │                   03 0c                            data section, 12 bytes
+     … │                         02                         4B alignment of data
+     … │                            00 00 00                padding as index is 4B aligned
+     … │                                     00 00 00 00    index[0] = offset 0
+  0040 │ 00 00 00 63                                        i32 0x63 (at offset 0)
+     … │             04 22                                  code section, 34 bytes
+     … │                   00 00                            padding
+     … │                         ff ff ff ff ff ff ff ff    vmcode …
+  0050 │ ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff    … vmcode …
+  0060 │ ff ff ff ff ff ff ff ff                            … vmcode
+     … │                         05 1c                      name section, 28 bytes
+     … │                               03                   3 entries
+     … │                                  01 07 5f 68 65    kind=func 7 "_he …
+  0070 │ 6c 70 65 72 00                                     … lper"  code[0]
+     … │                00 06 75 70 63 61 73 65 00 02       kind=func 6 "upcase" code[2]
+     … │                                              00    kind=func
+  0080 │ 04 6d 61 69 6e 04                                  4 "main" code[4]
+
+
+module:
+  ┌──────────┬────────────┬─────────────┬──────────┬────────────────────┐
+  │ R  S  M  │ version u8 │ section ... │ padding? │ vmcode u32[icount] │
+  └──────────┴────────────┴─────────────┴──────────┴────────────────────┘
+section:
+  ┌─────────┬──────────────┬───────────────────┐
+  │ type u8 │ size varuint │ contents u8[size] │
+  └─────────┴──────────────┴───────────────────┘
+  0x00 types section:
+    ┌───────────────┬────────────────┐
+    │ count varuint │ funtype[count] │
+    └───────────────┴───────╥────────┘
+      ╒════════════════╤════╩═════════╤═════════════════╤═══════════════╕
+      │ paramc varuint │ type[paramc] │ resultc varuint │ type[resultc] │
+      └────────────────┴──────────────┴─────────────────┴───────────────┘
+  0x01 import section:
+    ┌────────────────┬─────────────────┐
+    │ mcount varuint │ mimport[mcount] │
+    └────────────────┴───────╥─────────┘
+      ╒═════════════════╤════╩════════════════╤════════════════╤═════════════════╕
+      │ namelen varuint │ namestr u8[namelen] │ fcount varuint │ fimport[fcount] │
+      └─────────────────┴─────────────────────┴────────────────┴─╥───────────────┘
+          ╒═════════════════╤═════════════════════╤══════════════╩╕
+          │ namelen varuint │ namestr u8[namelen] │ typei varuint │
+          └─────────────────┴─────────────────────┴───────────────┘
+  0x02 export section:
+    ┌───────────────┬───────────────┐
+    │ count varuint │ export[count] │
+    └───────────────┴───────╥───────┘
+      ╒═════════════════╤═══╩═════════════════╤═══════════════╤═══════════════╕
+      │ namelen varuint │ namestr u8[namelen] │ typei varuint │ codei varuint │
+      └─────────────────┴─────────────────────┴───────────────┴───────────────┘
+  0x03 data section:
+    ┌──────────┬───────────────┬─────────────────┬──────┐
+    │ align u8 │ count varuint │ offs u32[count] │ data │
+    └──────────┴───────────────┴─────────────────┴──────┘
+  0x04 code section:
+    ┌───────────────┬─────────────────┬──────┐
+    │ count varuint │ offs u32[count] │ data │
+    └───────────────┴─────────────────┴──────┘
+  0x05 name section:
+    ┌───────────────┬─────────────┐
+    │ count varuint │ name[count] │
+    └───────────────┴──────╥──────┘
+      ╒═════════╤══════════╩══════╤══════════════════╤═══════════════╕
+      │ kind u8 │ namelen varuint │ name u8[namelen] │ codei varuint │
+      └─────────┴─────────────────┴──────────────────┴───────────────┘
+        kind: 00 module, 01 func, 02 label
+type:
+  ┌────┐   0x00 i1   0x03 i32   0x08 f32
+  │ u8 │   0x01 i8   0x04 i64   0x09 f64
+  └────┘   0x02 i16
+
 
 Runtime memory layout
 
@@ -44,4 +151,5 @@ Runtime memory layout
     ┌─────────────┼────────── ··· ─────────────┤
     │ data        │ heap →    ···    ← stack   │
     └─────────────┴────────── ··· ─────────────┘
+
 

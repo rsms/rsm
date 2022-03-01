@@ -471,9 +471,8 @@ bool vmem_free(void* ptr, usize nbytes);
 // rarray is a dynamic typed array
 typedef struct rarray rarray;
 struct rarray {
-  u8* v; // u8 so we get -Wincompatible-pointer-types if we try to access .v directly
-  u32 len;
-  u32 cap;
+  u8* nullable v; // u8 so we get -Wincompatible-pointer-types if we access .v directly
+  u32 len, cap;
 };
 #define rarray_at(TYPE, a, index)           ( ((TYPE*)(a)->v) + (index) )
 #define rarray_push(TYPE, a, m)             ((TYPE*)rarray_zpush(sizeof(TYPE),(a),(m)))
@@ -582,11 +581,11 @@ inline static const smapent* nullable smap_itstart(const smap* m) { return m->en
 bool smap_itnext(const smap* m, const smapent** ep);
 
 // smap_optimize tries to improve the key distribution of m by trying different
-// hash seeds. Returns the best smap_score or USIZE_MAX if rmem_alloc(mem) failed,
+// hash seeds. Returns the best smap_score or <0.0 if rmem_alloc(mem) failed,
 // leaving m with at least as good key distribution as before the call.
 // mem is used to allocate temporary space for m's entries;
 // space needed is m->entries*sizeof(smapent). Applies smap_compact(m) before returning.
-usize smap_optimize(smap* m, usize iterations, rmem mem);
+double smap_optimize(smap* m, usize iterations, rmem mem);
 
 // smap_cfmt prints C code for a constant static representation of m
 usize smap_cfmt(char* buf, usize bufcap, const smap* m, const char* name);

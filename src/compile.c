@@ -194,16 +194,16 @@ static const char* kBlock0Name = "b0"; // name of first block
 
 #if HASHCODE_MAX >= 0xFFFFFFFFFFFFFFFFu
 static const smapent kwmap_entries[64] = {
- {"i16",3,36},{"brz",3,4109},{0},{0},{"i32",3,37},{0},{0},{"brnz",4,4365},{0},
- {"or",2,2061},{0},{"ret",3,5133},{0},{"cmpeq",5,3341},{0},{"sub",3,781},{0},
- {"fun",3,33},{0},{"i1",2,34},{"shl",3,2573},{0},{"scall",5,4877},
- {"loadk",5,269},{0},{"cmplt",5,3597},{0},{"div",3,1293},{0},{0},{"i64",3,38},
- {0},{0},{"mod",3,1549},{0},{0},{"shrs",4,2829},{"and",3,1805},{0},
- {"call",4,4621},{0},{0},{"shru",4,3085},{0},{0},{"mul",3,1037},{0},{0},
- {"xor",3,2317},{0},{"i8",2,35},{0},{"cmpgt",5,3853},{0},{0},{"add",3,525},
- {"copy",4,13},{0},{0},{0},{0},{0},{0},{0}};
+ {"i64",3,38},{0},{0},{0},{"i1",2,34},{0},{"copy",4,13},{0},{0},{"add",3,781},
+ {0},{"shl",3,2829},{0},{"or",2,2317},{0},{"cmplt",5,3853},{0},{"i8",2,35},{0},
+ {"tcall",5,5133},{"brz",3,4365},{0},{"store",5,525},{"load",4,269},{0},
+ {"i16",3,36},{"and",3,2061},{0},{0},{0},{0},{0},{"xor",3,2573},{0},{0},
+ {"cmpeq",5,3597},{0},{"i32",3,37},{0},{0},{"brnz",4,4621},{0},{"mul",3,1293},
+ {"fun",3,33},{0},{"shrs",4,3085},{"ret",3,5645},{0},{"sub",3,1037},
+ {"shru",4,3341},{0},{"scall",5,5389},{0},{"call",4,4877},{0},{"div",3,1549},{0},
+ {0},{"cmpgt",5,4109},{0},{0},{0},{"mod",3,1805},{0}};
 static const struct{u32 cap,len,gcap;maplf lf;hashcode hash0;const smapent* ep;}
-kwmap_data={64,27,48,2,0x1636428,kwmap_entries};
+kwmap_data={64,29,48,2,0x6c1b07fa,kwmap_entries};
 static const smap* kwmap = (const smap*)&kwmap_data;
 #else /* can't use static map; check_kwmap will build one */
 static const smap* kwmap;
@@ -1448,7 +1448,7 @@ static void check_kwmap() {
     if (smap_lookup(m, e->key, e->keylen) == NULL) goto differ;
   return; // kwmap is good
 differ:   // kwmap is outdated -- optimize and print replacement C code
-  #if 1 /* generator disabled */
+  #if 1 /* generator disabled -- change to "0" to run it */
     dlog("————————————————————————————————————————————————————————");
     dlog("kwmap needs updating — find me and enable the generator");
     dlog("————————————————————————————————————————————————————————");

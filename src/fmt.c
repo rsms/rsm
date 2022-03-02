@@ -10,8 +10,8 @@ static void _fu(abuf* s, u32 v) { abuf_fmt(s, "\t0x%x", v); }
 static void _fs(abuf* s, u32 v) { abuf_fmt(s, "\t%d", (i32)v); }
 
 #define fr(N) _fr(s, RSM_GET_##N(in))
-#define fu(N) (RSM_GET_##N##i(in) ? _fu(s, RSM_GET_##N##u(in)) : _fr(s, RSM_GET_##N##u(in)))
-#define fs(N) (RSM_GET_##N##i(in) ? _fs(s, RSM_GET_##N##s(in)) : _fr(s, RSM_GET_##N##s(in)))
+#define fu(N) (RSM_GET_i(in) ? _fu(s, RSM_GET_##N##u(in)) : _fr(s, RSM_GET_##N##u(in)))
+#define fs(N) (RSM_GET_i(in) ? _fs(s, RSM_GET_##N##s(in)) : _fr(s, RSM_GET_##N##s(in)))
 
 DIAGNOSTIC_IGNORE_PUSH("-Wunused-function")
 static void fi__(abuf* s, rinstr in)     { }

@@ -26,7 +26,8 @@ $CC -Oz -std=c11 -g -c -o $O "$@"
 wait
 
 OBJDUMP=$(command -v clang)
-[ -n "$OBJDUMP" ] && OBJDUMP=$(dirname "$OBJDUMP")/objdump
+[ -n "$OBJDUMP" ] && OBJDUMP=$(dirname "$OBJDUMP")/llvm-objdump
+[ -x "$OBJDUMP" ] || OBJDUMP=$(dirname "$OBJDUMP")/objdump
 [ -x "$OBJDUMP" ] && "$OBJDUMP" -S --no-show-raw-insn -l $O > $S3
 
 eval "$(cat "$PF" 2>/dev/null)" || true

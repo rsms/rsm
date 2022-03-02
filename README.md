@@ -93,26 +93,26 @@ There is room for 256 operations and 32+32 (int+fp) registers (8 bit OP, 5 bit r
 Most instructions accept reg or immediate (`i` bit is set) as last argument
 
 ```
-        ┌─────────────────┬─────────┬─────────┬─────────┬───────────────┐
-  bit   │3 3 2 2 2 2 2 2 2│2 2 2 1 1│1 1 1 1 1│1 1 1    │               │
-        │1 0 9 8 7 6 5 4 3│2 1 0 9 8│7 6 5 4 3│2 1 0 9 8│7 6 5 4 3 2 1 0│
-        ├───────────────┬─┼─────────┼─────────┼─────────┼───────────────┤
-  ABCD  │         D (8) │i│  C (5)  │  B (5)  │  A (5)  │     OP (8)    │
-        ├───────────────┴─┴───────┬─┼─────────┼─────────┼───────────────┤
-  ABCw  │                  C (13) │i│  B (5)  │  A (5)  │     OP (8)    │
-        ├─────────────────────────┴─┴───────┬─┼─────────┼───────────────┤
-  ABw   │                            B (18) │i│  A (5)  │     OP (8)    │
-        ├───────────────────────────────────┴─┴───────┬─┼───────────────┤
+        ┌───────────────┬─────────┬─────────┬─────────┬─┬───────────────┐
+  bit   │3 3 2 2 2 2 2 2│2 2 2 2 1│1 1 1 1 1│1 1 1 1  │ │               │
+        │1 0 9 8 7 6 5 4│3 2 1 0 9│8 7 6 5 4│3 2 1 0 9│8│7 6 5 4 3 2 1 0│
+        ├───────────────┼─────────┼─────────┼─────────┼─┼───────────────┤
+  ABCD  │         D (8) │  C (5)  │  B (5)  │  A (5)  │i│     OP (8)    │
+        ├───────────────┴─────────┼─────────┼─────────┼─┼───────────────┤
+  ABCw  │                  C (13) │  B (5)  │  A (5)  │i│     OP (8)    │
+        ├─────────────────────────┴─────────┼─────────┼─┼───────────────┤
+  ABw   │                            B (18) │  A (5)  │i│     OP (8)    │
+        ├───────────────────────────────────┴─────────┼─┼───────────────┤
   Aw    │                                      A (23) │i│     OP (8)    │
         └─────────────────────────────────────────────┴─┴───────────────┘
 ```
 
 Registers:
 - 30 general-purpose integer registers (R0 ... R29)
-- Context register (CTX; 31st int register)
-- Stack pointer (R31 aka SP; 32nd int register)
+- Context register (CTX aka R30)
+- Stack pointer (SP aka R31)
 - 31 floating-point registers (F0 ... F30)
-- Floating-point status (FPSR; 32nd fp register)
+- Floating-point status (FPSR aka F31)
 - _TODO: Callee/caller saves what? Maybe just use AAPCS64?_
 - _TODO: is a fp control reg needed for stuff like 0div traps? No... no._
 

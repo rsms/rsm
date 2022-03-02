@@ -10,5 +10,5 @@ fun bar(x i32, y i32) i32 {
 }
 fun foo(x i32, y i32) i32 {
   R0 = R0 * R1
-  tcall bar  // tail call means we won't return here
+  jump bar  // tail call
 }

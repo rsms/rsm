@@ -31,7 +31,7 @@ OBJDUMP=$(command -v clang)
 
 eval "$(cat "$PF" 2>/dev/null)" || true
 
-IGN_PAT='^(?:\s*[;#]|\s+\.)'
+IGN_PAT='^(?:\s*[;#]|\s+\.|Ltmp\d+:)'
 LABEL_PAT='^\.?[0-9A-Za-z_]+:'
 ARCH=$(uname -m)
 case "$(command -v $CC)" in

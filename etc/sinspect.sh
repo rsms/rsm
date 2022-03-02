@@ -5,7 +5,9 @@ if [ $1 = "-w" ]; then shift; exec autorun -no-banner "$1" -- "$0" "$@"; fi
 mkdir -p out/sinspect
 IF=$(basename "$1")
 S=out/sinspect/$IF-verbatim.s
+O=out/sinspect/$IF.o
 S2=out/sinspect/$IF.s
+S3=out/sinspect/$IF-objdump.s
 B=out/sinspect/$IF-stripped-prev.s
 D=out/sinspect/$IF.s.diff
 PF=out/sinspect/$IF.sh
@@ -19,7 +21,13 @@ CC=${CC:-$CCDEF}
 
 # copy previous, compile new
 [ -f $S2 ] && cp $S2 $B
-$CC -Oz -std=c11 -S -o $S "$@"
+$CC -Oz -std=c11 -g -S -o $S "$@" &
+$CC -Oz -std=c11 -g -c -o $O "$@"
+wait
+
+OBJDUMP=$(command -v clang)
+[ -n "$OBJDUMP" ] && OBJDUMP=$(dirname "$OBJDUMP")/objdump
+[ -x "$OBJDUMP" ] && "$OBJDUMP" -S --no-show-raw-insn -l $O > $S3
 
 eval "$(cat "$PF" 2>/dev/null)" || true
 

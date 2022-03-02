@@ -134,9 +134,9 @@ _( CMPGT , ABCu , "cmpgt" /* R(A) = R(B) > {R(C),Cu}  */)\
 \
 _( BRZ   , ABs  , "brz"   /* if R(A)==0 PC += {R(B),Bs} */)\
 _( BRNZ  , ABs  , "brnz"  /* if R(A)!=0 PC += {R(B),Bs} */)\
-_( JUMP  , Au   , "jump"  /* PC = {R(A),Au} (R0...R7) */)\
-_( CALL  , Au   , "call"  /* R0...R7 = call PC={R(A),Au} (R0...R7) */)\
-_( SCALL , Au   , "scall" /* R0...R7 = system_call {R(A),Au} (R0...R7) */)\
+_( JUMP  , Au   , "jump"  /* PC = {R(A),Au} */)\
+_( CALL  , Au   , "call"  /* R0...R7 = call PC={R(A),Au} clobbers R0...R7 */)\
+_( SCALL , Au   , "scall" /* R0...R7 = system_call {R(A),Au} clobbers R0...R7 */)\
   /* TODO: would be nice to be able to pass multiple imms to SCALL \
      e.g. "scall PUTC 'h'"; a new encoding AuBu maybe? */          \
 \

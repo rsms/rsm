@@ -6,7 +6,7 @@ typedef struct vmstate vmstate;
 struct vmstate {
   usize inlen;   // number of instructions at inv
   usize memsize;
-  usize datasize;
+  union { usize datasize, stacktop; };  // aka
   union { usize heapbase, stackbase; }; // aka
 };
 
@@ -126,7 +126,6 @@ static void vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
 #define check(cond, ...) ((void)0)
 #endif // RSM_SAFE
 
-__attribute__((noinline))
 static void scall(VMPARAMS, u8 ar, rinstr in) {
   // dlog("scall #%llu arg1 0x%llx", RA, RBs);
   iregs[0] = 0; // result = no error
@@ -150,70 +149,85 @@ static void store(VMPARAMS, u64 addr, usize nbits, u64 val) {
 
 static void push(VMPARAMS, usize nbits, u64 val) {
   usize addr = SP;
-  check(addr+nbits >= vs->datasize, VM_E_STACK_OVERFLOW, addr); // datasize == stacktop
+  check(addr >= nbits && addr - nbits >= vs->stacktop, VM_E_STACK_OVERFLOW, addr);
+  addr -= nbits;
+  SP = addr;
   store(VMARGS, addr, nbits, val);
-  SP = addr - nbits;
 }
 
 static u64 pop(VMPARAMS, usize nbits) {
-  usize addr = SP + nbits;
-  check(addr <= vs->stackbase, VM_E_STACK_OVERFLOW, addr);
-  SP = addr;
+  usize addr = SP;
+  check(USIZE_MAX - addr >= nbits && addr + nbits <= vs->stackbase, VM_E_STACK_OVERFLOW, addr);
+  SP = addr + nbits;
   return load(VMARGS, addr, nbits);
 }
 
 static usize call(VMPARAMS) {
-  // save return address on stack and return destination address
-  push(VMARGS, 8, (u64)PC);
-  rinstr in = inv[pc - 1]; // for RAu
-  return (usize)RAu;
+  push(VMARGS, 8, (u64)PC); // save return address on stack
+  rinstr in = inv[pc - 1];  // for RAu
+  return (usize)RAu;        // replacement PC
 }
 
 static void vmexec(VMPARAMS) {
+  #if 1 // use label jump table
+    static const void* jumptab[RSM_OP_COUNT] = {
+      #define _(name, ...) &&_op_##name,
+      RSM_FOREACH_OP(_)
+      #undef _
+    };
+    #define DISPATCH goto *jumptab[RSM_GET_OP(in)];
+    #define NEXT     continue;
+    #define E(OP)    _op_##OP:
+  #else // use switch
+    #define DISPATCH switch (RSM_GET_OP(in))
+    #define NEXT     break;
+    #define E(OP)    case rop_##OP:
+  #endif
+
   for (;;) {
     assertf(pc < vs->inlen, "pc overrun %lu", pc);
     logstate(VMARGS);
 
-    rinstr in = inv[pc++]; // load current instruction and advance pc
-    u8 ar = RSM_GET_A(in); // argument Ar, which almost every instruction needs
-    switch ((enum rop)RSM_GET_OP(in)) {
+    rinstr in = inv[pc++];
+    u8 ar = RSM_GET_A(in);
 
-    case rop_COPY:  RA = RBu; break;
-    case rop_LOAD:  RA = load(VMARGS, (u64)((i64)RB + RCs), 8); break;
-    case rop_STORE: store(VMARGS, (u64)((i64)RB + RCs), 8, RA); break;
+    DISPATCH {
 
-    case rop_ADD:   RA = RB + RCu; break;
-    case rop_SUB:   RA = RB - RCu; break;
-    case rop_MUL:   RA = RB * RCu; break;
-    case rop_DIV:   RA = RB / RCu; break;
-    case rop_MOD:   RA = RB % RCu; break;
-    case rop_AND:   RA = RB & RCu; break;
-    case rop_OR:    RA = RB | RCu; break;
-    case rop_XOR:   RA = RB ^ RCu; break;
-    case rop_SHL:   RA = RB << RCu; break;
-    case rop_SHRS:  RA = (u64)((i64)RB >> RCs); break;
-    case rop_SHRU:  RA = RB >> RCu; break;
+    E(COPY)  RA = RBu; NEXT
+    E(LOAD)  RA = load(VMARGS, (u64)((i64)RB + RCs), 8); NEXT
+    E(STORE) store(VMARGS, (u64)((i64)RB + RCs), 8, RA); NEXT
 
-    case rop_CMPEQ: RA = RB == RCu; break;
-    case rop_CMPLT: RA = RB < RCu; break;
-    case rop_CMPGT: RA = RB > RCu; break;
+    E(ADD)   RA = RB + RCu; NEXT
+    E(SUB)   RA = RB - RCu; NEXT
+    E(MUL)   RA = RB * RCu; NEXT
+    E(DIV)   RA = RB / RCu; NEXT
+    E(MOD)   RA = RB % RCu; NEXT
+    E(AND)   RA = RB & RCu; NEXT
+    E(OR)    RA = RB | RCu; NEXT
+    E(XOR)   RA = RB ^ RCu; NEXT
+    E(SHL)   RA = RB << RCu; NEXT
+    E(SHRS)  RA = (u64)((i64)RB >> RCs); NEXT
+    E(SHRU)  RA = RB >> RCu; NEXT
 
-    case rop_BRZ:  if (RA == 0) pc = ((isize)pc + (isize)RBs); break;
-    case rop_BRNZ: if (RA != 0) pc = ((isize)pc + (isize)RBs); break;
+    E(CMPEQ) RA = RB == RCu; NEXT
+    E(CMPLT) RA = RB < RCu; NEXT
+    E(CMPGT) RA = RB > RCu; NEXT
 
-    case rop_SCALL: scall(VMARGS, ar, in); break;
-    case rop_CALL:  pc = call(VMARGS); break;
-    case rop_TCALL: pc = (usize)RAu; break;
-    case rop_RET: {
+    E(BRZ)  if (RA == 0) pc = ((isize)pc + (isize)RBs); NEXT
+    E(BRNZ) if (RA != 0) pc = ((isize)pc + (isize)RBs); NEXT
+
+    E(SCALL) scall(VMARGS, ar, in); NEXT
+    E(CALL)  pc = call(VMARGS); NEXT
+    E(TCALL) pc = (usize)RAu; NEXT
+    E(RET) {
       pc = (usize)pop(VMARGS, 8); // load return address from stack
       // TODO: instead of MAIN_RET_PC, append coro(end) or yield(end) or exit instr
       // to end of inv and setup main return to that address.
       if (pc == MAIN_RET_PC) return;
-      break;
+      NEXT
     }
-
-    case RSM_OP_COUNT: assert(0);
-  }}
+  } // DISPATCH
+  } // loop
 }
 
 void rsm_vmexec(u64* iregs, rinstr* inv, usize inlen, void* membase, usize memsize) {

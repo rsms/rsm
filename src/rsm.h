@@ -192,7 +192,7 @@ _( RET   , _    , "ret" /* return */)\
 // u32 RSM_GET_Ar(rinstr) -- get register-sized value in A
 // u32 RSM_GET_Au(rinstr) -- get full-size unsigned value in A
 // i32 RSM_GET_As(rinstr) -- get full-size signed value in A
-#define RSM_GET_OP(i)  ((rop)( RSM_GET_ARGN(i,0,RSM_SIZE_OP) ))
+#define RSM_GET_OP(i)  ((rop)( (rinstr)(i) & RSM_MASK1(RSM_SIZE_OP,0) ))
 
 #define RSM_GET_A(i)   RSM_GET_ARGN(i, RSM_POS_A, RSM_SIZE_A)
 #define RSM_GET_Ai(i)  RSM_GET_ARGN(i, RSM_POS_A, 1)

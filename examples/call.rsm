@@ -1,9 +1,14 @@
 fun main() {
   R0 = 3
   R1 = 4
+  R3 = R0  // save R0 (just for testing)
   call foo
+  R0 = R3  // restore R0 (just for testing)
+}
+fun bar(x i32, y i32) i32 {
+  R0 = R0 * R1
 }
 fun foo(x i32, y i32) i32 {
   R0 = R0 * R1
-  ret
+  tcall bar  // tail call means we won't return here
 }

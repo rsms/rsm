@@ -4,12 +4,7 @@
 
 static void _fr(abuf* s, u32 v) {
   assert(v < 32);
-  #ifdef __wasm__
-    abuf_fmt(s, "\tR%u", v);
-  #else
-    // ANSI colors: (\e[3Nm or \e[9Nm) 1 red, 2 green, 3 yellow, 4 blue, 5 magenta, 6 cyan
-    abuf_fmt(s, "\t\e[9%cmR%u\e[39m", '1'+((v)%6), v); assert(v < 32);
-  #endif
+  abuf_fmt(s, "\t" REG_FMTNAME_PAT, REG_FMTNAME(v));
 }
 static void _fu(abuf* s, u32 v) { abuf_fmt(s, "\t0x%x", v); }
 static void _fs(abuf* s, u32 v) { abuf_fmt(s, "\t%d", (i32)v); }
@@ -34,7 +29,7 @@ static void fi_ABCDu(abuf* s, rinstr in) { fr(A); fr(B); fr(C); fu(D); }
 static void fi_ABCDs(abuf* s, rinstr in) { fr(A); fr(B); fr(C); fs(D); }
 DIAGNOSTIC_IGNORE_POP()
 
-static void fmtinstr1(abuf* s, rinstr in) {
+void fmtinstr(abuf* s, rinstr in) {
   abuf_str(s, rop_name(RSM_GET_OP(in)));
   switch (RSM_GET_OP(in)) {
     #define _(OP, ENC, ...) case rop_##OP: fi_##ENC(s, in); break;
@@ -45,7 +40,7 @@ static void fmtinstr1(abuf* s, rinstr in) {
 
 usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in) {
   abuf s = abuf_make(buf, bufcap);
-  fmtinstr1(&s, in);
+  fmtinstr(&s, in);
   return abuf_terminate(&s);
 }
 
@@ -57,7 +52,7 @@ usize rsm_fmtprog(char* buf, usize bufcap, rinstr* nullable ip, usize ilen) {
       abuf_c(s, '\n');
     rinstr in = ip[i];
     abuf_fmt(s, "%4lx  ", i);
-    fmtinstr1(s, in);
+    fmtinstr(s, in);
   }
   return abuf_terminate(s);
 }

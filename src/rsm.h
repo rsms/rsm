@@ -110,8 +110,9 @@ typedef u32 rinstr;
 //   ABCDs   R(A), R(B), R(C), R(D) or immediate signed value
 // Changing instruction encoding? Remember to also update eval.c and genop in asm.c
 #define RSM_FOREACH_OP(_) /* _(name, arguments, asmname, semantics) */ \
-_( COPY  , ABu  , "copy"  /* R(A) = {R(B),B} aka "move" */)\
-_( LOADK , ABu  , "loadk" /* R(A) = K(B) -- load constant  */)\
+_( COPY  , ABu  , "copy"  /* R(A) = {R(B),Bu} aka "move" */)\
+_( LOAD  , ABCs , "load"  /* R(A) = mem[R(B) + {R(C),Cs}] */)\
+_( STORE , ABCs , "store" /* mem[R(B) + {R(C),Cs}] = R(A) */)\
 \
 _( ADD   , ABCu , "add"   /* R(A) = R(B) + {R(C),Cu}                                */)\
 _( SUB   , ABCu , "sub"   /* R(A) = R(B) - {R(C),Cu}                                */)\
@@ -133,6 +134,7 @@ _( BRZ   , ABs  , "brz"   /* if R(A)==0 goto PC+{R(B),Bs} */)\
 _( BRNZ  , ABs  , "brnz"  /* if R(A)!=0 goto PC+{R(B),Bs} */)\
 \
 _( CALL  , Au   , "call"  /* R0...R7 = call PC={R(A),Au} (R0...R7) */)\
+_( TCALL , Au   , "tcall" /* R0...R7 = tail_call PC={R(A),Au} (R0...R7) */)\
 _( SCALL , Au   , "scall" /* R0...R7 = system_call {R(A),Au} (R0...R7) */)\
   /* TODO: would be nice to be able to pass multiple imms to SCALL \
      e.g. "scall PUTC 'h'"; a new encoding AuBu maybe? */          \
@@ -141,7 +143,8 @@ _( RET   , _    , "ret" /* return */)\
 // end RSM_FOREACH_OP
 
 // opcode test macros. Update when adding affected opcodes
-#define RSM_OP_IS_BR(op) (rop_BRZ <= (op) && (op) <= rop_BRNZ)
+#define RSM_OP_IS_BR(op)   (rop_BRZ <= (op) && (op) <= rop_BRNZ)
+#define RSM_OP_IS_CALL(op) (rop_CALL <= (op) && (op) <= rop_SCALL)
 
 // size and position of instruction arguments
 #define RSM_SIZE_OP  8
@@ -155,18 +158,18 @@ _( RET   , _    , "ret" /* return */)\
 #define RSM_SIZE_Bw  (RSM_SIZE_B + RSM_SIZE_C + RSM_SIZE_D - RSM_SIZE_i)
 #define RSM_SIZE_Aw  (RSM_SIZE_A + RSM_SIZE_B + RSM_SIZE_C + RSM_SIZE_D - RSM_SIZE_i)
 
-#define RSM_MAX_Au   0x7fffff /* 2^23 - 1 */
-#define RSM_MAX_Bu   0x3ffff  /* 2^18 - 1 */
-#define RSM_MAX_Cu   0x1fff   /* 2^13 - 1 */
-#define RSM_MAX_Du   0xff     /* 2^8  - 1 */
-#define RSM_MAX_As   (RSM_MAX_Au >> 1)
-#define RSM_MAX_Bs   (RSM_MAX_Bu >> 1)
-#define RSM_MAX_Cs   (RSM_MAX_Cu >> 1)
-#define RSM_MAX_Ds   (RSM_MAX_Du >> 1)
-#define RSM_MIN_As   (-RSM_MAX_As - 1)
-#define RSM_MIN_Bs   (-RSM_MAX_Bs - 1)
-#define RSM_MIN_Cs   (-RSM_MAX_Cs - 1)
-#define RSM_MIN_Ds   (-RSM_MAX_Ds - 1)
+#define RSM_MAX_Au   ((1 << RSM_SIZE_Aw) - 1) /* (2^23 - 1) = 8,388,607  0x7fffff */
+#define RSM_MAX_Bu   ((1 << RSM_SIZE_Bw) - 1) /* (2^18 - 1) =   262,143   0x3ffff */
+#define RSM_MAX_Cu   ((1 << RSM_SIZE_Cw) - 1) /* (2^13 - 1) =     8,191    0x1fff */
+#define RSM_MAX_Du   ((1 << RSM_SIZE_Dw) - 1) /* (2^8  - 1) =       255      0xff */
+#define RSM_MAX_As   (RSM_MAX_Au >> 1) /*                     4,194,303  0x3fffff */
+#define RSM_MAX_Bs   (RSM_MAX_Bu >> 1) /*                       131,071   0x1ffff */
+#define RSM_MAX_Cs   (RSM_MAX_Cu >> 1) /*                         4,095     0xfff */
+#define RSM_MAX_Ds   (RSM_MAX_Du >> 1) /*                           127      0x7f */
+#define RSM_MIN_As   (-RSM_MAX_As - 1) /*                    -4,194,304 -0x400000 */
+#define RSM_MIN_Bs   (-RSM_MAX_Bs - 1) /*                      -131,072  -0x20000 */
+#define RSM_MIN_Cs   (-RSM_MAX_Cs - 1) /*                        -4,096   -0x1000 */
+#define RSM_MIN_Ds   (-RSM_MAX_Ds - 1) /*                          -128     -0x80 */
 
 #define RSM_POS_A    RSM_SIZE_OP
 #define RSM_POS_Aw   (RSM_POS_A + RSM_SIZE_i)
@@ -323,7 +326,7 @@ RSMAPI usize rsm_compile(rcomp* c, rmem resm, rinstr** resp);
 void rcomp_dispose(rcomp* c);
 
 // rsm_vmexec executes a program, starting with instruction inv[0]
-RSMAPI void rsm_vmexec(u64* iregs, u32* inv, usize inlen);
+RSMAPI void rsm_vmexec(u64* iregs, u32* inv, usize inlen, void* membase, usize memsize);
 
 // rsm_fmtprog formats an array of instructions ip as "assembly" text to buf.
 // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th

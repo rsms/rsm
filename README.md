@@ -32,7 +32,7 @@ TODO
 
 ```
 ./build.sh -debug
-./out/rsm factorial.rsm 15
+./out/rsm examples/factorial.rsm 15
 ```
 
 You'll need the following things to build rsm:
@@ -72,8 +72,8 @@ fun factorial (i32) i32 {
 EXAMPLE
 $ out/rsm example.rsm 15
 assembled some sweet vm code:
-   0  move   R1   R0
-   1  move   R0   0x1
+   0  copy   R1   R0
+   1  copy   R0   0x1
    2  brz    R1   3
    3  mul    R0   R1   R0
    4  sub    R1   R1   0x1
@@ -110,7 +110,7 @@ Most instructions accept reg or immediate (`i` bit is set) as last argument
 Registers:
 - 30 general-purpose integer registers (R0 ... R29)
 - Context register (CTX; 31st int register)
-- Stack pointer (SP; 32nd int register)
+- Stack pointer (R31 aka SP; 32nd int register)
 - 31 floating-point registers (F0 ... F30)
 - Floating-point status (FPSR; 32nd fp register)
 - _TODO: Callee/caller saves what? Maybe just use AAPCS64?_
@@ -134,7 +134,8 @@ fundef     = "fun" name "(" params? ")" result? funbody?
 params     = param ("," param)*
 result     = param ("," param)*
 param      = name type | type
-funbody    = "{" block+ "}"
+funbody    = "{" block0? block* "}"
+block0     = blockstmt*
 block      = name ":" blockstmt*
 blockstmt  = operation | assignment | binop
 operation  = op arg*

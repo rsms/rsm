@@ -802,13 +802,14 @@ static node* prefix_fun(PPARAMS) {
     nlist_append(&n->list, pparams(PARGS));
   }
 
-  if (p->tok == T_SEMI)
+  if (p->tok == T_SEMI) // function declaration
     return n;
 
   // body "{" ... "}"
   expecttok(p, T_LBRACE);
   node* block0 = mknode(p); // recycle the "{" token
   node* body = mklist(p); // body starts at position of "{"
+  nlist_append(&n->list, body);
   sadvance(p); // consume "{"
   if (got(p, T_RBRACE)) // empty function body
     return n;
@@ -827,7 +828,6 @@ static node* prefix_fun(PPARAMS) {
       perr(p, block, "block named %s must be first block", kBlock0Name);
     nlist_append(&body->list, block);
   }
-  nlist_append(&n->list, body);
   eat(p, T_RBRACE);
   return n;
 }
@@ -1077,7 +1077,7 @@ static bool getiargs(gstate* g, node* n, i32* argv, u32 wantargc, i64 minval, i6
     argv[argc] = (i32)val;
     return false;
   case T_NAME:
-    if ((rop)n->ival == rop_CALL) {
+    if (RSM_OP_IS_CALL((rop)n->ival)) {
       argv[argc] = refgfun(g, arg, g->iv.len - 1);
     } else {
       argv[argc] = refgblock(g, arg, g->iv.len - 1);
@@ -1089,9 +1089,8 @@ static bool getiargs(gstate* g, node* n, i32* argv, u32 wantargc, i64 minval, i6
       errintsize(g->c, arg->pos, (rop)n->ival, minval, maxval, val, issigned);
       return false;
     }
-    if UNLIKELY(RSM_OP_IS_BR(n->ival) && val == 0) {
+    if UNLIKELY(RSM_OP_IS_BR(n->ival) && val == 0)
       warnf(g->c, arg->pos, "zero jump offset for %s has no effect", rop_name((rop)n->ival));
-    }
     argv[argc] = (i32)val;
     return true;
   default:
@@ -1220,7 +1219,7 @@ static void resolvefunrefs(gstate* g, rarray* refs, gfun* fn) {
   }
 }
 
-static void genblock(gstate* g, node* block, bool islastblock) {
+static void genblock(gstate* g, node* block) {
   assert(block->t == T_LABEL);
   assertnotnull(g->fn);
 
@@ -1235,19 +1234,24 @@ static void genblock(gstate* g, node* block, bool islastblock) {
   // resolve pending references
   resolveblockrefs(g, &g->fn->ulv, b);
 
+  // state for detecting non-trailin tailcall instruction
+  u32 taili = 0;
+  node* tailn = NULL;
+
   for (node* cn = block->list.head; cn; cn = cn->next) {
     switch (cn->t) {
-      case T_OP: genop(g, cn); break;
-      case T_EQ: genassign(g, cn); break;
+      case T_OP:
+        if (cn->ival == rop_TCALL) { taili = g->iv.len; tailn = cn; }
+        genop(g, cn);
+        break;
+      case T_EQ:
+        genassign(g, cn); break;
       default:
         errf(g->c, cn->pos, "invalid block element %s", tokname(cn->t));
     }
-    if (islastblock && cn->next == NULL && (cn->t != T_OP || cn->ival != rop_RET)) {
-      // make sure the last instruction of the last block of a function is "ret"
-      rinstr* in = GARRAY_PUSH_OR_RET(rinstr, &g->iv);
-      *in = RSM_MAKE__(rop_RET);
-    }
   }
+  if (tailn && taili+1 != g->iv.len)
+    errf(g->c, tailn->pos, "%s not in tail position", rop_name(tailn->ival));
 }
 
 static void genfun(gstate* g, node* fun) {
@@ -1286,7 +1290,16 @@ static void genfun(gstate* g, node* fun) {
 
   // generate function body
   for (node* cn = body->list.head; cn; cn = cn->next)
-    genblock(g, cn, cn->next == NULL);
+    genblock(g, cn);
+
+  // make sure the last instruction of the last block of a function is RET or TCALL
+  if (fn->i == g->iv.len) { // no function body
+    *GARRAY_PUSH_OR_RET(rinstr, &g->iv) = RSM_MAKE__(rop_RET);
+  } else {
+    rinstr endin = *rarray_at(rinstr, &g->iv, g->iv.len - 1);
+    if (RSM_GET_OP(endin) != rop_RET && RSM_GET_OP(endin) != rop_TCALL)
+      *GARRAY_PUSH_OR_RET(rinstr, &g->iv) = RSM_MAKE__(rop_RET);
+  }
 
   // report unresolved labels
   for (u32 i = 0; i < fn->ulv.len; i++) {

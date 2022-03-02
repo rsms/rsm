@@ -108,7 +108,7 @@ static void usage(const char* prog) {
 }
 
 
-#ifdef DEBUG
+#if 0
 ATTR_UNUSED static void test_stuff() {
   rmem mem = rmem_mkvmalloc(0);
   char buf[512]; // for logging stuff
@@ -185,7 +185,7 @@ ATTR_UNUSED static void test_stuff() {
 }
 #else
   #define test_stuff() ((void)0)
-#endif // DEBUG
+#endif
 
 
 RSMAPI int main(int argc, const char** argv) {
@@ -257,7 +257,8 @@ RSMAPI int main(int argc, const char** argv) {
 
   // execute first function
   log("evaluating function0(%lld)", (i64)iregs[0]);
-  rsm_vmexec(iregs, iv, icount);
+  u8 memory[4096];
+  rsm_vmexec(iregs, iv, icount, memory, sizeof(memory));
   log("result R0..R7: %llu %llu %llu %llu %llu %llu %llu %llu",
     iregs[0], iregs[1], iregs[2], iregs[3], iregs[4], iregs[5], iregs[6], iregs[7]);
 

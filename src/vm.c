@@ -42,7 +42,7 @@ struct vmstate {
 #define SP  iregs[31]
 #define PC  pc
 
-#define RA  iregs[ar]
+#define RA  iregs[RSM_GET_A(in)]
 #define RB  iregs[RSM_GET_B(in)]
 #define RC  iregs[RSM_GET_C(in)]
 #define RD  iregs[RSM_GET_D(in)]
@@ -189,7 +189,6 @@ static void vmexec(VMPARAMS) {
     logstate(VMARGS);
 
     rinstr in = inv[pc++];
-    u8 ar = RSM_GET_A(in);
 
     DISPATCH {
 
@@ -216,7 +215,7 @@ static void vmexec(VMPARAMS) {
     E(BRZ)  if (RA == 0) pc = ((isize)pc + (isize)RBs); NEXT
     E(BRNZ) if (RA != 0) pc = ((isize)pc + (isize)RBs); NEXT
 
-    E(SCALL) scall(VMARGS, ar, in); NEXT
+    E(SCALL) scall(VMARGS, RSM_GET_A(in), in); NEXT
     E(CALL)  pc = call(VMARGS); NEXT
     E(TCALL) pc = (usize)RAu; NEXT
     E(RET) {

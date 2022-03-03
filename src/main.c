@@ -119,7 +119,7 @@ static bool diaghandler(const rdiag* d, void* userdata) {
 }
 
 int main(int argc, char*const* argv) {
-  rsm_init();
+  if (!rsm_init()) return 1;
 
   // vm execution state
   u64 iregs[32] = {0};

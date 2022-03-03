@@ -1,4 +1,4 @@
-fun factorial (i32) i32 {
+fun factorial(i32) i32 {
     R1 = R0        // ACC = n (argument 0)
     R0 = 1         // RES (return value 0)
     brz R1 end     // if n==0 goto end

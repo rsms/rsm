@@ -429,7 +429,7 @@ RSM_ASSUME_NONNULL_BEGIN
 
 // rsm_qsort is qsort_r aka qsort_s
 void rsm_qsort(void* base, usize nmemb, usize size,
-  int(*cmp)(const void* x, const void* y, void* ctx), void* ctx);
+  int(*cmp)(const void* x, const void* y, void* nullable ctx), void* nullable ctx);
 
 // --------------------------------------------------------------------------------------
 // internal utility functions, like a string buffer. Not namespaced. See util.c

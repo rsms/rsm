@@ -34,7 +34,7 @@
 #include <stdlib.h>
 void rsm_qsort(
   void* base, usize nmemb, usize size,
-  int(*cmp)(const void* x, const void* y, void* ctx), void* ctx)
+  int(*cmp)(const void* x, const void* y, void* nullable ctx), void* nullable ctx)
 {
   return qsort_r(base, nmemb, size, cmp, ctx);
 }
@@ -73,7 +73,7 @@ void rsm_qsort(
 
 #define ntz(x) rsm_ctz((x))
 
-typedef int (*cmpfun)(const void *, const void *, void *);
+typedef int (*cmpfun)(const void *, const void *, void* nullable);
 typedef usize size_t;
 
 static inline int pntz(size_t p[2]) {
@@ -197,7 +197,7 @@ static void trinkle(unsigned char *head, size_t width, cmpfun cmp, void *arg, si
   }
 }
 
-void rsm_qsort(void *base, size_t nel, size_t width, cmpfun cmp, void *arg) {
+void rsm_qsort(void *base, size_t nel, size_t width, cmpfun cmp, void* nullable arg) {
   size_t lp[12*sizeof(size_t)];
   size_t i, size = width * nel;
   unsigned char *head, *high;

@@ -647,7 +647,7 @@ inline static usize abuf_avail(const abuf* s) { return (usize)(uintptr)(s->lastp
 bool abuf_endswith(const abuf* s, const char* str, usize len);
 
 
-void fmtinstr(abuf* s, rinstr in);
+void fmtinstr(abuf* s, rinstr in, rfmtflag fl);
 
 
 // ---------------

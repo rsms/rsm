@@ -26,7 +26,7 @@ struct vmstate {
     for (int i = 0; i < 6; i++)
       fprintf(stderr, REG_FMTVAL_PAT("%4llx"), REG_FMTVAL(i, iregs[i]));
     char buf[128];
-    rsm_fmtinstr(buf, sizeof(buf), inv[pc]);
+    rsm_fmtinstr(buf, sizeof(buf), inv[pc], RSM_FMT_COLOR);
     fprintf(stderr, "  │ %3ld  %s\n", pc, buf);
   }
 #else
@@ -98,7 +98,7 @@ static void _vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
   abuf_c(s, '\n');
 
   abuf_fmt(s, "  %08lx  ", PC);
-  fmtinstr(s, inv[pc]);
+  fmtinstr(s, inv[pc], RSM_FMT_COLOR);
   abuf_c(s, '\n');
 
   abuf_str(s, "Register state:");

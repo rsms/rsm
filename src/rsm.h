@@ -311,6 +311,12 @@ struct rcomp {
   void* nullable _gstate; // reusable internal codegen state
 };
 
+// rfmtflag -- string formatting flags
+typedef u8 rfmtflag;
+enum rfmtflag {
+  RSM_FMT_COLOR = 1 << 0, // use ANSI colors
+} RSM_END_ENUM(rfmtflag)
+
 // rop_name returns the name of an opcode
 RSMAPI const char* rop_name(rop);
 
@@ -333,8 +339,8 @@ RSMAPI void rsm_vmexec(u64* iregs, u32* inv, usize inlen, void* membase, usize m
 // discarded. The output is always null-terminated, unless size is 0.
 // Returns the number of characters that would have been printed if bufcap was
 // unlimited (not including the final `\0').
-RSMAPI usize rsm_fmtprog(char* buf, usize bufcap, rinstr* nullable ip, usize ilen);
-RSMAPI usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in);
+RSMAPI usize rsm_fmtprog(char* buf, usize bufcap, rinstr* nullable ip, usize ilen, rfmtflag);
+RSMAPI usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in, rfmtflag);
 
 // RMEM_MK_MIN is the minimum size for rmem_mk*alloc functions
 #define RMEM_MK_MIN (sizeof(void*)*4)

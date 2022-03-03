@@ -57,7 +57,6 @@ contexts:
             - include: types
             - include: comments
             - include: strings
-            - include: anonymous-functions
     - match: \b(type)\s+({{identifier}})
       captures:
         1: storage.type.rsm
@@ -68,7 +67,6 @@ contexts:
           pop: true
         - include: comments
         - include: types
-        - include: anonymous-functions
         - include: keywords
         - include: late-keywords
     - include: expressions-late
@@ -93,7 +91,6 @@ contexts:
     - include: strings
     - include: char
     - include: types
-    - include: anonymous-functions
     - include: late-keywords
     - include: operators
     - include: function-calls
@@ -244,56 +241,8 @@ contexts:
             - include: expressions
 
   initializers:
-    # Match multiple variable declarations inside of parens
-    - match: \b(var)\s+(\()
-      captures:
-        1: storage.type.rsm
-        2: meta.group.rsm punctuation.definition.group.begin.rsm
-      push:
-        - meta_scope: meta.initialization.multiple.rsm
-        - meta_content_scope: meta.group.rsm
-        - match: \)
-          scope: meta.group.rsm punctuation.definition.group.end.rsm
-          pop: true
-        - match: '^\s*({{identifier}})'
-          captures:
-            1: variable.other.rsm
-          push:
-            - match: '\s*(,)\s*({{identifier}})'
-              captures:
-                1: punctuation.separator.rsm
-                2: variable.other.rsm
-            - match: ''
-              pop: true
-        - include: expressions
-    # Match multiple constant declarations inside of parens
-    - match: \b(const)\s+(\()
-      captures:
-        1: storage.type.rsm
-        2: meta.group.rsm punctuation.definition.group.begin.rsm
-      push:
-        - meta_content_scope: meta.group.rsm
-        - match: \)
-          scope: meta.group.rsm punctuation.definition.group.end.rsm
-          pop: true
-        - match: '^\s*({{identifier}})'
-          captures:
-            1: entity.name.constant.rsm
-          push:
-            - match: '\s*(,)\s*({{identifier}})'
-              captures:
-                1: punctuation.separator.rsm
-                2: entity.name.constant.rsm
-            - match: ''
-              pop: true
-        - include: expressions
-    # Match a single constant
-    - match: \b(const)b(?:\s+({{identifier}}))?
-      captures:
-        1: storage.type.rsm
-        2: entity.name.constant.rsm
-    # Matches the 'var x int = 0' style of variable declaration
-    - match: '^\s*(var)\s+({{identifier}})'
+    # 'data x int = 0'
+    - match: '^\s*(data)\s+({{identifier}})'
       captures:
         1: storage.type.rsm
         2: variable.other.rsm
@@ -310,30 +259,25 @@ contexts:
             - match: '$'
               pop: true
             - include: expressions
-    # Matches the 'x := 0' style of variable declaration
-    - match: '({{identifier}})(?=(\s*,\s*{{identifier}})*\s*:=)'
-      scope: variable.other.rsm
-      push:
-        - meta_scope: meta.initialization.short.rsm
-        - include: comments
-        - match: '\s*(,)\s*({{identifier}})'
-          captures:
-            1: punctuation.separator.rsm
-            2: variable.other.rsm
-        - match: ':='
-          scope: keyword.operator.initialize.rsm
-          pop: true
 
   keywords:
-    - match: \b(as|switch|continue|case|if|import|default|else|for|fallthrough|return|goto|break|while)\b
+    - match: \b(add|and|br|brlt|brz|call|copy|div|eq|fun|gtes|gteu|gts|gtu|i1|i16|i32|i64|i8|jump|load|load1s|load1u|load2s|load2u|load4s|load4u|ltes|lteu|lts|ltu|mod|mul|neq|or|pop|push|ret|scall|shl|shrs|shru|store|store1|store2|store4|sub|write|xor)\b
       scope: keyword.control.rsm
-    - match: \b(nil|true|false|iota)\b
+    - match: \b(true|false|R\d\d?|F\d\d?|SP)\b
       scope: constant.language.rsm
-    - match: '\b((0(x|X)\h*)|(([0-9]+\.?[0-9]*)|(\.[0-9]+))((e|E)(\+|-)?[0-9]+)?)\b'
+    - match: |-
+        (?x)
+        \b(
+          (0(x|X)\h+) |
+          (0(b|B)[01]+) |
+          ( ([0-9]+\.?[0-9]*) |
+            (\.[0-9]+)) ( (e|E) (\+|-)? [0-9]+ )?
+        )\b
       scope: constant.numeric.rsm
 
+
   late-keywords:
-    - match: \b(chan|fun|type|map|var|const)\b
+    - match: \b(fun|data)\b
       scope: storage.type.rsm
     - match: \bmut\b
       scope: storage.modifier.rsm
@@ -357,83 +301,21 @@ contexts:
       scope: keyword.operator.rsm
 
   types:
-    - match: '\b(struct|interface)\b(?:(\{)(\}))?'
-      captures:
-        1: storage.type.rsm
-        2: meta.block.rsm punctuation.definition.block.begin.rsm
-        3: meta.block.rsm punctuation.definition.block.end.rsm
     - match: (\[)(\d*)(\])(?=[[:alpha:]_])
       scope: meta.brackets.rsm
       captures:
         1: punctuation.definition.brackets.begin.rsm
         2: constant.numeric.rsm
         3: punctuation.definition.brackets.end.rsm
-    - match: '\b(map)\b(\[)'
-      captures:
-        1: storage.type.rsm
-        2: meta.brackets.rsm punctuation.definition.brackets.begin.rsm
-      push:
-        - meta_content_scope: meta.brackets.rsm
-        - match: '(?=\s|$)'
-          pop: true
-        - match: \]
-          scope: meta.brackets.rsm punctuation.definition.brackets.end.rsm
-          pop: true
-        - include: types
-    - match: '(<-)?\b(chan)\b(<-)?(?=\s+[[:alpha:]_])'
-      captures:
-        1: keyword.operator.channel.rsm
-        2: storage.type.rsm
-        3: keyword.operator.channel.rsm
-    - include: basic-types
-
-  basic-types:
-    - match: '\b([ui](8|16|32|64|size)|u?int|f32|f64|byte|bool|error|str|rune|auto)\b'
+    - match: '\b([ui](1|8|16|32|64)|f32|f64|bool)\b'
       scope: storage.type.rsm
 
   functions:
-    - include: reciever-function-begin
     - include: plain-function-begin
-    - include: anonymous-functions
     - match: '\b(fun)\s+({{identifier}})'
       captures:
         1: storage.type.rsm
         2: entity.name.function.rsm
-
-  anonymous-functions:
-    - include: no-param-anonymous-function-begin
-    - include: multi-param-anonymous-function-begin
-    - include: single-param-anonymous-function-begin
-
-  reciever-function-begin:
-    - match: |-
-        (?x)
-        (fun)
-        \s*
-        # receiver declaration: (Type), (*Type), (t Type), (t *Type)
-        (
-          (\()
-            (?:\s*({{identifier}})\s+)?
-            (\*?)
-            \s*
-            {{identifier}}
-            \s*
-          (\))
-        )
-        \s*
-        # name of function
-        ( {{identifier}} )
-        (?=\s*\()
-      scope: meta.function.declaration.rsm
-      captures:
-        1: storage.type.rsm
-        2: meta.group.rsm
-        3: punctuation.definition.group.begin.rsm
-        4: variable.parameter.receiver.rsm
-        5: keyword.operator.rsm
-        6: punctuation.definition.group.end.rsm
-        7: entity.name.function.rsm
-      push: function-params
 
   plain-function-begin:
     - match: |-
@@ -447,58 +329,6 @@ contexts:
       captures:
         1: storage.type.rsm
         2: entity.name.function.rsm
-      push: function-params
-
-  no-param-anonymous-function-begin:
-    - match: |-
-        (?x)
-        (fun)
-        (\s*)
-        ((\()\s*(\)))
-        (\s*)
-      captures:
-        1: meta.function.declaration.anonymous.rsm storage.type.rsm
-        2: meta.function.rsm
-        3: meta.function.parameters.rsm meta.group.rsm
-        4: punctuation.definition.group.begin.rsm
-        5: punctuation.definition.group.end.rsm
-        6: meta.function.rsm
-      push: function-return-type
-
-  multi-param-anonymous-function-begin:
-    - match: |-
-        (?x)
-        (fun)
-        (\s*)
-        # param list with at least one comma: (t Type, ...)
-        (?=\(.*,)
-      scope: meta.function.declaration.anonymous.rsm
-      captures:
-        1: meta.function.declaration.anonymous.rsm storage.type.rsm
-        2: meta.function.rsm
-      push: function-params
-
-  single-param-anonymous-function-begin:
-    - match: |-
-        (?x)
-        (fun)
-        (\s*)
-        (?=
-          # single param: (t Type)
-          \([^,)]+\)
-          \s*
-          # return type: Type, (Type), (Type, Type2)
-          (
-            \({{type_chars}}+\)
-            |
-            {{type_chars}}
-          )?
-          \s*
-          (\{|$)
-        )
-      captures:
-        1: meta.function.declaration.anonymous.rsm storage.type.rsm
-        2: meta.function.rsm
       push: function-params
 
   function-params:

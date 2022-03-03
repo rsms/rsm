@@ -1,0 +1,8 @@
+<snippet>
+	<content><![CDATA[fun ${1:name}(${2:arg} ${3:Type}) ${4:RetType} {
+	${5:body}
+}]]></content>
+	<tabTrigger>fun</tabTrigger>
+	<scope>source.rsm</scope>
+	<description>fun …(…)…{…}</description>
+</snippet>

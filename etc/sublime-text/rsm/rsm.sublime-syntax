@@ -1,0 +1,655 @@
+%YAML 1.2
+---
+# http://www.sublimetext.com/docs/3/syntax.html
+name: RSM
+file_extensions:
+  - rsm
+first_line_match: "-[*]-( Mode:)? rsm -[*]-"
+scope: source.rsm
+variables:
+  identifier: '\b[[:alpha:]_][[:alnum:]_]*\b'
+  type_chars: '[[:alnum:]\s,._*&<>\[\]-]'
+
+contexts:
+  main:
+    - include: global
+
+  global:
+    - include: data-section
+    - include: imports
+    - include: functions
+    - include: statements
+
+  statements:
+    - include: expressions-early
+    - include: initializers
+    - include: block
+    - match: ^\s*((?!default){{identifier}})(:)(?!=)
+      captures:
+        1: entity.name.label.rsm
+        2: punctuation.separator.rsm
+    - match: \b(type)\s+({{identifier}})\s+(struct)\b
+      captures:
+        1: storage.type.rsm
+        2: entity.name.struct.rsm
+        3: storage.type.rsm
+      push:
+        - meta_scope: meta.struct.rsm
+        - include: comments
+        - match: \}
+          scope: meta.block.rsm punctuation.definition.block.end.rsm
+          pop: true
+        - match: \{
+          scope: punctuation.definition.block.begin.rsm
+          push:
+            - meta_scope: meta.block.rsm
+            - match: '(?=\})'
+              pop: true
+            - match: (?:(,)|^)\s*(\*)?(?:{{identifier}}\.)*({{identifier}})\s*(?=$|"|`)
+              captures:
+                1: punctuation.separator.rsm
+                2: keyword.operator.rsm
+                3: variable.other.member.rsm
+            - match: (?:(,)|^)\s*({{identifier}})
+              captures:
+                1: punctuation.separator.rsm
+                2: variable.other.member.rsm
+            - include: types
+            - include: comments
+            - include: strings
+            - include: anonymous-functions
+    - match: \b(type)\s+({{identifier}})
+      captures:
+        1: storage.type.rsm
+        2: entity.name.type.rsm
+      push:
+        - meta_scope: meta.type.rsm
+        - match: $
+          pop: true
+        - include: comments
+        - include: types
+        - include: anonymous-functions
+        - include: keywords
+        - include: late-keywords
+    - include: expressions-late
+
+  case-default:
+    - match: '\b(default|case)\b'
+      scope: keyword.control.rsm
+    - match: (,|:)
+      scope: punctuation.separator.rsm
+
+  expressions:
+    - include: expressions-early
+    - include: expressions-late
+
+  expressions-early:
+    - include: case-default
+    - include: keywords
+
+  expressions-late:
+    - include: comments
+    - include: access
+    - include: strings
+    - include: char
+    - include: types
+    - include: anonymous-functions
+    - include: late-keywords
+    - include: operators
+    - include: function-calls
+    - include: builtins
+    - match: \[
+      scope: punctuation.definition.brackets.begin.rsm
+      push:
+        - meta_scope: meta.brackets.rsm
+        - match: \]
+          scope: punctuation.definition.brackets.end.rsm
+          pop: true
+        - include: expressions
+    - match: \(
+      scope: punctuation.definition.group.begin.rsm
+      push:
+        - meta_scope: meta.group.rsm
+        - match: \)
+          scope: punctuation.definition.group.end.rsm
+          pop: true
+        - include: expressions
+
+  builtins:
+    - match: \b(append|cap|close|complex|copy|delete|imag|len|make|new|panic|print|println|real|recover)\b
+      scope: support.function.builtin.rsm
+
+  imports:
+    - match: '^\s*(import)\s+(?=")'
+      scope: meta.import.rsm
+      captures:
+        1: keyword.control.import.rsm
+      push:
+        - meta_scope: meta.import.rsm
+        - include: strings
+        - match: '$'
+          pop: true
+    - match: '^\s*(import)\s*(\()'
+      captures:
+        1: keyword.control.import.rsm
+        2: meta.group.rsm punctuation.definition.group.begin.rsm
+      push:
+        - meta_scope: meta.import.rsm
+        - meta_content_scope: meta.group.rsm
+        - match: '\)'
+          scope: meta.group.rsm punctuation.definition.group.end.rsm
+          pop: true
+        - include: comments
+        - include: strings
+
+  access:
+    - match: '(\.)({{identifier}})(?!\s*\()'
+      captures:
+        1: punctuation.accessor.rsm
+        2: variable.other.member.rsm
+
+  block:
+    - match: '\{'
+      scope: punctuation.definition.block.begin.rsm
+      push:
+        - meta_scope: meta.block.rsm
+        - match: '\}'
+          scope: punctuation.definition.block.end.rsm
+          pop: true
+        - include: statements
+
+  comments:
+    # Special AST block comment e.g. "/*!AST flag flag \n lisp */"
+    - match: (/\*)(\!AST)((\s+(?i:types|usecount|refs|attrs))*)
+      captures:
+        1: comment.block.rsm
+        2: keyword.control.rsm
+        3: meta.variable.function.rsm
+      push:
+        - include: scope:source.lisp
+        - meta_scope: source.lisp
+        - match: \*/
+          scope: comment.block.rsm punctuation.definition.comment.end.rsm
+          pop: true
+
+    # Special line comment e.g. "//!name ..."
+    - match: (//)(\!{{identifier}})
+      captures:
+        1: punctuation.definition.comment.rsm
+        2: meta.keyword.annotation.rsm
+      push:
+        - meta_scope: comment.line.rsm
+        - match: \S+
+          scope: meta.annotation.rsm
+        # End the annotation scope at EOL, but stretch the comment scope
+        # indefinitely to the right.
+        - match: $
+          set: pop-line-comment
+
+    # Block comment
+    - match: /\*
+      scope: punctuation.definition.comment.rsm
+      push:
+        - meta_scope: comment.block.rsm
+        - match: \*/
+          scope: punctuation.definition.comment.rsm
+          pop: true
+    - match: \*/
+      scope: invalid.illegal.stray-comment-end.rsm
+
+    # Line comment
+    - match: //
+      scope: punctuation.definition.comment.rsm
+      push:
+        - meta_scope: comment.line.double-slash.rsm
+        - match: \n
+          pop: true
+
+  pop-line-comment:
+    - meta_scope: comment.line.rsm
+    # Including the newline allows the scope to visually stretch to the right,
+    # and ensures that functionality that relies on comment scoping, such as
+    # contextual hotkeys, works properly at EOL while typing a comment. This
+    # should also match \r\n due to Sublime's internal normalization.
+    - match: $\n?
+      pop: true
+
+  function-calls:
+    - match: (\.)({{identifier}})\s*(\()
+      captures:
+        1: punctuation.accessor.rsm
+        2: variable.function.rsm
+        3: meta.group.rsm punctuation.definition.group.begin.rsm
+      push:
+        - meta_scope: meta.function-call.method.rsm
+        - meta_content_scope: meta.group.rsm
+        - match: \)
+          scope: meta.group.rsm punctuation.definition.group.end.rsm
+          pop: true
+        - include: expressions
+    - match: (?={{identifier}}\s*\()
+      push:
+        - meta_content_scope: meta.function-call.rsm
+        - include: builtins
+        - match: '{{identifier}}'
+          scope: variable.function.rsm
+        - match: '\('
+          scope: meta.group.rsm punctuation.definition.group.begin.rsm
+          set:
+            - meta_scope: meta.function-call.rsm
+            - meta_content_scope: meta.group.rsm
+            - match: \)
+              scope: meta.group.rsm punctuation.definition.group.end.rsm
+              pop: true
+            - include: expressions
+
+  initializers:
+    # Match multiple variable declarations inside of parens
+    - match: \b(var)\s+(\()
+      captures:
+        1: storage.type.rsm
+        2: meta.group.rsm punctuation.definition.group.begin.rsm
+      push:
+        - meta_scope: meta.initialization.multiple.rsm
+        - meta_content_scope: meta.group.rsm
+        - match: \)
+          scope: meta.group.rsm punctuation.definition.group.end.rsm
+          pop: true
+        - match: '^\s*({{identifier}})'
+          captures:
+            1: variable.other.rsm
+          push:
+            - match: '\s*(,)\s*({{identifier}})'
+              captures:
+                1: punctuation.separator.rsm
+                2: variable.other.rsm
+            - match: ''
+              pop: true
+        - include: expressions
+    # Match multiple constant declarations inside of parens
+    - match: \b(const)\s+(\()
+      captures:
+        1: storage.type.rsm
+        2: meta.group.rsm punctuation.definition.group.begin.rsm
+      push:
+        - meta_content_scope: meta.group.rsm
+        - match: \)
+          scope: meta.group.rsm punctuation.definition.group.end.rsm
+          pop: true
+        - match: '^\s*({{identifier}})'
+          captures:
+            1: entity.name.constant.rsm
+          push:
+            - match: '\s*(,)\s*({{identifier}})'
+              captures:
+                1: punctuation.separator.rsm
+                2: entity.name.constant.rsm
+            - match: ''
+              pop: true
+        - include: expressions
+    # Match a single constant
+    - match: \b(const)b(?:\s+({{identifier}}))?
+      captures:
+        1: storage.type.rsm
+        2: entity.name.constant.rsm
+    # Matches the 'var x int = 0' style of variable declaration
+    - match: '^\s*(var)\s+({{identifier}})'
+      captures:
+        1: storage.type.rsm
+        2: variable.other.rsm
+      push:
+        - meta_scope: meta.initialization.explicit.rsm
+        - include: comments
+        - match: '\s*(,)\s*({{identifier}})'
+          captures:
+            1: punctuation.separator.rsm
+            2: variable.other.rsm
+        - match: ''
+          set:
+            - meta_content_scope: meta.initialization.explicit.rsm
+            - match: '$'
+              pop: true
+            - include: expressions
+    # Matches the 'x := 0' style of variable declaration
+    - match: '({{identifier}})(?=(\s*,\s*{{identifier}})*\s*:=)'
+      scope: variable.other.rsm
+      push:
+        - meta_scope: meta.initialization.short.rsm
+        - include: comments
+        - match: '\s*(,)\s*({{identifier}})'
+          captures:
+            1: punctuation.separator.rsm
+            2: variable.other.rsm
+        - match: ':='
+          scope: keyword.operator.initialize.rsm
+          pop: true
+
+  keywords:
+    - match: \b(as|switch|continue|case|if|import|default|else|for|fallthrough|return|goto|break|while)\b
+      scope: keyword.control.rsm
+    - match: \b(nil|true|false|iota)\b
+      scope: constant.language.rsm
+    - match: '\b((0(x|X)\h*)|(([0-9]+\.?[0-9]*)|(\.[0-9]+))((e|E)(\+|-)?[0-9]+)?)\b'
+      scope: constant.numeric.rsm
+
+  late-keywords:
+    - match: \b(chan|fun|type|map|var|const)\b
+      scope: storage.type.rsm
+    - match: \bmut\b
+      scope: storage.modifier.rsm
+
+  operators:
+    - match: '\|\|'
+      scope: keyword.operator.rsm
+    - match: '&[&^]'
+      scope: keyword.operator.rsm
+    - match: ':='
+      scope: keyword.operator.initialize.rsm
+    - match: '[=!<>]='
+      scope: keyword.operator.rsm
+    - match: <<|>>
+      scope: keyword.operator.rsm
+    - match: <-|->
+      scope: keyword.operator.channel.rsm
+    - match: '='
+      scope: keyword.operator.assignment.rsm
+    - match: '[-/*&<>+|^%!]'
+      scope: keyword.operator.rsm
+
+  types:
+    - match: '\b(struct|interface)\b(?:(\{)(\}))?'
+      captures:
+        1: storage.type.rsm
+        2: meta.block.rsm punctuation.definition.block.begin.rsm
+        3: meta.block.rsm punctuation.definition.block.end.rsm
+    - match: (\[)(\d*)(\])(?=[[:alpha:]_])
+      scope: meta.brackets.rsm
+      captures:
+        1: punctuation.definition.brackets.begin.rsm
+        2: constant.numeric.rsm
+        3: punctuation.definition.brackets.end.rsm
+    - match: '\b(map)\b(\[)'
+      captures:
+        1: storage.type.rsm
+        2: meta.brackets.rsm punctuation.definition.brackets.begin.rsm
+      push:
+        - meta_content_scope: meta.brackets.rsm
+        - match: '(?=\s|$)'
+          pop: true
+        - match: \]
+          scope: meta.brackets.rsm punctuation.definition.brackets.end.rsm
+          pop: true
+        - include: types
+    - match: '(<-)?\b(chan)\b(<-)?(?=\s+[[:alpha:]_])'
+      captures:
+        1: keyword.operator.channel.rsm
+        2: storage.type.rsm
+        3: keyword.operator.channel.rsm
+    - include: basic-types
+
+  basic-types:
+    - match: '\b([ui](8|16|32|64|size)|u?int|f32|f64|byte|bool|error|str|rune|auto)\b'
+      scope: storage.type.rsm
+
+  functions:
+    - include: reciever-function-begin
+    - include: plain-function-begin
+    - include: anonymous-functions
+    - match: '\b(fun)\s+({{identifier}})'
+      captures:
+        1: storage.type.rsm
+        2: entity.name.function.rsm
+
+  anonymous-functions:
+    - include: no-param-anonymous-function-begin
+    - include: multi-param-anonymous-function-begin
+    - include: single-param-anonymous-function-begin
+
+  reciever-function-begin:
+    - match: |-
+        (?x)
+        (fun)
+        \s*
+        # receiver declaration: (Type), (*Type), (t Type), (t *Type)
+        (
+          (\()
+            (?:\s*({{identifier}})\s+)?
+            (\*?)
+            \s*
+            {{identifier}}
+            \s*
+          (\))
+        )
+        \s*
+        # name of function
+        ( {{identifier}} )
+        (?=\s*\()
+      scope: meta.function.declaration.rsm
+      captures:
+        1: storage.type.rsm
+        2: meta.group.rsm
+        3: punctuation.definition.group.begin.rsm
+        4: variable.parameter.receiver.rsm
+        5: keyword.operator.rsm
+        6: punctuation.definition.group.end.rsm
+        7: entity.name.function.rsm
+      push: function-params
+
+  plain-function-begin:
+    - match: |-
+        (?x)
+        (fun)
+        \s*
+        # name of function
+        ( {{identifier}} )
+        (?=\s*\()
+      scope: meta.function.declaration.rsm
+      captures:
+        1: storage.type.rsm
+        2: entity.name.function.rsm
+      push: function-params
+
+  no-param-anonymous-function-begin:
+    - match: |-
+        (?x)
+        (fun)
+        (\s*)
+        ((\()\s*(\)))
+        (\s*)
+      captures:
+        1: meta.function.declaration.anonymous.rsm storage.type.rsm
+        2: meta.function.rsm
+        3: meta.function.parameters.rsm meta.group.rsm
+        4: punctuation.definition.group.begin.rsm
+        5: punctuation.definition.group.end.rsm
+        6: meta.function.rsm
+      push: function-return-type
+
+  multi-param-anonymous-function-begin:
+    - match: |-
+        (?x)
+        (fun)
+        (\s*)
+        # param list with at least one comma: (t Type, ...)
+        (?=\(.*,)
+      scope: meta.function.declaration.anonymous.rsm
+      captures:
+        1: meta.function.declaration.anonymous.rsm storage.type.rsm
+        2: meta.function.rsm
+      push: function-params
+
+  single-param-anonymous-function-begin:
+    - match: |-
+        (?x)
+        (fun)
+        (\s*)
+        (?=
+          # single param: (t Type)
+          \([^,)]+\)
+          \s*
+          # return type: Type, (Type), (Type, Type2)
+          (
+            \({{type_chars}}+\)
+            |
+            {{type_chars}}
+          )?
+          \s*
+          (\{|$)
+        )
+      captures:
+        1: meta.function.declaration.anonymous.rsm storage.type.rsm
+        2: meta.function.rsm
+      push: function-params
+
+  function-params:
+    - match: (\s*)(\()(\s*)
+      captures:
+        1: meta.function.rsm
+        2: meta.function.parameters.rsm meta.group.rsm punctuation.definition.group.begin.rsm
+        3: meta.function.parameters.rsm meta.group.rsm
+      # Create a temporary context to handle the initial parameter if it does
+      # not include a type
+      set: function-params-param-name
+
+  function-params-param-name:
+    # If the first thing is an identifier followed by a comma or a comment
+    # and then a comma, it is a parameter that shares a type with a later
+    # parameter
+    - meta_content_scope: meta.function.parameters.rsm meta.group.rsm
+    - match: \s+(?=/\*)
+    - include: comments
+    - match: '\s*({{identifier}})(?=\s*,|\s*/\*.*?\*/\s*,)'
+      captures:
+        1: variable.parameter.rsm
+      set: function-params-other
+    - match: ''
+      set: function-params-other
+
+  function-params-other:
+    - meta_content_scope: meta.function.parameters.rsm meta.group.rsm
+    - match: (?=\)\s*)
+      set:
+        - match: '(\))(\s*)'
+          captures:
+            1: meta.function.parameters.rsm meta.group.rsm punctuation.definition.group.end.rsm
+            2: meta.function.rsm
+          set: function-return-type
+    - include: comments
+    - match: '{{identifier}}(?=\s+[^\s,)])'
+      scope: variable.parameter.rsm
+      set:
+        - meta_content_scope: meta.function.parameters.rsm meta.group.rsm
+        - match: '(?=\))'
+          set: function-params-other
+        - match: '(,)\s*'
+          captures:
+            1: punctuation.separator.rsm
+          set: function-params-param-name
+        - include: types-group
+    - include: types-group
+    - match: ','
+      scope: punctuation.separator.rsm
+
+  function-return-type:
+    - meta_content_scope: meta.function.return-type.rsm
+    - match: '(?=\{)'
+      set: function-body
+    - include: types-group
+    # Match an identifier so that is doesn't trigger an exit from the context
+    - match: '{{identifier}}'
+    - match: \(
+      scope: meta.group.rsm punctuation.definition.group.begin.rsm
+      set:
+        - meta_content_scope: meta.function.return-type.rsm meta.group.rsm
+        - match: '\)'
+          scope: punctuation.definition.group.end.rsm
+          set: function-body
+        - match: ','
+          scope: punctuation.separator.rsm
+        - include: types-group
+    # If a function declaration ends in a newline not in parens and not in a
+    # block, it is a forward declaration
+    - match: $
+      pop: true
+    # Exit for any other char, such as )
+    - match: (?=\S)
+      pop: true
+
+  types-group:
+    - include: comments
+    - match: \*
+      scope: keyword.operator.rsm
+    - include: types
+
+  function-body:
+    - match: $
+      pop: true
+    - match: (\s*)(\{)
+      captures:
+        1: meta.function.rsm
+        2: meta.function.rsm meta.block.rsm punctuation.definition.block.begin.rsm
+      set:
+        - meta_content_scope: meta.function.rsm meta.block.rsm
+        - match: \}
+          scope: meta.function.rsm meta.block.rsm punctuation.definition.block.end.rsm
+          pop: true
+        - include: statements
+
+  string-escaped-char:
+    - match: '\\(\\|[abfnrutv''"]|x\h{2}|u\h{4}|U\h{8}|[0-7]{3})'
+      scope: constant.character.escape.rsm
+    - match: \\.
+      scope: invalid.illegal.unknown-escape.rsm
+
+  string-placeholder:
+    - match: |-
+        (?x)%
+            [#0\- +']*                                  # flags
+            (\[\d+\])?                                  # field (argument #)
+            [,;:_]?                                     # separator character (AltiVec)
+            ((-?\d+)|(\[\d+\])?\*)?                     # minimum field width
+            (\.((-?\d+)|(\[\d+\])?\*)?)?                # precision
+            [diouxXDOUeEfFgGaAcCsSpqnvtTbyYhHmMzZ%]     # conversion type
+      scope: constant.other.placeholder.rsm
+    - match: "%"
+      scope: invalid.illegal.placeholder.rsm
+
+  strings:
+    - match: '"'
+      scope: punctuation.definition.string.begin.rsm
+      push:
+        - meta_scope: string.quoted.double.rsm
+        - match: '"'
+          scope: punctuation.definition.string.end.rsm
+          pop: true
+        - include: string-placeholder
+        - include: string-escaped-char
+    - match: "`"
+      scope: punctuation.definition.string.begin.rsm
+      push:
+        - meta_scope: string.quoted.raw.rsm
+        - match: "`"
+          scope: punctuation.definition.string.end.rsm
+          pop: true
+        - include: string-placeholder
+  char:
+    - match: "'"
+      scope: punctuation.definition.string.begin.rsm
+      push:
+        - meta_scope: string.quoted.single.rsm
+        - match: "'"
+          scope: punctuation.definition.string.end.rsm
+          pop: true
+        - include: string-escaped-char
+
+  data-section:
+    - match: ^(#\!EOF)\b[^\n]*\n
+      captures:
+        0: meta.preprocessor.rsm
+        1: keyword.control.rsm
+      push:
+        - meta_content_scope: text.plain
+        - match: (?=<?xml|<(?i:html\b)|!DOCTYPE (?i:html\b))
+          push:
+            - meta_scope: text.html.embedded.rsm
+            - include: scope:text.html.basic

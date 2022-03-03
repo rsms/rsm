@@ -162,6 +162,8 @@ if $DEBUG && $CC_IS_CLANG; then
     \
     -fno-omit-frame-pointer \
     -fno-optimize-sibling-calls \
+    \
+    -fmacro-backtrace-limit=0 \
   )
   LDFLAGS_HOST+=(
     -fsanitize=address,undefined \

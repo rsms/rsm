@@ -320,6 +320,10 @@ enum rfmtflag {
 // rop_name returns the name of an opcode
 RSMAPI const char* rop_name(rop);
 
+// rsm_init initializes global state; must be called before using the rest of the API.
+// Returns false if initialization failed.
+RSMAPI bool rsm_init();
+
 // rsm_compile compiles assembly source text into vm bytecode.
 // Uses c->mem for temporary storage, allocates *resp in resm.
 // c can be reused with multiple calls.

@@ -322,8 +322,8 @@ typedef __builtin_va_list va_list;
 
 // RSM_SAFE -- checks enabled in "debug" and "safe" builds (but not in "fast" builds.)
 //
-// void safecheck(EXPR)
-// EXPR safecheckx(EXPR)
+// void safecheck(EXPR)      -- elided from non-safe builds
+// EXPR safecheckexpr(EXPR)  -- included in non-safe builds (without check)
 // void safecheckf(EXPR, const char* fmt, ...)
 // typeof(EXPR) safenotnull(EXPR)
 //
@@ -457,6 +457,7 @@ void unmapfile(void* p, usize len);
 rerror read_stdin_data(rmem, usize maxlen, void** p_put, usize* len_out);
 
 const char* rerror_str(rerror);
+rerror rerror_errno(int errnoval);
 
 noreturn void _panic(const char* file, int line, const char* fun, const char* fmt, ...)
   ATTR_FORMAT(printf, 4, 5);
@@ -644,9 +645,21 @@ inline static usize abuf_terminate(abuf* s) { *s->p = 0; return s->len; }
 inline static usize abuf_avail(const abuf* s) { return (usize)(uintptr)(s->lastp - s->p); }
 bool abuf_endswith(const abuf* s, const char* str, usize len);
 
-
+// fmtinstr appends to s a printable representation of in
 void fmtinstr(abuf* s, rinstr in, rfmtflag fl);
 
+// unixtime stores the number of seconds + nanoseconds since Jan 1 1970 00:00:00 UTC
+// at *sec and *nsec
+rerror unixtime(i64* sec, u64* nsec);
+
+// nanotime returns nanoseconds measured from an undefined point in time.
+// It uses the most high-resolution, low-latency clock available on the system.
+// u64 is enough to express 584 years in nanoseconds.
+u64 nanotime();
+
+// fmtduration appends human-readable time duration to buf, including a null terminator.
+// Returns number of bytes written, excluding the null terminator.
+usize fmtduration(char buf[25], u64 duration_ns);
 
 // ---------------
 

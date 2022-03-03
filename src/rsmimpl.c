@@ -89,18 +89,18 @@ const char* rerror_str(rerror e) {
 }
 
 
-#ifndef RSM_NO_LIBC
-  static rerror rerror_errno(int e) {
-    switch (e) {
-      case 0: return 0;
-      case EACCES: return rerr_access;
-      case EEXIST: return rerr_exists;
-      case ENOENT: return rerr_not_found;
-      case EBADF:  return rerr_badfd;
-      default: return rerr_invalid;
-    }
+rerror rerror_errno(int e) {
+  switch (e) {
+    case 0: return 0;
+  #ifndef RSM_NO_LIBC
+    case EACCES: return rerr_access;
+    case EEXIST: return rerr_exists;
+    case ENOENT: return rerr_not_found;
+    case EBADF:  return rerr_badfd;
+  #endif
+    default: return rerr_invalid;
   }
-#endif
+}
 
 
 rerror mmapfile(const char* filename, void** p_put, usize* len_out) {
@@ -645,3 +645,26 @@ void* memmove(void* dest, const void* src, usize n) {
 
 
 // --- END musl code (resume original rsm code) ---
+
+// one-time initialization of global state
+rerror time_init();
+rerror compile_init();
+
+bool rsm_init() {
+  static bool y = false; if (y) return true; y = true;
+  rerror err;
+  #define CHECK_ERR(expr) err = (expr); if (err) goto error
+
+  CHECK_ERR(time_init());
+
+  u64 sec, nsec;
+  CHECK_ERR(unixtime((i64*)&sec, &nsec));
+  fastrand_seed(nsec);
+
+  CHECK_ERR(compile_init());
+
+  return true;
+error:
+  log("rsm_init error: %s", rerror_str(err));
+  return false;
+}

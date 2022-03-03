@@ -119,7 +119,7 @@ static bool diaghandler(const rdiag* d, void* userdata) {
 }
 
 int main(int argc, char*const* argv) {
-  fastrand_seed((u32)(uintptr)argv); // TODO: use time or something actually random
+  rsm_init();
 
   // vm execution state
   u64 iregs[32] = {0};
@@ -156,7 +156,11 @@ int main(int argc, char*const* argv) {
 
   if (opt_run) {
     u8 memory[1024*1024];
+    u64 starttime = nanotime();
     rsm_vmexec(iregs, iv, icount, memory, sizeof(memory));
+    char duration[25];
+    fmtduration(duration, nanotime() - starttime);
+    log("execution finished in %s", duration);
     printf("%llu\t%llu\t%llu\t%llu\t%llu\t%llu\t%llu\t%llu\n",
       iregs[0], iregs[1], iregs[2], iregs[3], iregs[4], iregs[5], iregs[6], iregs[7]);
   }

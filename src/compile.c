@@ -1444,11 +1444,12 @@ void rcomp_dispose(rcomp* c) {
   #define print_keywords(...) ((void)0)
 #endif
 
-static void init_kwmap() {
+rerror compile_init() {
   static u8 memory[4640];
   rmem mem = rmem_mkbufalloc(memory, sizeof(memory));
-  smap* m = &kwmap;
-  assertnotnull(smap_make(m, mem, kwcount, MAPLF_2)); // increase sizeof(memory)
+  smap* m = smap_make(&kwmap, mem, kwcount, MAPLF_2); // increase sizeof(memory)
+  if UNLIKELY(m == NULL)
+    return rerr_nomem;
   uintptr* vp;
   #define _(token, kw) \
     vp = assertnotnull(smap_assign(m, kw, strlen(kw))); \
@@ -1465,12 +1466,11 @@ static void init_kwmap() {
     if (p) dlog("kwmap uses only %zu B memory -- trim memory", (usize)(p - (void*)memory));
   #endif
   print_keywords();
+  return 0;
 }
 
 // compiler entry point
 usize rsm_compile(rcomp* c, rmem resm, rinstr** resp) {
-  if UNLIKELY(kwmap.entries == NULL)
-    init_kwmap();
   c->_stop = false;
   c->errcount = 0;
   dlog("assembling \"%s\"", c->srcname);

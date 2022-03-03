@@ -35,20 +35,20 @@ _( T_INT16  ) _( T_SINT16  ) /* 0x7b            */ \
 // end RSM_FOREACH_TOKEN
 // RSM_FOREACH_BINOP_TOKEN maps an infix binary operation to opcodes,
 // allowing "x + y" as an alternative to "add x y"
-#define RSM_FOREACH_BINOP_TOKEN(_) \
-_( T_PLUS  , ADD   ) /* + */ \
-_( T_MINUS , SUB   ) /* - */ \
-_( T_STAR  , MUL   ) /* * */ \
-_( T_SLASH , DIV   ) /* / */ \
-_( T_PERC  , MOD   ) /* % */ \
-_( T_AMP   , AND   ) /* & */ \
-_( T_PIPE  , OR    ) /* | */ \
-_( T_HAT   , XOR   ) /* ^ */ \
-_( T_LT2   , SHL   ) /* << */ \
-_( T_GT2   , SHRS  ) /* >> */ \
-_( T_GT3   , SHRU  ) /* >>> */ \
-_( T_LT    , CMPLT ) /* < */ \
-_( T_GT    , CMPGT ) /* > */ \
+#define RSM_FOREACH_BINOP_TOKEN(_) /* token, unsigned_op, signed_op */\
+_( T_PLUS  , ADD  , ADD  ) /* + */ \
+_( T_MINUS , SUB  , SUB  ) /* - */ \
+_( T_STAR  , MUL  , MUL  ) /* * */ \
+_( T_SLASH , DIV  , DIV  ) /* / */ \
+_( T_PERC  , MOD  , MOD  ) /* % */ \
+_( T_AMP   , AND  , AND  ) /* & */ \
+_( T_PIPE  , OR   , OR   ) /* | */ \
+_( T_HAT   , XOR  , XOR  ) /* ^ */ \
+_( T_LT2   , SHL  , SHL  ) /* << */ \
+_( T_GT2   , SHRU , SHRS ) /* >> */ \
+_( T_GT3   , SHRU , SHRU ) /* >>> */ \
+_( T_LT    , LTU  , LTS  ) /* < */ \
+_( T_GT    , GTU  , GTS  ) /* > */ \
 // end RSM_FOREACH_BINOP_TOKEN
 #define RSM_FOREACH_KEYWORD_TOKEN(_) \
 _( T_FUN , "fun" ) \
@@ -196,17 +196,24 @@ struct gref {
 static const char* kBlock0Name = "b0"; // name of first block
 
 #if HASHCODE_MAX >= 0xFFFFFFFFFFFFFFFFu
-static const smapent kwmap_entries[64] = {
- {"fun",3,33},{"brz",3,4877},{0},{0},{0},{"call",4,5645},{0},{"shl",3,3341},
- {"jump",4,5389},{0},{0},{"ret",3,6157},{0},{"load",4,269},{0},{0},
- {"pop",3,1037},{0},{"i16",3,36},{0},{"add",3,1293},{0},{"i32",3,37},{"i1",2,34},
- {0},{"sub",3,1549},{"shrs",4,3597},{0},{"cmpgt",5,4621},{0},{0},{"and",3,2573},
- {0},{0},{0},{"shru",4,3853},{0},{"mod",3,2317},{0},{0},{0},{"scall",5,5901},
- {"mul",3,1805},{0},{"brnz",4,5133},{0},{"i8",2,35},{0},{0},{"cmpeq",5,4109},
- {"xor",3,3085},{0},{"cmplt",5,4365},{"copy",4,13},{0},{"store",5,525},{0},
- {"div",3,2061},{"i64",3,38},{0},{0},{"push",4,781},{0},{"or",2,2829}};
+static const smapent kwmap_entries[128] = {
+ {"push",4,3085},{0},{0},{"gtu",3,7949},{0},{"load1s",6,1805},{0},{"shl",3,5645},
+ {0},{"eq",2,6413},{0},{"br",2,8973},{0},{"i16",3,36},{0},{0},{"store2",6,2573},
+ {0},{"copy",4,13},{"scall",5,10253},{0},{"i8",2,35},{0},{"load4u",6,525},{0},
+ {0},{0},{0},{0},{0},{"lts",3,7181},{0},{0},{0},{"gtes",4,8717},{0},{0},{0},
+ {"mul",3,4109},{"sub",3,3853},{0},{0},{"and",3,4877},{0},{"or",2,5133},{0},{0},
+ {"pop",3,3341},{0},{0},{0},{"store",5,2061},{"brlt",4,9485},{"load2u",6,1037},
+ {0},{0},{0},{0},{"lteu",4,7437},{0},{0},{"ltes",4,7693},{"add",3,3597},{0},
+ {"mod",3,4621},{0},{0},{"gteu",4,8461},{0},{0},{0},{0},{0},{0},{0},
+ {"write",5,10765},{"div",3,4365},{0},{"load2s",6,1293},{"i32",3,37},
+ {"gts",3,8205},{0},{0},{0},{0},{0},{0},{"fun",3,33},{0},{"load",4,269},{0},{0},
+ {0},{"shrs",4,5901},{"shru",4,6157},{"brz",3,9229},{0},{"neq",3,6669},{0},
+ {"call",4,9997},{0},{"xor",3,5389},{0},{0},{0},{0},{"load1u",6,1549},{0},{0},
+ {"store1",6,2829},{"ret",3,10509},{0},{"store4",6,2317},{0},{0},{"jump",4,9741},
+ {0},{"i64",3,38},{0},{0},{"ltu",3,6925},{0},{"i1",2,34},{0},{0},{0},
+ {"load4s",6,781},{0}};
 static const struct{u32 cap,len,gcap;maplf lf;hashcode hash0;const smapent* ep;}
-kwmap_data={64,31,48,2,0xfc453834,kwmap_entries};
+kwmap_data={128,49,96,2,0x3705ce41,kwmap_entries};
 static const smap* kwmap = (const smap*)&kwmap_data;
 #else /* can't use static map; check_kwmap will build one */
 static const smap* kwmap;
@@ -495,7 +502,7 @@ static void sadvance(pstate* p) { // scan the next token
       if (*p->inp != '<') { p->tok = T_LT; return; }
       p->inp++;             p->tok = T_LT2; return;
     case '>':
-      if (*p->inp != '>')   p->tok = T_GT; return;
+      if (*p->inp != '>') { p->tok = T_GT; return; }
       p->inp++;
       if (*p->inp != '>') { p->tok = T_GT2; return; }
       p->inp++;             p->tok = T_GT3; return;
@@ -615,6 +622,10 @@ static bool expectname(pstate* p, node* n) {
   return true;
 }
 
+static bool nsigned(node* n) {
+  return n->t == T_SINT2 || n->t == T_SINT10 || n->t == T_SINT16;
+}
+
 // eat comsumes the next token, reporting a syntax error if p->tok != t
 static void eat(pstate* p, rtok t) {
   expecttok(p, t);
@@ -697,7 +708,8 @@ static node* infix_op(PPARAMS, node* arg0) {
   node* n = mknode(p);
   // map token to opcode
   switch (n->t) {
-    #define _(tok, op) case tok: n->ival = rop_##op; break;
+    #define _(tok, op_u, op_s) \
+      case tok: n->ival = nsigned(arg0) ? rop_##op_s : rop_##op_u; break;
     RSM_FOREACH_BINOP_TOKEN(_)
     #undef _
     default: UNREACHABLE;
@@ -1026,7 +1038,7 @@ static i32 addgref( // record a pending reference
 {
   gref* ref = GARRAY_PUSH_OR_RET(gref, refs, 0);
   ref->i = referreri;
-  ref->n = referrer;
+  ref->n = assertnotnull(referrer);
   ref->iarg = iarg;
   ref->isabs = isabs;
   ref->isany = isany;
@@ -1059,7 +1071,7 @@ static void gpostresolve(gstate* g, rarray* refs, gbhead* b) {
       case 'D': *in = ref->isabs ? RSM_SET_Du(*in, val) : RSM_SET_Ds(*in, val); break;
       default: assertf(0,"invalid iarg 0x%02x", ref->iarg);
     }
-    rarray_remove(gblock, refs, i, 1);
+    rarray_remove(gref, refs, i, 1);
   }
 }
 
@@ -1265,11 +1277,21 @@ static void genblock(gstate* g, node* block) {
   // resolve pending references
   gpostresolve(g, &g->fn->ulv, (gbhead*)b);
 
+  node* jumpn = NULL; // last unconditional jump
   for (node* cn = block->list.head; cn; cn = cn->next) {
+    if (jumpn) {
+      warnf(g->c, cn->pos, "unreachable code");
+      break;
+    }
     switch (cn->t) {
-      case T_OP: genop(g, cn); break;
-      case T_EQ: genassign(g, cn); break;
-      default:   errf(g->c, cn->pos, "invalid block element %s", tokname(cn->t));
+      case T_OP:
+        if ((rop)cn->ival == rop_JUMP || (rop)cn->ival == rop_RET)
+          jumpn = cn;
+        genop(g, cn); break;
+      case T_EQ:
+        genassign(g, cn); break;
+      default:
+        errf(g->c, cn->pos, "invalid block element %s", tokname(cn->t));
     }
   }
 }
@@ -1439,7 +1461,7 @@ static void check_kwmap() {
   static bool didcheck = false; if (didcheck) return; didcheck = true;
 
   // build kwmap with all keywords
-  static u8 memory[1568];
+  static u8 memory[4640];
   static smap kwmap2 = {0}; smap* m = &kwmap2;
   rmem mem = rmem_mkbufalloc(memory, sizeof(memory));
   assertnotnull(smap_make(m, mem, kwcount, MAPLF_2)); // increase sizeof(memory)
@@ -1462,6 +1484,10 @@ static void check_kwmap() {
   #if HASHCODE_MAX < 0xFFFFFFFFFFFFFFFFu
     kwmap = m; // use m since we have no static map
   #endif
+  #ifdef DEBUG
+    void* p = rmem_alloc(mem,1);
+    if (p) dlog("kwmap uses only %zu B memory -- trim memory", (usize)(p - (void*)memory));
+  #endif
 #endif
 #if defined(DEBUG) && HASHCODE_MAX >= 0xFFFFFFFFFFFFFFFFu
   // check to see if keywords has changed; if kwmap is outdated
@@ -1470,7 +1496,7 @@ static void check_kwmap() {
   for (const smapent* e = smap_itstart(kwmap); smap_itnext(kwmap, &e); )
     if (smap_lookup(m, e->key, e->keylen) == NULL) goto differ;
   return; // kwmap is good
-differ:   // kwmap is outdated -- optimize and print replacement C code
+differ:   // kwmap is outdated
   #if 1 /* generator disabled -- change to "0" to run it */
     dlog("————————————————————————————————————————————————————————");
     dlog("kwmap needs updating — find me and enable the generator");

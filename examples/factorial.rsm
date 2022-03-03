@@ -5,7 +5,7 @@ fun factorial (i32) i32 {
   b1:              // <- [b0] b1
     R0 = R1 * R0   // RES = ACC * RES
     R1 = R1 - 1    // ACC = ACC - 1
-    brnz R1 b1     // if n!=0 goto b1
+    br R1 b1       // if n!=0 goto b1
   end:             // <- b0 [b1]
     ret            // RES is at R0
 }

@@ -110,41 +110,62 @@ typedef u32 rinstr;
 //   ABCDs   R(A), R(B), R(C), R(D) or immediate signed value
 // Changing instruction encoding? Remember to also update vm.c, fmt.c and compile.c
 #define RSM_FOREACH_OP(_) /* _(name, arguments, asmname, semantics) */ \
-_( COPY  , ABu  , "copy"  /* R(A) = {R(B),Bu} aka "move"  */)\
-_( LOAD  , ABCs , "load"  /* R(A) = mem[R(B) + {R(C),Cs}] */)\
-_( STORE , ABCs , "store" /* mem[R(B) + {R(C),Cs}] = R(A) */)\
-_( PUSH  , Au   , "push"  /* SP -= 8; mem[SP] = Au        */)\
-_( POP   , A    , "pop"   /* A = mem[SP]; SP += 8         */)\
+_( COPY , ABs , "copy"  /* RA = Bs -- aka "move" */)\
 \
-_( ADD   , ABCu , "add"   /* R(A) = R(B) + {R(C),Cu}                                */)\
-_( SUB   , ABCu , "sub"   /* R(A) = R(B) - {R(C),Cu}                                */)\
-_( MUL   , ABCu , "mul"   /* R(A) = R(B) * {R(C),Cu}                                */)\
-_( DIV   , ABCu , "div"   /* R(A) = R(B) / {R(C),Cu}                                */)\
-_( MOD   , ABCu , "mod"   /* R(A) = R(B) % {R(C),Cu}                                */)\
-_( AND   , ABCu , "and"   /* R(A) = R(B) & {R(C),Cu}                                */)\
-_( OR    , ABCu , "or"    /* R(A) = R(B) | {R(C),Cu}                                */)\
-_( XOR   , ABCu , "xor"   /* R(A) = R(B) ^ {R(C),Cu}                                */)\
-_( SHL   , ABCu , "shl"   /* R(A) = R(B) << {R(C),Cu}                               */)\
-_( SHRS  , ABCu , "shrs"  /* R(A) = R(B) >> {R(C),Cu} sign-replicating (arithmetic) */)\
-_( SHRU  , ABCu , "shru"  /* R(A) = R(B) >> {R(C),Cu} zero-replicating (logical)    */)\
+_( LOAD    , ABCs , "load"    /* RA = mem[RB + Cs : 8]                           */)\
+_( LOAD4U  , ABCs , "load4u"  /* RA = mem[RB + Cs : 4] -- zero-extend i32 to i64 */)\
+_( LOAD4S  , ABCs , "load4s"  /* RA = mem[RB + Cs : 4] -- sign-extend i32 to i64 */)\
+_( LOAD2U  , ABCs , "load2u"  /* RA = mem[RB + Cs : 2] -- zero-extend i16 to i64 */)\
+_( LOAD2S  , ABCs , "load2s"  /* RA = mem[RB + Cs : 2] -- sign-extend i16 to i64 */)\
+_( LOAD1U  , ABCs , "load1u"  /* RA = mem[RB + Cs : 1] -- zero-extend i8 to i64  */)\
+_( LOAD1S  , ABCs , "load1s"  /* RA = mem[RB + Cs : 1] -- sign-extend i8 to i64  */)\
 \
-_( CMPEQ , ABCu , "cmpeq" /* R(A) = R(B) == {R(C),Cu} */)\
-_( CMPLT , ABCu , "cmplt" /* R(A) = R(B) < {R(C),Cu}  */)\
-_( CMPGT , ABCu , "cmpgt" /* R(A) = R(B) > {R(C),Cu}  */)\
+_( STORE   , ABCs , "store"   /* mem[RB + Cs : 8] = RA                    */)\
+_( STORE4  , ABCs , "store4"  /* mem[RB + Cs : 4] = RA -- wrap i64 to i32 */)\
+_( STORE2  , ABCs , "store2"  /* mem[RB + Cs : 2] = RA -- wrap i64 to i16 */)\
+_( STORE1  , ABCs , "store1"  /* mem[RB + Cs : 1] = RA -- wrap i64 to i8  */)\
 \
-_( BRZ   , ABs  , "brz"   /* if R(A)==0 PC += {R(B),Bs} */)\
-_( BRNZ  , ABs  , "brnz"  /* if R(A)!=0 PC += {R(B),Bs} */)\
-_( JUMP  , Au   , "jump"  /* PC = {R(A),Au} */)\
-_( CALL  , Au   , "call"  /* R0...R7 = call PC={R(A),Au} clobbers R0...R7 */)\
-_( SCALL , Au   , "scall" /* R0...R7 = system_call {R(A),Au} clobbers R0...R7 */)\
-  /* TODO: would be nice to be able to pass multiple imms to SCALL \
-     e.g. "scall PUTC 'h'"; a new encoding AuBu maybe? */          \
+_( PUSH    , Au   , "push"    /* SP -= 8; mem[SP] = Au                   */)\
+_( POP     , A    , "pop"     /* A = mem[SP]; SP += 8                    */)\
 \
-_( RET   , _    , "ret" /* return */)\
+_( ADD   , ABCu , "add"   /* RA = RB + Cu}                               */)\
+_( SUB   , ABCu , "sub"   /* RA = RB - Cu}                               */)\
+_( MUL   , ABCu , "mul"   /* RA = RB * Cu}                               */)\
+_( DIV   , ABCu , "div"   /* RA = RB / Cu}                               */)\
+_( MOD   , ABCu , "mod"   /* RA = RB % Cu}                               */)\
+_( AND   , ABCu , "and"   /* RA = RB & Cu}                               */)\
+_( OR    , ABCu , "or"    /* RA = RB | Cu}                               */)\
+_( XOR   , ABCu , "xor"   /* RA = RB ^ Cu}                               */)\
+_( SHL   , ABCu , "shl"   /* RA = RB << Cu                               */)\
+_( SHRS  , ABCu , "shrs"  /* RA = RB >> Cu sign-replicating (arithmetic) */)\
+_( SHRU  , ABCu , "shru"  /* RA = RB >> Cu zero-replicating (logical)    */)\
+\
+_( EQ   , ABCu , "eq"   /* RA = RB == Cu */)\
+_( NEQ  , ABCu , "neq"  /* RA = RB != Cu */)\
+_( LTU  , ABCu , "ltu"  /* RA = RB <  Cu */)\
+_( LTS  , ABCs , "lts"  /* RA = RB <  Cs */)\
+_( LTEU , ABCu , "lteu" /* RA = RB <= Cu */)\
+_( LTES , ABCs , "ltes" /* RA = RB <= Cs */)\
+_( GTU  , ABCu , "gtu"  /* RA = RB >  Cu */)\
+_( GTS  , ABCs , "gts"  /* RA = RB >  Cs */)\
+_( GTEU , ABCu , "gteu" /* RA = RB >= Cu */)\
+_( GTES , ABCs , "gtes" /* RA = RB >= Cs */)\
+\
+_( BR    , ABs  , "br"    /* if RA!=0 PC += Bs */)\
+_( BRZ   , ABs  , "brz"   /* if RA==0 PC += Bs */)\
+_( BRLT  , ABCs , "brlt"  /* if RA<RB PC += Cs */)\
+\
+_( CALL  , Au   , "call"  /* R0...R7 = push(PC); PC=Au */)\
+_( SCALL , Au   , "scall" /* R0...R7 = system_call(Au) */)\
+_( JUMP  , Au   , "jump"  /* PC = Au                   */)\
+_( RET   , _    , "ret"   /* PC = pop()                */)\
+\
+_( WRITE , ABCDu , "write"  /* RA = write addr=RB size=R(C) fd=Du */)\
+\
 // end RSM_FOREACH_OP
 
 // opcode test macros. Update when adding affected opcodes
-#define RSM_OP_IS_BR(op)   (rop_BRZ <= (op) && (op) <= rop_BRNZ)
+#define RSM_OP_IS_BR(op)   (rop_BR <= (op) && (op) <= rop_BRLT)
 
 // size and position of instruction arguments
 #define RSM_SIZE_OP  8

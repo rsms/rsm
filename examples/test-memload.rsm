@@ -1,0 +1,44 @@
+// this tests memory loads -- returns 0 on success
+fun main() {
+
+  // i64
+  R1 = -1       // 0xffffffffffffffff
+  store  R1 R31 -8  // store 0xffffffffffffffff to stack
+  load   R5 R31 -8  // R5 should be 0xffffffffffffffff
+    R0 = neq R5 R1 ; br R0 fail
+  load4u R5 R31 -8  // R5 should be 0x00000000ffffffff
+    R1 = R1 >> 32 ; R0 = neq R5 R1 ; br R0 fail
+  load2u R5 R31 -8  // R5 should be 0x000000000000ffff
+    R1 = 0xffff ; R0 = neq R5 R1 ; br R0 fail
+  load1u R5 R31 -8  // R5 should be 0x00000000000000ff
+    R1 = 0xff ; R0 = neq R5 R1 ; br R0 fail
+
+  // i32
+  R1 = -1 ; R1 = R1 >> 32 // 0xffffffff
+  store4 R1 R31 -4  // store 0xffffffff to stack
+  load4u R5 R31 -4  // R5 should be 0xffffffff
+    R0 = neq R5 R1 ; br R0 fail
+  load2u R5 R31 -4  // R5 should be 0x0000ffff
+    R1 = 0xffff ; R0 = neq R5 R1 ; br R0 fail
+  load1u R5 R31 -4  // R5 should be 0x000000ff
+    R1 = 0xff ; R0 = neq R5 R1 ; br R0 fail
+
+  // i16
+  R1 = 0xffff
+  store2 R1 R31 -2  // store 0xffff to stack
+  load2u R5 R31 -2  // R5 should be 0xffff
+    R0 = neq R5 R1 ; br R0 fail
+  load1u R5 R31 -2  // R5 should be 0x00ff
+    R1 = 0xff ; R0 = neq R5 R1 ; br R0 fail
+
+  // i8
+  R1 = 0xff
+  store1 R1 R31 -1  // store 0xff to stack
+  load1u R5 R31 -1  // R5 should be 0xff
+    R0 = neq R5 R1 ; br R0 fail
+
+  R0 = 0
+  ret
+fail:
+  R0 = 0xbad
+}

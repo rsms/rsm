@@ -77,6 +77,7 @@ enum vmerror {
   VM_E_OOB_LOAD,
   VM_E_OOB_STORE,
   VM_E_OPNOI,
+  VM_E_SHIFT_EXP,
 } RSM_END_ENUM(vmerror)
 
 static void _vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
@@ -91,6 +92,7 @@ static void _vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
     S(VM_E_OOB_LOAD,        "memory load out of bounds %llx (align %llu B)", arg1, arg2)
     S(VM_E_OOB_STORE,       "memory store out of bounds %llx (align %llu B)", arg1, arg2)
     S(VM_E_OPNOI,           "op %s does not accept immediate value", rop_name(arg1))
+    S(VM_E_SHIFT_EXP,       "shift exponent %llu is too large", arg1)
   }
   #undef S
   abuf_c(s, '\n');
@@ -134,8 +136,15 @@ static void _vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
 #define vmerr(...) _vmerr(VMARGS, __vmerr_DISP(__vmerr,__VA_ARGS__))
 #define check(cond, ...) if UNLIKELY(!(cond)) vmerr(__VA_ARGS__)
 #else
-#define check(cond, ...) ((void)0)
+  #define check(cond, ...) ((void)0)
 #endif // RSM_SAFE
+
+#define check_loadstore(addr, size, ealign, eoob) ({ \
+  check(IS_ALIGN2(addr, size), ealign, addr, size); \
+  check(addr + size <= vs->memsize, eoob, addr, size); \
+})
+
+#define check_shift(exponent) check((exponent) < 64, VM_E_SHIFT_EXP, exponent)
 
 static void scall(VMPARAMS, u8 ar, rinstr in) {
   // dlog("scall #%llu arg1 0x%llx", RA, RBrs);
@@ -146,35 +155,44 @@ static void scall(VMPARAMS, u8 ar, rinstr in) {
   // }
 }
 
-static u64 load(VMPARAMS, u64 addr, usize nbits) {
-  check(IS_ALIGN2(addr, nbits), VM_E_UNALIGNED_LOAD, addr, nbits);
-  check(addr+nbits <= vs->memsize, VM_E_OOB_LOAD, addr, nbits);
-  return *(u64*)(membase + addr);
-}
+// u64 LOAD(TYPE, usize addr)
+#define LOAD(TYPE, addr) ({ \
+  usize a__ = (usize)(addr); TYPE t__; \
+  check_loadstore(a__, sizeof(TYPE), VM_E_UNALIGNED_LOAD, VM_E_OOB_LOAD); \
+  void* p = membase + a__; \
+  u64 val = (u64)*_Generic(t__, u64:(u64*)p, u32:(u32*)p, u16:(u16*)p, u8:(u8*)p ); \
+  /*dlog("load  %s mem[0x%lx] => 0x%llx", #TYPE, a__, val);*/ \
+  val; \
+})
 
-static void store(VMPARAMS, u64 addr, usize nbits, u64 val) {
-  check(IS_ALIGN2(addr, nbits), VM_E_UNALIGNED_STORE, addr, nbits);
-  check(addr+nbits <= vs->memsize, VM_E_OOB_STORE, addr, nbits);
-  *(u64*)(membase + addr) = val;
-}
+// void STORE(TYPE, usize addr, u64 value)
+#define STORE(TYPE, addr, value) ({ \
+  usize a__ = (usize)(addr); TYPE v__ = (TYPE)(value); \
+  check_loadstore(a__, sizeof(TYPE), VM_E_UNALIGNED_STORE, VM_E_OOB_STORE); \
+  void* p = membase + a__; \
+  /*dlog("store %s mem[0x%lx] <= 0x%llx", #TYPE, a__, (u64)v__);*/ \
+  *_Generic(v__, u64:(u64*)p, u32:(u32*)p, u16:(u16*)p, u8:(u8*)p ) = v__; \
+})
 
-static void push(VMPARAMS, usize nbits, u64 val) {
+static void push(VMPARAMS, usize size, u64 val) {
   usize addr = SP;
-  check(addr >= nbits && addr - nbits >= vs->stacktop, VM_E_STACK_OVERFLOW, addr);
-  addr -= nbits;
+  check(addr >= size && addr - size >= vs->stacktop, VM_E_STACK_OVERFLOW, addr);
+  addr -= size;
   SP = addr;
-  store(VMARGS, addr, nbits, val);
+  STORE(u64, addr, val);
 }
 
-static u64 pop(VMPARAMS, usize nbits) {
+static u64 pop(VMPARAMS, usize size) {
   usize addr = SP;
-  check(USIZE_MAX-addr >= nbits && addr+nbits <= vs->stackbase, VM_E_STACK_OVERFLOW, addr);
-  SP = addr + nbits;
-  return load(VMARGS, addr, nbits);
+  check(USIZE_MAX-addr >= size && addr+size <= vs->stackbase, VM_E_STACK_OVERFLOW, addr);
+  SP = addr + size;
+  return LOAD(u64, addr);
 }
+
+isize write(int fd, const void* buf, usize nbyte); // libc
 
 static void vmexec(VMPARAMS) {
-  // This is the core interpreter loop.
+  // This is the interpreter loop.
   // It executes instructions until the entry function returns or an error occurs.
   //
   // First, we define how we will map an instruction to its corresponding handler code.
@@ -245,9 +263,21 @@ static void vmexec(VMPARAMS) {
     // operation handlers -- each op should have a do_OP(lastarg) macro defined here.
     // Ops that use the i(mmediate) flag will have their "do" macro used twice (reg & imm)
     // These macros are used like this: "case op_and_i: do_OP(lastarg); break;"
-    #define do_COPY(B)  RA = B
-    #define do_LOAD(C)  RA = load(VMARGS, (u64)((i64)RB + (i64)C), 8)
-    #define do_STORE(C) store(VMARGS, (u64)((i64)RB + (i64)C), 8, RA)
+    #define do_COPY(B) RA = B
+
+    #define do_LOAD(C)   RA = LOAD(u64, (usize)((i64)RB+(i64)C))
+    #define do_LOAD4U(C) RA = LOAD(u32, (usize)((i64)RB+(i64)C)) // zero-extend i32 to i64
+    #define do_LOAD4S(C) RA = LOAD(u32, (usize)((i64)RB+(i64)C)) // sign-extend i32 to i64
+    #define do_LOAD2U(C) RA = LOAD(u16, (usize)((i64)RB+(i64)C)) // zero-extend i16 to i64
+    #define do_LOAD2S(C) RA = LOAD(u16, (usize)((i64)RB+(i64)C)) // sign-extend i16 to i64
+    #define do_LOAD1U(C) RA = LOAD(u8,  (usize)((i64)RB+(i64)C)) // zero-extend i8 to i64
+    #define do_LOAD1S(C) RA = LOAD(u8,  (usize)((i64)RB+(i64)C)) // sign-extend i8 to i64
+
+    #define do_STORE(C)  STORE(u64, (usize)((i64)RB+(i64)C), RA)
+    #define do_STORE4(C) STORE(u32, (usize)((i64)RB+(i64)C), RA) // wrap i64 to i32
+    #define do_STORE2(C) STORE(u16, (usize)((i64)RB+(i64)C), RA) // wrap i64 to i16
+    #define do_STORE1(C) STORE(u8,  (usize)((i64)RB+(i64)C), RA) // wrap i64 to i8
+
     #define do_PUSH(A)  push(VMARGS, 8, A)
     #define do_POP(A)   A = pop(VMARGS, 8)
 
@@ -259,19 +289,30 @@ static void vmexec(VMPARAMS) {
     #define do_AND(C)  RA = RB & C
     #define do_OR(C)   RA = RB | C
     #define do_XOR(C)  RA = RB ^ C
-    #define do_SHL(C)  RA = RB << C
-    #define do_SHRS(C) RA = (u64)((i64)RB >> C)
-    #define do_SHRU(C) RA = RB >> C
+    #define do_SHL(C)  check_shift(C); RA = RB << C
+    #define do_SHRS(C) check_shift(C); RA = (u64)((i64)RB >> C)
+    #define do_SHRU(C) check_shift(C); RA = RB >> C
 
-    #define do_CMPEQ(C) RA = RB == C
-    #define do_CMPLT(C) RA = RB < C
-    #define do_CMPGT(C) RA = RB > C
+    #define do_EQ(C)   RA = RB == C
+    #define do_NEQ(C)  RA = RB != C
+    #define do_LTU(C)  RA = RB < C
+    #define do_LTS(C)  RA = (i64)RB < (i64)C
+    #define do_LTEU(C) RA = RB <= C
+    #define do_LTES(C) RA = (i64)RB <=(i64)C
+    #define do_GTU(C)  RA = RB > C
+    #define do_GTS(C)  RA = (i64)RB > (i64)C
+    #define do_GTEU(C) RA = RB >= C
+    #define do_GTES(C) RA = (i64)RB >= (i64)C
 
+    #define do_BR(B)    if (RA)      pc = (isize)((i64)pc + (i64)B)
     #define do_BRZ(B)   if (RA == 0) pc = (isize)((i64)pc + (i64)B)
-    #define do_BRNZ(B)  if (RA != 0) pc = (isize)((i64)pc + (i64)B)
+    #define do_BRLT(C)  if (RA < RB) pc = (isize)((i64)pc + (i64)C)
+
     #define do_JUMP(A)  pc = (usize)A
     #define do_SCALL(A) scall(VMARGS, A, in)
     #define do_CALL(A)  push(VMARGS, 8, (u64)PC); pc = (usize)A
+
+    #define do_WRITE(D) RA = (u64)write(D, membase + RB, RC) // (addr=RB size=RC fd=D)
 
     #define do_RET() { \
       pc = (usize)pop(VMARGS, 8); /* load return address from stack */ \
@@ -319,10 +360,21 @@ void rsm_vmexec(u64* iregs, rinstr* inv, usize inlen, void* membase, usize memsi
     membase = (void*)ma;
     dlog("adjusting membase+%lu memsize-%lu (address alignment)", (usize)diff, (usize)diff);
   }
-  usize datasize = 0; // TODO: read from ROM
+  usize datasize  = 64; // TODO: read from ROM
   usize stacktop  = ALIGN2(datasize, STK_ALIGN);
-  usize stackbase = stacktop + ALIGN2_FLOOR(MIN(memsize/2, 4096), STK_ALIGN);
-  dlog("memsize %zu B, stack{top,base} %zu...%zu", memsize, stacktop, stackbase);
+  usize stackbase = stacktop + ALIGN2_FLOOR(MIN((memsize-datasize)/2, 4096), STK_ALIGN);
+  usize stacksize = stackbase - stacktop;
+
+  dlog(
+    "Memory layout: (%.3f MB total)\n"
+    "   ┌─────────────────────┬────────────────────┬───────────────────────┐\n"
+    "   │ data %12lu B │ %8lu B ← stack │ heap → %12lu B │\n"
+    "   ├─────────────────────┼────────────────────┼───────────────────────┘\n"
+    "   0                   0x%-8lx           0x%-8lx\n",
+    (double)memsize/1024.0/1024.0,
+    datasize, stacksize, /*heapsize*/memsize - datasize - stacksize,
+    stacktop, stackbase
+  );
 
   vmstate vs = {
     .inlen    = inlen,
@@ -334,6 +386,10 @@ void rsm_vmexec(u64* iregs, rinstr* inv, usize inlen, void* membase, usize memsi
   // initialize stack pointer and push main return address on stack
   SP = (u64)stackbase;
   push(&vs, iregs, inv, membase, 0, 8, MAIN_RET_PC);
+
+  // initialize data (TODO: copy from ROM)
+  memset(membase, 0, datasize);
+  memcpy(membase, "hello\n", 6);
 
   logstate_header();
   return vmexec(&vs, iregs, inv, membase, 0);

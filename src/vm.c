@@ -363,7 +363,6 @@ void rsm_vmexec(u64* iregs, rinstr* inv, usize inlen, void* membase, usize memsi
   usize datasize  = 64; // TODO: read from ROM
   usize stacktop  = ALIGN2(datasize, STK_ALIGN);
   usize stackbase = stacktop + ALIGN2_FLOOR(MIN((memsize-datasize)/2, 4096), STK_ALIGN);
-  usize stacksize = stackbase - stacktop;
 
   dlog(
     "Memory layout: (%.3f MB total)\n"
@@ -372,7 +371,7 @@ void rsm_vmexec(u64* iregs, rinstr* inv, usize inlen, void* membase, usize memsi
     "   ├─────────────────────┼────────────────────┼───────────────────────┘\n"
     "   0                   0x%-8lx           0x%-8lx\n",
     (double)memsize/1024.0/1024.0,
-    datasize, stacksize, /*heapsize*/memsize - datasize - stacksize,
+    datasize, /*stacksize=*/stackbase - stacktop, /*heapsize=*/memsize - stackbase,
     stacktop, stackbase
   );
 

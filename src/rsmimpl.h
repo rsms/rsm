@@ -56,10 +56,8 @@ typedef unsigned long       usize;
   #define UINTPTR_MAX USIZE_MAX
 #endif
 
-#ifdef __cplusplus
-  #define NORETURN noreturn
-#else
-  #define NORETURN      _Noreturn
+#ifndef __cplusplus
+  #define noreturn      _Noreturn
   #define auto          __auto_type
   #define static_assert _Static_assert
 #endif
@@ -460,7 +458,7 @@ rerror read_stdin_data(rmem, usize maxlen, void** p_put, usize* len_out);
 
 const char* rerror_str(rerror);
 
-NORETURN void _panic(const char* file, int line, const char* fun, const char* fmt, ...)
+noreturn void _panic(const char* file, int line, const char* fun, const char* fmt, ...)
   ATTR_FORMAT(printf, 4, 5);
 
 usize mem_pagesize();

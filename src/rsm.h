@@ -366,14 +366,19 @@ static void* nullable rmem_alloc(rmem m, usize size);
 static void* nullable rmem_resize(rmem m, void* nullable p, usize oldsize, usize newsize);
 static void rmem_free(rmem m, void* p, usize size);
 
+
 RSM_ATTR_MALLOC RSM_WARN_UNUSED_RESULT
 inline static void* nullable rmem_alloc(rmem m, usize size) {
   return m.a(m.state, NULL, 0, size);
 }
+
 RSM_ATTR_MALLOC RSM_WARN_UNUSED_RESULT
-inline static void* nullable rmem_resize(rmem m, void* nullable p, usize oldsize, usize newsize) {
+inline static void* nullable rmem_resize(
+  rmem m, void* nullable p, usize oldsize, usize newsize)
+{
   return m.a(m.state, p, oldsize, newsize);
 }
+
 inline static void rmem_free(rmem m, void* p, usize size) {
   #if __has_attribute(unused)
   __attribute__((unused))

@@ -1,266 +1,165 @@
-// rsm CLI program (or WASM API, when targeting WASM)
+// rsm CLI program
 // SPDX-License-Identifier: Apache-2.0
+#if !defined(__wasm__) || defined(__wasi__)
 #include "rsmimpl.h"
+#ifndef RSM_NO_LIBC
+  #include <stdio.h>
+  #include <stdlib.h>
+  #include <unistd.h>
+#endif
 
-// -----------------------------------------------------------------------------------------
-#if defined(__wasm__) && !defined(__wasi__)
-#define EXPORT __attribute__((visibility("default")))
+static const char* prog = ""; // argv[0]
+static const char* outfile = NULL;
+static bool opt_run = false;
+static bool opt_print_asm = false;
 
-// WASM imports (provided by rsm.js)
-__attribute__((visibility("default"))) void log1(const char* s, usize len);
+#define errmsg(fmt, args...) fprintf(stderr, "%s: " fmt "\n", prog, ##args)
 
-// WASM memory layout
-//        0        __data_end    __heap_base
-//        ┌─────────────┼─────────────┼───────────···
-//        │ data        │ stack       │ heap
-//        └─────────────┴─────────────┴───────────···
-extern u8 __heap_base, __data_end; // symbols provided by wasm-ld
-
-// WASM instance state
-static rmem                  mem; // the one memory allocator, owning the wasm heap
-static u64                   iregs[32] = {0}; // register state
-static char*                 tmpbuf;          // for temporary formatting etc
-static usize                 tmpbufcap;
-struct { // wasm_compile result
-  usize   c;
-  rinstr* v;
-  const char* nullable errmsg;
-} cresult;
-
-// winit is called by rsm.js to initialize the WASM instance state
-EXPORT void winit(usize memsize) {
-  void* heap = &__heap_base;
-  usize heapsize = (memsize < (usize)heap) ? 0 : memsize - (usize)heap;
-
-  #if DEBUG
-  // we haven't allocated tmpbuf yet, so use stack space for early log messages
-  char tmpbufstk[512];
-  tmpbufcap = sizeof(tmpbufstk);
-  tmpbuf = tmpbufstk;
-  void* stackbase = &__data_end;
-  log("data: %zu B, stack: %p-%p (%zu B), heap %p (%zu B)",
-    (usize)stackbase, stackbase, heap, (usize)(heap - stackbase), heap, heapsize);
-  #endif
-
-  // first chunk of heap used for tmpbuf
-  tmpbufcap = (heapsize > 4096*4) ? 4096 : 512;
-  tmpbuf = heap;
-  heap += tmpbufcap;
-  heapsize -= tmpbufcap;
-
-  // rest of heap is owned by our one allocator
-  mem = rmem_mkbufalloc(heap, heapsize);
+static int setreg(u64* iregs, const char* s) {
+  usize p = 0, len = strlen(s);
+  while (p < len && s[p++] != '=') {}
+  if (p == len)
+    goto malformed;
+  const char* vals = s + p;
+  usize vallen = len - p;
+  int base = 10;
+  u64 regno = 0;
+  if (vallen > 2 && vals[0] == '0' && (vals[1] == 'x' || vals[1] == 'X')) {
+    base = 16;
+    vals += 2;
+    vallen -= 2;
+  }
+  if (parseu64(s, p-1, 10, &regno, 0xff) != 0)
+    goto malformed;
+  if (regno > 31) {
+    errmsg("invalid register -R%llu", regno);
+    return 1;
+  }
+  if (parseu64(vals, vallen, base, &iregs[regno], 0xffffffffffffffff) == 0)
+    return 0;
+malformed:
+  errmsg("malformed option -R%s (expected e.g. -R3=123 or -R3=0xfAcE)", s);
+  return 1;
 }
 
-void logv(const char* _Nonnull format, va_list ap) {
-  int n = vsnprintf(tmpbuf, tmpbufcap, format, ap);
-  if (n < 0) n = 0;
-  log1(tmpbuf, MIN((usize)n, tmpbufcap));
+static void usage() {
+  printf(
+    "RSM virtual machine <https://rsms.me/rsm/>\n"
+    "Usage: %s [options] [<asmfile>]\n"
+    "Options:\n"
+    "  -h           Show help and exit\n"
+    "  -r           Run the program (implied unless -o or -p are set)\n"
+    "  -p           Print assembly on stdout\n"
+    "  -R<N>=<val>  Initialize register R<N> to <val> (e.g. -R0=4, -R3=0xff)\n"
+    "  -o <file>    Write compiled ROM to <file>\n"
+    "<asmfile>\n"
+    "  If not given or if it's \"-\", read from stdin (stdin can't be a TTY.)\n"
+    "Example:\n"
+    "  echo 'fun main() { R0=R1*R1; }' | out/rsm -R1=18\n"
+    ,prog);
 }
 
-EXPORT void* wmalloc(usize nbyte) { return rmem_alloc(mem, nbyte); }
-EXPORT void* wmresize(void* p, usize newsize, usize oldsize) {
-  return rmem_resize(mem, p, newsize, oldsize); }
-EXPORT void wmfree(void* p, usize size) { return rmem_free(mem, p, size); }
-
-static bool diaghandler(const rdiag* d, void* _) {
-  cresult.errmsg = d->msg;
-  return d->code != 1; // stop on error
+static int parse_cli_opts(int argc, char*const* argv, u64* iregs) {
+  prog = argv[0];
+  extern char* optarg; // global state in libc... coolcoolcool
+  extern int optind, optopt;
+  int nerrs = 0;
+  for (int c; (c = getopt(argc, argv, ":hrpR:o:")) != -1;) switch(c) {
+    case 'h': usage(); exit(0);
+    case 'r': opt_run = true; break;
+    case 'p': opt_print_asm = true; break;
+    case 'R': nerrs += setreg(iregs, optarg); break;
+    case 'o': outfile = optarg; break;
+    case ':': errmsg("option -%c requires a value", optopt); nerrs++; break;
+    case '?': errmsg("unrecognized option -%c", optopt); nerrs++; break;
+  }
+  if (nerrs) exit(1);
+  if (!outfile && !opt_print_asm) opt_run = true;
+  return optind;
 }
 
-EXPORT void* wcompile(const char* srcname, const char* srcdata, usize srclen) {
-  rcomp comp = {
-    .mem         = mem,
-    .srcdata     = srcdata,
-    .srclen      = srclen,
-    .srcname     = srcname,
-    .diaghandler = &diaghandler,
-  };
-  cresult.errmsg = NULL;
-  cresult.c = rsm_compile(&comp, mem, &cresult.v);
-  return &cresult;
+static bool load_srcfile(rcomp* c, const char* nullable infile) {
+  if (infile) {
+    c->srcname = infile;
+    rerror err = mmapfile(infile, (void**)&c->srcdata, &c->srclen);
+    if (err != 0) {
+      fprintf(stderr, "%s: %s\n", infile, rerror_str(err));
+      return false;
+    }
+    return true;
+  }
+  c->srcname = "stdin";
+  usize limit = 1024*1024; // 1MB
+  rerror err = read_stdin_data(c->mem, limit, (void**)&c->srcdata, &c->srclen);
+  if (err == 0)
+    return true;
+  if (err == rerr_badfd) { // stdin is a tty
+    errmsg("missing <srcfile>");
+  } else {
+    errmsg("error reading stdin: %s", rerror_str(err));
+  }
+  return false;
 }
 
-EXPORT usize wfmtprog(char* buf, usize bufcap, rinstr* nullable inv, u32 inc) {
-  return rsm_fmtprog(buf, bufcap, inv, inc);
+static void print_asm(rmem mem, rinstr* iv, usize icount) {
+  char* buf = rmem_alloc(mem, 512); if (!buf) panic("out of memory");
+  rfmtflag fl = isatty(1) ? RSM_FMT_COLOR : 0;
+  usize n = rsm_fmtprog(buf, 512, iv, icount, fl);
+  if (n >= 512) {
+    buf = rmem_resize(mem, buf, 512, n + 1); if (!buf) panic("out of memory");
+    rsm_fmtprog(buf, n, iv, icount, fl);
+  }
+  fwrite(buf, n, 1, stdout); putc('\n', stdout);
 }
 
-EXPORT void wvmexec(u64* iregs, rinstr* inv, u32 inc) {
-  return rsm_vmexec(iregs, inv, inc);
-}
-
-EXPORT u64* wvmiregs() {
-  return iregs;
-}
-
-#else // !__wasm__
-// -----------------------------------------------------------------------------------------
-// CLI
-
-// diaghandler is called by the assembler when an error occurs
 static bool diaghandler(const rdiag* d, void* userdata) {
-  log("%s", d->msg);
+  // called by the compiler when an error occurs
+  fwrite(d->msg, strlen(d->msg), 1, stderr); putc('\n', stderr);
   return true; // keep going (show all errors)
 }
 
-static void usage(const char* prog) {
-  log("usage: %s <srcfile> [R0 [R1 ...]]", prog);
-}
-
-
-#if 0
-ATTR_UNUSED static void test_stuff() {
-  rmem mem = rmem_mkvmalloc(0);
-  char buf[512]; // for logging stuff
-  u64 iregs[32] = {0};
-
-  rinstr* ip = rmem_alloc(mem, sizeof(rinstr)*32);
-  memset(ip, 0, sizeof(rinstr)*32);
-  u32 pc = 0;
-  // fun factorial (i32) i32
-  //   b0:              //
-  //     r1 = r0        // ACC = n (argument 0)
-  //     r0 = 1         // RES (return value 0)
-  //     brz r1 end     // if n==0 goto end
-  //   b1:              // <- [b0] b1
-  //     r0 = mul r1 r0 // RES = ACC * RES
-  //     r1 = sub r1 1  // ACC = ACC - 1
-  //     brnz r1  b1    // if n!=0 goto b1
-  //   end:             // <- b0 [b1]
-  //     ret            // RES is at r0
-  //
-  ip[pc++] = RSM_MAKE_AB(rop_COPY, 1, 0); // r1 = r0
-  ip[pc++] = RSM_MAKE_ABu(rop_COPY, 0, 1); // r0 = 1
-  ip[pc++] = RSM_MAKE_ABs(rop_BRZ, 1, 3); // brz r1 end -- PC+3=end (TODO patch marker)
-  u32 b1 = pc; // b1:
-  ip[pc++] = RSM_MAKE_ABC(rop_MUL, 0, 1, 0); // r0 = mul r1 r0
-  ip[pc++] = RSM_MAKE_ABCu(rop_SUB, 1, 1, 1); // r1 = sub r1 1
-  ip[pc]   = RSM_MAKE_ABs(rop_BRNZ, 1, -(pc+1-b1)); // brnz r1 b1 (TODO sign)
-  pc++;
-  // end:
-  ip[pc++] = RSM_MAKE__(rop_RET); // ret
-
-  // print function
-  dlog("function size: %lu B", pc*sizeof(rinstr));
-  rsm_fmtprog(buf, sizeof(buf), ip, pc);
-  log("%s", buf);
-
-  // eval
-  iregs[0] = 3; // arg 1
-  dlog("evaluating factorial(%lld)", (i64)iregs[0]);
-  rsm_vmexec(iregs, ip, pc);
-  dlog("result: %llu", iregs[0]);
-
-  const char* src =
-    "fun factorial (n i32, j i32) a i32 {\n"
-    "    R1 = R0        // ACC = n (argument 0)\n"
-    "    R0 = 1         // RES (return value 0)\n"
-    "    brz R1 end     // if n==0 goto end\n"
-    "  b1:              // <- [b0] b1\n"
-    "    R0 = mul R1 R0 // RES = ACC * RES\n"
-    "    R1 = sub R1 1  // ACC = ACC - 1\n"
-    "    brnz R1  b1    // if n!=0 goto b1\n"
-    "  end:             // <- b0 [b1]\n"
-    "    ret            // RES is at R0\n"
-    "}\n"
-    // "    123 -456 0xface 0b101 F31\n"
-    // //   U+1F469 woman, U+1F3FE skin tone mod 5, U+200D zwj, U+1F680 rocket = astronaut
-    // "    \xF0\x9F\x91\xA9\xF0\x9F\x8F\xBE\xE2\x80\x8D\xF0\x9F\x9A\x80\n"
-  ;
-  rcomp comp = {
-    .mem         = mem,
-    .srcdata     = src,
-    .srclen      = strlen(src),
-    .srcname     = "factorial",
-    .diaghandler = &diaghandler,
-  };
-  rinstr* iv = NULL;
-  usize icount = rsm_compile(&comp, mem, &iv);
-  rsm_fmtprog(buf, sizeof(buf), iv, icount);
-  if (!icount)
-    return;
-  log("assembled some sweet vm code:\n%s", buf);
-
-  rmem_freealloc(mem);
-}
-#else
-  #define test_stuff() ((void)0)
-#endif
-
-
-RSMAPI int main(int argc, const char** argv) {
+int main(int argc, char*const* argv) {
   fastrand_seed((u32)(uintptr)argv); // TODO: use time or something actually random
-  test_stuff();
 
-  for (int i = 0; i < argc; i++) {
-    if (strcmp(argv[i], "-h") == 0) {
-      usage(argv[0]);
-      return 0;
-    }
-  }
-
-  // set R0..R7 to argv[2..9]
+  // vm execution state
   u64 iregs[32] = {0};
-  for (int i = 2; i < MIN(argc, 10); i++) {
-    rerror err = parseu64(argv[i], strlen(argv[i]), 10, &iregs[i-2], 0xffffffffffffffff);
-    if (err != 0) {
-      log("cli argument %s is not an integer number", argv[i]);
-      return 1;
-    }
+
+  // parse command-line options
+  int argi = parse_cli_opts(argc, argv, iregs);
+  const char* infile = NULL;
+  if (argi < argc) { // <srcfile> [R0 [R1 ...]]
+    infile = strcmp(argv[argi],"-")==0 ? NULL : argv[argi];
+    if (argi < argc-1) errmsg("ignoring %d extra command-line arguments", argc-1 - argi);
   }
 
+  // initialize memory allocator
   rmem mem = rmem_mkvmalloc(0);
-  rcomp comp = {
-    .mem         = mem,
-    .srcname     = "stdin",
-    .diaghandler = diaghandler,
-  };
+  if (mem.state == NULL) panic("failed to allocate virtual memory");
 
-  // open input file or read stdin
-  if (argc > 1 && strcmp(argv[1], "-") != 0) {
-    comp.srcname = argv[1];
-    rerror err = mmapfile(argv[1], (void**)&comp.srcdata, &comp.srclen);
-    if (err != 0) {
-      log("%s: %s", argv[1], rerror_str(err));
-      return 1;
-    }
-  } else {
-    rerror err = read_stdin_data(mem, 1024*1024, (void**)&comp.srcdata, &comp.srclen);
-    if (err) { // stdin is a tty
-      if (err == rerr_badfd) {
-        usage(argv[0]);
-      } else {
-        log("stdin: %s", rerror_str(err));
-      }
-      return 1;
-    }
-  }
+  // create compiler state and load source from file or stdin
+  rcomp comp = { .mem = mem, .diaghandler = diaghandler };
+  if (!load_srcfile(&comp, infile))
+    exit(1);
 
   // compile
   rinstr* iv = NULL;
   usize icount = rsm_compile(&comp, mem, &iv);
-  if (comp.errcount)
+  if (comp.errcount) // errors has been reported by diaghandler
     return 1;
   if (icount == 0) {
-    log("empty program");
+    errmsg("empty program");
     return 1;
   }
 
-  // log vm assembly
-  char* buf = rmem_alloc(mem, 128);
-  usize n = rsm_fmtprog(buf, 512, iv, icount);
-  if (n >= 512) {
-    buf = rmem_alloc(mem, n) + 1;
-    rsm_fmtprog(buf, n, iv, icount);
-  }
-  log("assembled some sweet vm code:\n%s", buf);
+  if (opt_print_asm)
+    print_asm(mem, iv, icount);
 
-  // execute first function
-  log("evaluating function0(%lld)", (i64)iregs[0]);
-  u8 memory[1024*1024];
-  rsm_vmexec(iregs, iv, icount, memory, sizeof(memory));
-  log("result R0..R7: %llu %llu %llu %llu %llu %llu %llu %llu",
-    iregs[0], iregs[1], iregs[2], iregs[3], iregs[4], iregs[5], iregs[6], iregs[7]);
+  if (opt_run) {
+    u8 memory[1024*1024];
+    rsm_vmexec(iregs, iv, icount, memory, sizeof(memory));
+    printf("%llu\t%llu\t%llu\t%llu\t%llu\t%llu\t%llu\t%llu\n",
+      iregs[0], iregs[1], iregs[2], iregs[3], iregs[4], iregs[5], iregs[6], iregs[7]);
+  }
 
   return 0;
 }

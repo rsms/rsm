@@ -395,7 +395,7 @@ bool abuf_endswith(const abuf* s, const char* str, usize len) {
 }
 
 
-NORETURN void _panic(const char* file, int line, const char* fun, const char* fmt, ...) {
+noreturn void _panic(const char* file, int line, const char* fun, const char* fmt, ...) {
   #ifdef RSM_NO_LIBC
     log("panic");
   #else

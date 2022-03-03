@@ -194,30 +194,7 @@ struct gref {
 
 
 static const char* kBlock0Name = "b0"; // name of first block
-
-#if HASHCODE_MAX >= 0xFFFFFFFFFFFFFFFFu
-static const smapent kwmap_entries[128] = {
- {"push",4,3085},{0},{0},{"gtu",3,7949},{0},{"load1s",6,1805},{0},{"shl",3,5645},
- {0},{"eq",2,6413},{0},{"br",2,8973},{0},{"i16",3,36},{0},{0},{"store2",6,2573},
- {0},{"copy",4,13},{"scall",5,9997},{0},{"i8",2,35},{0},{"load4u",6,525},{0},{0},
- {0},{0},{0},{0},{"lts",3,7181},{0},{0},{0},{"gtes",4,8717},{0},{0},{0},
- {"mul",3,4109},{"sub",3,3853},{0},{0},{"and",3,4877},{0},{"or",2,5133},{0},{0},
- {"pop",3,3341},{0},{0},{0},{"store",5,2061},{"brlt",4,9485},{"load2u",6,1037},
- {0},{0},{0},{0},{"lteu",4,7437},{0},{0},{"ltes",4,7693},{"add",3,3597},{0},
- {"mod",3,4621},{0},{0},{"gteu",4,8461},{0},{0},{0},{0},{0},{0},{0},
- {"write",5,10765},{"div",3,4365},{0},{"load2s",6,1293},{"i32",3,37},
- {"gts",3,8205},{0},{0},{0},{0},{0},{0},{"fun",3,33},{0},{"load",4,269},{0},{0},
- {0},{"shrs",4,5901},{"shru",4,6157},{"brz",3,9229},{0},{"neq",3,6669},{0},
- {"call",4,9741},{0},{"xor",3,5389},{0},{0},{0},{0},{"load1u",6,1549},{0},{0},
- {"store1",6,2829},{"ret",3,10509},{0},{"store4",6,2317},{0},{0},
- {"jump",4,10253},{0},{"i64",3,38},{0},{0},{"ltu",3,6925},{0},{"i1",2,34},{0},
- {0},{0},{"load4s",6,781},{0}};
-static const struct{u32 cap,len,gcap;maplf lf;hashcode hash0;const smapent* ep;}
-kwmap_data={128,49,96,2,0x3705ce41,kwmap_entries};
-static const smap* kwmap = (const smap*)&kwmap_data;
-#else /* can't use static map; check_kwmap will build one */
-static const smap* kwmap;
-#endif
+static smap kwmap = {0}; // keywords map
 
 
 // istypetok returns true if t represents (or begins the description of) a type
@@ -384,7 +361,7 @@ static void sname(pstate* p) {
     return;
   }
   p->insertsemi = true;
-  uintptr* vp = smap_lookup(kwmap, p->tokstart, toklen(p)); // look up keyword
+  uintptr* vp = smap_lookup(&kwmap, p->tokstart, toklen(p)); // look up keyword
   if (!vp)
     return;
   p->tok = *vp & 0xff;
@@ -1430,46 +1407,48 @@ static usize codegen(rcomp* c, node* module, rmem imem, rinstr** resp) {
   return g->iv.len;
 }
 
-
 void rcomp_dispose(rcomp* c) {
   gstate* g = c->_gstate;
   if (!g)
     return;
-
   if (g->fn)
     rarray_free(gref, &g->fn->ulv, c->mem);
-
   for (u32 i = 0; i < g->funs.len; i++) {
     gfun* fn = rarray_at(gfun, &g->funs, i);
     rarray_free(gblock, &fn->blocks, c->mem);
   }
-
   rarray_free(usize, &g->ufv, c->mem);
   rarray_free(usize, &g->funs, c->mem);
   smap_dispose(&g->funm);
-
   #ifdef DEBUG
   memset(g, 0, sizeof(gstate));
   #endif
-
   rmem_free(c->mem, g, sizeof(gstate));
 }
 
+#if 0 && defined(DEBUG) && !defined(RSM_NO_LIBC)
+  static int cstrsort(const char** p1, const char** p2, void* ctx) {
+    return strcmp(*p1, *p2);
+  }
+  ATTR_UNUSED static void print_keywords() {
+    const char* list[128];
+    usize n = 0;
+    for (const smapent* e = smap_itstart(&kwmap); smap_itnext(&kwmap, &e); )
+      list[n++] = e->key;
+    rsm_qsort(list, n, sizeof(void*), (int(*)(const void*,const void*,void*))&cstrsort, NULL);
+    for (usize i = 0; i < n; i++)
+      fprintf(stdout, i?" %s":"%s", list[i]);
+    putc('\n', stdout);
+  }
+#else
+  #define print_keywords(...) ((void)0)
+#endif
 
-static void check_kwmap() {
-#if HASHCODE_MAX < 0xFFFFFFFFFFFFFFFFu || defined(DEBUG)
-  static bool didcheck = false; if (didcheck) return; didcheck = true;
-
-  // build kwmap with all keywords
+static void init_kwmap() {
   static u8 memory[4640];
-  static smap kwmap2 = {0}; smap* m = &kwmap2;
   rmem mem = rmem_mkbufalloc(memory, sizeof(memory));
+  smap* m = &kwmap;
   assertnotnull(smap_make(m, mem, kwcount, MAPLF_2)); // increase sizeof(memory)
-  #if HASHCODE_MAX < 0xFFFFFFFFFFFFFFFFu
-    m->hash0 = fastrand();
-  #else
-    m->hash0 = kwmap->hash0;
-  #endif
   uintptr* vp;
   #define _(token, kw) \
     vp = assertnotnull(smap_assign(m, kw, strlen(kw))); \
@@ -1481,53 +1460,17 @@ static void check_kwmap() {
     *vp = (T_OP | ((uintptr)rop_##op << (sizeof(rtok)*8)));
   RSM_FOREACH_OP(_)
   #undef _
-  #if HASHCODE_MAX < 0xFFFFFFFFFFFFFFFFu
-    kwmap = m; // use m since we have no static map
-  #endif
   #ifdef DEBUG
     void* p = rmem_alloc(mem,1);
     if (p) dlog("kwmap uses only %zu B memory -- trim memory", (usize)(p - (void*)memory));
   #endif
-#endif
-#if defined(DEBUG) && HASHCODE_MAX >= 0xFFFFFFFFFFFFFFFFu
-  // check to see if keywords has changed; if kwmap is outdated
-  for (const smapent* e = smap_itstart(m); smap_itnext(m, &e); ) {
-    uintptr* vp = smap_lookup(kwmap, e->key, e->keylen);
-    if (!vp || *vp != e->value) goto differ;
-  }
-  for (const smapent* e = smap_itstart(kwmap); smap_itnext(kwmap, &e); ) {
-    uintptr* vp = smap_lookup(m, e->key, e->keylen);
-    if (!vp || *vp != e->value) goto differ;
-  }
-  return; // kwmap is good
-differ:   // kwmap is outdated
-  #if 1 /* generator disabled -- change to "0" to run it */
-    dlog("————————————————————————————————————————————————————————");
-    dlog("kwmap needs updating — find me and enable the generator");
-    dlog("————————————————————————————————————————————————————————");
-  #else /* generator enabled */
-    dlog("————————————————————————————————————————————————————————");
-    dlog("generating kwmap, running smap_optimize...");
-    u8 tmpmemory[sizeof(memory)];
-    rmem tmpmem = rmem_mkbufalloc(tmpmemory, sizeof(tmpmemory));
-    double score = smap_optimize(m, 200000, tmpmem);
-    dlog("new kwmap hash0 0x%llx, score %f, cap %u, len %u, gcap %u",
-      (u64)m->hash0, score, m->cap, m->len, m->gcap);
-    char buf[4096];
-    smap_cfmt(buf, sizeof(buf), m, "kwmap");
-    log("————————————————————————————————————————————————————————");
-    log("  Please update %s with the following code:", __FILE__);
-    log("————————————————————————————————————————————————————————\n"
-        "\n%s\n\n"
-        "—————————————————————————————————————————————————————————", buf);
-  #endif // generator
-  kwmap = m; // use fresh map
-#endif // DEBUG
+  print_keywords();
 }
 
 // compiler entry point
 usize rsm_compile(rcomp* c, rmem resm, rinstr** resp) {
-  check_kwmap();
+  if UNLIKELY(kwmap.entries == NULL)
+    init_kwmap();
   c->_stop = false;
   c->errcount = 0;
   dlog("assembling \"%s\"", c->srcname);

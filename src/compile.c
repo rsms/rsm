@@ -199,8 +199,8 @@ static const char* kBlock0Name = "b0"; // name of first block
 static const smapent kwmap_entries[128] = {
  {"push",4,3085},{0},{0},{"gtu",3,7949},{0},{"load1s",6,1805},{0},{"shl",3,5645},
  {0},{"eq",2,6413},{0},{"br",2,8973},{0},{"i16",3,36},{0},{0},{"store2",6,2573},
- {0},{"copy",4,13},{"scall",5,10253},{0},{"i8",2,35},{0},{"load4u",6,525},{0},
- {0},{0},{0},{0},{0},{"lts",3,7181},{0},{0},{0},{"gtes",4,8717},{0},{0},{0},
+ {0},{"copy",4,13},{"scall",5,9997},{0},{"i8",2,35},{0},{"load4u",6,525},{0},{0},
+ {0},{0},{0},{0},{"lts",3,7181},{0},{0},{0},{"gtes",4,8717},{0},{0},{0},
  {"mul",3,4109},{"sub",3,3853},{0},{0},{"and",3,4877},{0},{"or",2,5133},{0},{0},
  {"pop",3,3341},{0},{0},{0},{"store",5,2061},{"brlt",4,9485},{"load2u",6,1037},
  {0},{0},{0},{0},{"lteu",4,7437},{0},{0},{"ltes",4,7693},{"add",3,3597},{0},
@@ -208,10 +208,10 @@ static const smapent kwmap_entries[128] = {
  {"write",5,10765},{"div",3,4365},{0},{"load2s",6,1293},{"i32",3,37},
  {"gts",3,8205},{0},{0},{0},{0},{0},{0},{"fun",3,33},{0},{"load",4,269},{0},{0},
  {0},{"shrs",4,5901},{"shru",4,6157},{"brz",3,9229},{0},{"neq",3,6669},{0},
- {"call",4,9997},{0},{"xor",3,5389},{0},{0},{0},{0},{"load1u",6,1549},{0},{0},
- {"store1",6,2829},{"ret",3,10509},{0},{"store4",6,2317},{0},{0},{"jump",4,9741},
- {0},{"i64",3,38},{0},{0},{"ltu",3,6925},{0},{"i1",2,34},{0},{0},{0},
- {"load4s",6,781},{0}};
+ {"call",4,9741},{0},{"xor",3,5389},{0},{0},{0},{0},{"load1u",6,1549},{0},{0},
+ {"store1",6,2829},{"ret",3,10509},{0},{"store4",6,2317},{0},{0},
+ {"jump",4,10253},{0},{"i64",3,38},{0},{0},{"ltu",3,6925},{0},{"i1",2,34},{0},
+ {0},{0},{"load4s",6,781},{0}};
 static const struct{u32 cap,len,gcap;maplf lf;hashcode hash0;const smapent* ep;}
 kwmap_data={128,49,96,2,0x3705ce41,kwmap_entries};
 static const smap* kwmap = (const smap*)&kwmap_data;
@@ -1491,10 +1491,14 @@ static void check_kwmap() {
 #endif
 #if defined(DEBUG) && HASHCODE_MAX >= 0xFFFFFFFFFFFFFFFFu
   // check to see if keywords has changed; if kwmap is outdated
-  for (const smapent* e = smap_itstart(m); smap_itnext(m, &e); )
-    if (smap_lookup(kwmap, e->key, e->keylen) == NULL) goto differ;
-  for (const smapent* e = smap_itstart(kwmap); smap_itnext(kwmap, &e); )
-    if (smap_lookup(m, e->key, e->keylen) == NULL) goto differ;
+  for (const smapent* e = smap_itstart(m); smap_itnext(m, &e); ) {
+    uintptr* vp = smap_lookup(kwmap, e->key, e->keylen);
+    if (!vp || *vp != e->value) goto differ;
+  }
+  for (const smapent* e = smap_itstart(kwmap); smap_itnext(kwmap, &e); ) {
+    uintptr* vp = smap_lookup(m, e->key, e->keylen);
+    if (!vp || *vp != e->value) goto differ;
+  }
   return; // kwmap is good
 differ:   // kwmap is outdated
   #if 1 /* generator disabled -- change to "0" to run it */
@@ -1506,7 +1510,7 @@ differ:   // kwmap is outdated
     dlog("generating kwmap, running smap_optimize...");
     u8 tmpmemory[sizeof(memory)];
     rmem tmpmem = rmem_mkbufalloc(tmpmemory, sizeof(tmpmemory));
-    double score = smap_optimize(m, 5000000, tmpmem);
+    double score = smap_optimize(m, 200000, tmpmem);
     dlog("new kwmap hash0 0x%llx, score %f, cap %u, len %u, gcap %u",
       (u64)m->hash0, score, m->cap, m->len, m->gcap);
     char buf[4096];

@@ -264,8 +264,7 @@ _( WRITE , ABCDu , "write"  /* RA = write addr=RB size=R(C) fd=Du */)\
 #define RSM_MAKE_ABCs(op,a,b,c)    RSM_MAKE_ABCu(op,a,b,((rinstr)(c))    + (RSM_MAX_Cu / 2))
 #define RSM_MAKE_ABCDs(op,a,b,c,d) RSM_MAKE_ABCDu(op,a,b,c,((rinstr)(d)) + (RSM_MAX_Du / 2))
 
-// rop, rop_* -- opcode
-typedef u8 rop;
+typedef u8 rop; // opcode
 enum rop {
   #define _(name, ...) rop_##name,
   RSM_FOREACH_OP(_)
@@ -273,65 +272,39 @@ enum rop {
   RSM_OP_COUNT,
 } RSM_END_ENUM(rop)
 
-// rmem is a memory allocator
-typedef struct rmem rmem;
+typedef struct rmem rmem; // memory allocator
 struct rmem {
-  // a(s,NULL,0,>0) = new, a(s,p,>0,>0) = resize, a(s,p,>0,0) = free.
   void* nullable (*a)(void* state, void* nullable p, usize oldsize, usize newsize);
   void* state;
 };
 
-// rdiag is a diagnostic report
-typedef struct rdiag rdiag;
-struct rdiag {
-  int         code;      // error code (1=error, 0=warning)
-  const char* msg;       // descriptive message including "srcname:line:col: type:"
-  const char* msgshort;  // short descriptive message without source location
-  const char* srcname;   // eg filename
-  u32         line, col; // origin (0 if unknown or not line-specific)
-};
-// rdiaghandler is called with a diagnostict report.
-// Return false to stop the process (e.g. stop assembling.)
-typedef bool(*rdiaghandler)(const rdiag*, void* nullable userdata);
-
-// rcomp represents a compilation session
-typedef struct rcomp rcomp;
-struct rcomp {
-  rmem           mem;         // memory allocator
-  const char*    srcdata;     // input source bytes
-  usize          srclen;      // length of srcdata
-  const char*    srcname;     // symbolic name of source (e.g. filename)
-  u32            errcount;    // number of errors reported
-  rdiag          diag;        // last diagnostic report
-  rdiaghandler   diaghandler; // diagnostic report callback
-  void* nullable userdata;    // passed along to diaghandler
-  // internal fields
-  char _diagmsg[128];     // storage for diag.msg
-  bool _stop;             // negated diaghandler return value
-  void* nullable _gstate; // reusable internal codegen state
-};
-
-// rfmtflag -- string formatting flags
-typedef u8 rfmtflag;
+typedef u8 rfmtflag; // string formatting flags
 enum rfmtflag {
   RSM_FMT_COLOR = 1 << 0, // use ANSI colors
 } RSM_END_ENUM(rfmtflag)
 
-// rop_name returns the name of an opcode
-RSMAPI const char* rop_name(rop);
+typedef int rerror; // error code
+enum rerror {
+  rerr_ok            =   0, // no error
+  rerr_invalid       =  -1, // invalid data or argument
+  rerr_sys_op        =  -2, // invalid syscall op or syscall op data
+  rerr_badfd         =  -3, // invalid file descriptor
+  rerr_bad_name      =  -4, // invalid or misformed name
+  rerr_not_found     =  -5, // resource not found
+  rerr_name_too_long =  -6, // name too long
+  rerr_canceled      =  -7, // operation canceled
+  rerr_not_supported =  -8, // not supported
+  rerr_exists        =  -9, // already exists
+  rerr_end           = -10, // end of resource
+  rerr_access        = -11, // permission denied
+  rerr_nomem         = -12, // cannot allocate memory
+  rerr_mfault        = -13, // bad memory address
+  rerr_overflow      = -14, // value too large
+};
 
 // rsm_init initializes global state; must be called before using the rest of the API.
 // Returns false if initialization failed.
 RSMAPI bool rsm_init();
-
-// rsm_compile compiles assembly source text into vm bytecode.
-// Uses c->mem for temporary storage, allocates *resp in resm.
-// c can be reused with multiple calls.
-// Returns the number of instructions at *resp on success, or 0 on failure.
-RSMAPI usize rsm_compile(rcomp* c, rmem resm, rinstr** resp);
-
-// rcomp_dispose frees resources of a compilation session structure
-void rcomp_dispose(rcomp* c);
 
 // rsm_vmexec executes a program, starting with instruction inv[0]
 RSMAPI void rsm_vmexec(u64* iregs, u32* inv, usize inlen, void* membase, usize memsize);
@@ -370,6 +343,144 @@ static void* nullable rmem_alloc(rmem m, usize size);
 static void* nullable rmem_resize(rmem m, void* nullable p, usize oldsize, usize newsize);
 static void rmem_free(rmem m, void* p, usize size);
 
+// enum to string
+RSMAPI const char* rop_name(rop);      // name of an opcode
+RSMAPI const char* rerror_str(rerror); // short description of an error
+
+
+// --------------------------------------------------------------------------------------
+// optional assembler API
+#ifndef RSM_NO_ASM
+
+typedef struct rasm    rasm;    // assembly session (think of it as one source file)
+typedef struct rnode   rnode;   // AST node
+typedef u8             rtok;    // source code token
+typedef struct rdiag   rdiag;   // diagnostic report
+typedef struct rsrcpos rsrcpos; // line & column source position
+
+// source tokens (rtok)
+#define RSM_FOREACH_TOKEN(_) \
+_( RT_END ) \
+_( RT_COMMENT ) \
+/* simple tokens */ \
+_( RT_LPAREN ) _( RT_RPAREN ) \
+_( RT_LBRACE ) _( RT_RBRACE ) \
+_( RT_SEMI   ) /* ; */ \
+_( RT_COMMA  ) /* , */ \
+_( RT_EQ     ) /* = */ \
+/* names              */ \
+_( RT_IREG   ) /* Rn   */ \
+_( RT_FREG   ) /* Fn   */ \
+_( RT_LABEL  ) /* foo: */ \
+_( RT_NAME   ) /* foo  */ \
+_( RT_OP     ) /* brz */ \
+/* literal numbers (order matters; see snumber) */ \
+_( RT_INT2   ) _( RT_SINT2   ) /* 0b1111011       */ \
+_( RT_INT10  ) _( RT_SINT10  ) /* 123, -123       */ \
+_( RT_INT16  ) _( RT_SINT16  ) /* 0x7b            */ \
+// end RSM_FOREACH_TOKEN
+// RSM_FOREACH_BINOP_TOKEN maps an infix binary operation to opcodes,
+// allowing "x + y" as an alternative to "add x y"
+#define RSM_FOREACH_BINOP_TOKEN(_) /* token, unsigned_op, signed_op */\
+_( RT_PLUS  , ADD  , ADD  ) /* + */ \
+_( RT_MINUS , SUB  , SUB  ) /* - */ \
+_( RT_STAR  , MUL  , MUL  ) /* * */ \
+_( RT_SLASH , DIV  , DIV  ) /* / */ \
+_( RT_PERC  , MOD  , MOD  ) /* % */ \
+_( RT_AMP   , AND  , AND  ) /* & */ \
+_( RT_PIPE  , OR   , OR   ) /* | */ \
+_( RT_HAT   , XOR  , XOR  ) /* ^ */ \
+_( RT_LT2   , SHL  , SHL  ) /* << */ \
+_( RT_GT2   , SHRU , SHRS ) /* >> */ \
+_( RT_GT3   , SHRU , SHRU ) /* >>> */ \
+_( RT_LT    , LTU  , LTS  ) /* < */ \
+_( RT_GT    , GTU  , GTS  ) /* > */ \
+// end RSM_FOREACH_BINOP_TOKEN
+#define RSM_FOREACH_KEYWORD_TOKEN(_) \
+_( RT_FUN , "fun" ) \
+_( RT_I1  , "i1"  ) \
+_( RT_I8  , "i8"  ) \
+_( RT_I16 , "i16" ) \
+_( RT_I32 , "i32" ) \
+_( RT_I64 , "i64" ) \
+// end RSM_FOREACH_KEYWORD_TOKEN
+enum rtok {
+  #define _(name, ...) name,
+  RSM_FOREACH_TOKEN(_)
+  RSM_FOREACH_BINOP_TOKEN(_)
+  RSM_FOREACH_KEYWORD_TOKEN(_)
+  #undef _
+  rtok_COUNT
+} RSM_END_ENUM(rtok)
+
+// rdiaghandler is called with a diagnostict report.
+// Return false to stop the process (e.g. stop assembling.)
+typedef bool(*rdiaghandler)(const rdiag*, void* nullable userdata);
+
+struct rdiag {
+  int         code;      // error code (1=error, 0=warning)
+  const char* msg;       // descriptive message including "srcname:line:col: type:"
+  const char* msgshort;  // short descriptive message without source location
+  const char* srcname;   // eg filename
+  u32         line, col; // origin (0 if unknown or not line-specific)
+};
+
+struct rasm {
+  rmem           mem;         // memory allocator
+  const char*    srcdata;     // input source bytes
+  usize          srclen;      // length of srcdata
+  const char*    srcname;     // symbolic name of source (e.g. filename)
+  u32            errcount;    // number of errors reported
+  rdiag          diag;        // last diagnostic report
+  rdiaghandler   diaghandler; // diagnostic report callback
+  void* nullable userdata;    // passed along to diaghandler
+  // internal fields
+  char _diagmsg[128];     // storage for diag.msg
+  bool _stop;             // negated diaghandler return value
+  void* nullable _gstate; // reusable internal codegen state
+};
+
+struct rsrcpos {
+  u32 line, col;
+};
+
+struct rnode {
+  rtok            t;    // type
+  rsrcpos         pos;  // source position, or {0,0} if unknown
+  rnode* nullable next; // intrusive list link
+  struct {
+    rnode* nullable head;
+    rnode* nullable tail;
+  } children;
+  union { // depends on value of t
+    u64 ival;
+    struct { const char* p; usize len; } name; // points into source data
+  };
+};
+
+// rasm_loadfile loads a source file, populating a->src{name,data,len} on success.
+rerror rasm_loadfile(rasm* a, const char* filename);
+
+// rasm_parse parses assembly source text into an AST.
+// Uses a->mem for temporary storage, allocates *resp in resm. a can be reused.
+// Returns AST representing the source (a->src* fields) module.
+// Caller should check a->errcount on return.
+RSMAPI rnode* rasm_parse(rasm* a);
+
+// rasm_gen builds VM code from AST.
+// Uses a->mem for temporary storage, allocates *resp in resm. a can be reused.
+// Returns the number of instructions at *resp on success, or 0 on failure.
+RSMAPI usize rasm_gen(rasm* a, rnode* module, rmem imem, rinstr** resp);
+
+// rasm_dispose frees resources of a
+RSMAPI void rasm_dispose(rasm* a);
+
+// rasm_free_rnode frees n (entire tree, includin all children) back to a->mem
+RSMAPI void rasm_free_rnode(rasm* a, rnode* n);
+
+#endif // RSM_NO_ASM
+// --------------------------------------------------------------------------------------
+// inline implementations
 
 RSM_ATTR_MALLOC RSM_WARN_UNUSED_RESULT
 inline static void* nullable rmem_alloc(rmem m, usize size) {

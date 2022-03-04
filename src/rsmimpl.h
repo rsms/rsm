@@ -210,25 +210,6 @@ static inline RSM_WARN_UNUSED_RESULT bool __must_check_unlikely(bool unlikely) {
   __builtin_mul_overflow(a__, b__, dst__); \
 }))
 
-typedef i32 rerror;
-enum rerror {
-  rerr_ok            =   0, // no error
-  rerr_invalid       =  -1, // invalid data or argument
-  rerr_sys_op        =  -2, // invalid syscall op or syscall op data
-  rerr_badfd         =  -3, // invalid file descriptor
-  rerr_bad_name      =  -4, // invalid or misformed name
-  rerr_not_found     =  -5, // resource not found
-  rerr_name_too_long =  -6, // name too long
-  rerr_canceled      =  -7, // operation canceled
-  rerr_not_supported =  -8, // not supported
-  rerr_exists        =  -9, // already exists
-  rerr_end           = -10, // end of resource
-  rerr_access        = -11, // permission denied
-  rerr_nomem         = -12, // cannot allocate memory
-  rerr_mfault        = -13, // bad memory address
-  rerr_overflow      = -14, // value too large
-};
-
 typedef __builtin_va_list va_list;
 #ifndef va_start
   #define va_start __builtin_va_start
@@ -456,7 +437,6 @@ rerror mmapfile(const char* filename, void** p_put, usize* len_out);
 void unmapfile(void* p, usize len);
 rerror read_stdin_data(rmem, usize maxlen, void** p_put, usize* len_out);
 
-const char* rerror_str(rerror);
 rerror rerror_errno(int errnoval);
 
 noreturn void _panic(const char* file, int line, const char* fun, const char* fmt, ...)
@@ -661,6 +641,21 @@ u64 nanotime();
 // Returns number of bytes written, excluding the null terminator.
 usize fmtduration(char buf[25], u64 duration_ns);
 
-// ---------------
+// --------------------------------------------------------------------------------------
+// assembler internals, shared by all asm*.c files
+#ifndef RSM_NO_ASM
+#define kBlock0Name "b0" // name of first block
 
+const char* tokname(rtok t);
+
+inline static bool nodename_eq(const rnode* n, const char* str, usize len) {
+  return n->name.len == len && memcmp(n->name.p, str, len) == 0;
+}
+
+void errf(rasm*, rsrcpos, const char* fmt, ...) ATTR_FORMAT(printf, 3, 4);
+void warnf(rasm*, rsrcpos, const char* fmt, ...) ATTR_FORMAT(printf, 3, 4);
+void reportv(rasm*, rsrcpos, int code, const char* fmt, va_list ap);
+
+#endif // RSM_NO_ASM
+// --------------------------------------------------------------------------------------
 RSM_ASSUME_NONNULL_END

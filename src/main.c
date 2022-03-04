@@ -78,19 +78,18 @@ static int parse_cli_opts(int argc, char*const* argv, u64* iregs) {
   return optind;
 }
 
-static bool load_srcfile(rcomp* c, const char* nullable infile) {
+static bool load_srcfile(rasm* a, const char* nullable infile) {
   if (infile) {
-    c->srcname = infile;
-    rerror err = mmapfile(infile, (void**)&c->srcdata, &c->srclen);
-    if (err != 0) {
+    rerror err = rasm_loadfile(a, infile);
+    if (err) {
       fprintf(stderr, "%s: %s\n", infile, rerror_str(err));
       return false;
     }
     return true;
   }
-  c->srcname = "stdin";
+  a->srcname = "stdin";
   usize limit = 1024*1024; // 1MB
-  rerror err = read_stdin_data(c->mem, limit, (void**)&c->srcdata, &c->srclen);
+  rerror err = read_stdin_data(a->mem, limit, (void**)&a->srcdata, &a->srclen);
   if (err == 0)
     return true;
   if (err == rerr_badfd) { // stdin is a tty
@@ -118,10 +117,34 @@ static bool diaghandler(const rdiag* d, void* userdata) {
   return true; // keep going (show all errors)
 }
 
+static usize compile(const char* nullable srcfile, rinstr** ivp) {
+  rmem mem = rmem_mkvmalloc(0);
+  if (mem.state == NULL) {
+    errmsg("failed to allocate virtual memory");
+    return 0;
+  }
+  rasm a = { .mem = mem, .diaghandler = diaghandler };
+  if (!load_srcfile(&a, srcfile))
+    exit(1);
+  rnode* mod = rasm_parse(&a);
+  if (a.errcount) // note: errors have been reported by diaghandler
+    return 0;
+  usize icount = rasm_gen(&a, mod, mem, ivp);
+  if (a.errcount)
+    return 0;
+  if (icount == 0) {
+    errmsg("empty program");
+    return 0;
+  }
+  if (opt_print_asm)
+    print_asm(mem, *ivp, icount);
+  return icount;
+}
+
 int main(int argc, char*const* argv) {
   if (!rsm_init()) return 1;
 
-  // vm execution state
+  // vm execution state (can be initialized with e.g. -R3=0xff)
   u64 iregs[32] = {0};
 
   // parse command-line options
@@ -132,28 +155,12 @@ int main(int argc, char*const* argv) {
     if (argi < argc-1) errmsg("ignoring %d extra command-line arguments", argc-1 - argi);
   }
 
-  // initialize memory allocator
-  rmem mem = rmem_mkvmalloc(0);
-  if (mem.state == NULL) panic("failed to allocate virtual memory");
+  // compile input source file
+  rinstr* iv;
+  usize icount = compile(infile, &iv);
+  if (icount == 0) return 1;
 
-  // create compiler state and load source from file or stdin
-  rcomp comp = { .mem = mem, .diaghandler = diaghandler };
-  if (!load_srcfile(&comp, infile))
-    exit(1);
-
-  // compile
-  rinstr* iv = NULL;
-  usize icount = rsm_compile(&comp, mem, &iv);
-  if (comp.errcount) // errors has been reported by diaghandler
-    return 1;
-  if (icount == 0) {
-    errmsg("empty program");
-    return 1;
-  }
-
-  if (opt_print_asm)
-    print_asm(mem, iv, icount);
-
+  // execute program
   if (opt_run) {
     u8 memory[1024*1024];
     u64 starttime = nanotime();

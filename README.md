@@ -32,7 +32,7 @@ TODO
 
 ```
 ./build.sh -debug
-./out/rsm examples/factorial.rsm 15
+./out/rsm -R0=15 examples/factorial.rsm
 ```
 
 You'll need the following things to build rsm:
@@ -43,12 +43,8 @@ You'll need the following things to build rsm:
 You can use `rsm` as a really awkward calculator:
 
 ```sh
-$ echo 'fun x() { R0 = R0 * 2; ret; }' | out/rsm - 123
-assembled some sweet vm code:
-   0  mul R0  R0  0x2
-   1  ret
-evaluating function0(123)
-result R0..R7: 246 0 0 0 0 0 0 0
+$ echo 'fun x() { R0 = R0 * 2; ret; }' | out/rsm -R0=123
+246
 ```
 
 If you're a bit crazy you can also embed it by copying the source files
@@ -58,29 +54,20 @@ into your project and using the API in `rsm.h`.
 
 ```sh
 $ cat <<EXAMPLE > example.rsm
-fun factorial (i32) i32 {
+fun factorial(i32) i32 {
     R1 = R0        // ACC = n (argument 0)
     R0 = 1         // RES (return value 0)
     brz R1 end     // if n==0 goto end
   b1:              // <- [b0] b1
-    R0 = mul R1 R0 // RES = ACC * RES
-    R1 = sub R1 1  // ACC = ACC - 1
-    brnz R1  b1    // if n!=0 goto b1
+    R0 = R1 * R0   // RES = ACC * RES
+    R1 = R1 - 1    // ACC = ACC - 1
+    br R1 b1       // if n!=0 goto b1
   end:             // <- b0 [b1]
     ret            // RES is at R0
 }
 EXAMPLE
-$ out/rsm example.rsm 15
-assembled some sweet vm code:
-   0  copy   R1   R0
-   1  copy   R0   0x1
-   2  brz    R1   3
-   3  mul    R0   R1   R0
-   4  sub    R1   R1   0x1
-   5  brnz   R1   -3
-   6  ret
-evaluating function0(15)
-result R0..R7: 1307674368000 0 0 0 0 0 0 0
+$ out/rsm -R0=15 example.rsm
+1307674368000
 ```
 
 

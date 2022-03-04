@@ -644,11 +644,12 @@ void* memmove(void* dest, const void* src, usize n) {
 #endif
 
 
-// --- END musl code (resume original rsm code) ---
+// --- END musl code ---
+// --- resume original rsm code ---
 
 // one-time initialization of global state
 rerror time_init();
-rerror compile_init();
+rerror parse_init();
 
 bool rsm_init() {
   static bool y = false; if (y) return true; y = true;
@@ -661,10 +662,74 @@ bool rsm_init() {
   CHECK_ERR(unixtime((i64*)&sec, &nsec));
   fastrand_seed(nsec);
 
-  CHECK_ERR(compile_init());
+  CHECK_ERR(parse_init());
 
   return true;
 error:
   log("rsm_init error: %s", rerror_str(err));
   return false;
 }
+
+// --------------------------------------------------------------------------------------
+// assembler internals, shared by all asm*.c files
+#ifndef RSM_NO_ASM
+
+const char* tokname(rtok t) {
+  switch (t) {
+  #define _(name, ...) case name: return &#name[3]; // [3] to skip "RT_" prefix
+  RSM_FOREACH_TOKEN(_)
+  RSM_FOREACH_BINOP_TOKEN(_)
+  RSM_FOREACH_KEYWORD_TOKEN(_)
+  #undef _
+  }
+  return "?";
+}
+
+void reportv(rasm* c, rsrcpos pos, int code, const char* fmt, va_list ap) {
+  if (c->_stop)
+    return; // previous call to diaghandler has asked us to stop
+  c->diag.code = code;
+  c->diag.msg = c->_diagmsg;
+  c->diag.srcname = c->srcname;
+  c->diag.line = pos.line;
+  c->diag.col = pos.col;
+
+  if (code)
+    c->errcount++;
+
+  abuf s = abuf_make(c->_diagmsg, sizeof(c->_diagmsg));
+  if (pos.line > 0) {
+    abuf_fmt(&s, "%s:%u:%u: ", c->srcname, pos.line, pos.col);
+  } else {
+    abuf_fmt(&s, "%s: ", c->srcname);
+  }
+  abuf_str(&s, code ? "error: " : "warning: ");
+  c->diag.msgshort = s.p;
+  abuf_fmtv(&s, fmt, ap);
+  abuf_terminate(&s);
+
+  c->_stop = !c->diaghandler(&c->diag, c->userdata);
+}
+
+void errf(rasm* c, rsrcpos pos, const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  reportv(c, pos, 1, fmt, ap);
+  va_end(ap);
+}
+
+void warnf(rasm* c, rsrcpos pos, const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  reportv(c, pos, 0, fmt, ap);
+  va_end(ap);
+}
+
+rerror rasm_loadfile(rasm* c, const char* filename) {
+  rerror err = mmapfile(filename, (void**)&c->srcdata, &c->srclen);
+  if (err == 0)
+    c->srcname = filename;
+  return err;
+}
+
+#endif // RSM_NO_ASM

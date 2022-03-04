@@ -25,6 +25,9 @@ inline static usize ba_avail(bufalloc* a) { // available capacity
 }
 
 // main allocator implementation
+//   ba_alloc(s, NULL,       0, newsize) = new allocation
+//   ba_alloc(s,    p, oldsize, newsize) = resize allocation
+//   ba_alloc(s,    p, oldsize,       0) = free allocation
 static void* nullable ba_alloc(void* state, void* nullable p, usize oldsize, usize newsize) {
   bufalloc* a = state;
   if UNLIKELY(p != NULL) {

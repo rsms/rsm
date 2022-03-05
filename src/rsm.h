@@ -99,6 +99,7 @@ typedef u32 rinstr;
 //   A       R(A)
 //   Au      R(A) or immediate unsigned value
 //   As      R(A) or immediate signed value
+//   ABv     R(A), with Bu immediate trailing u32 values
 //   AB      R(A), R(B)
 //   ABu     R(A), R(B) or immediate unsigned value
 //   ABs     R(A), R(B) or immediate signed value
@@ -108,59 +109,61 @@ typedef u32 rinstr;
 //   ABCD    R(A), R(B), R(C), R(D)
 //   ABCDu   R(A), R(B), R(C), R(D) or immediate unsigned value
 //   ABCDs   R(A), R(B), R(C), R(D) or immediate signed value
+// result types:
+//   reg   Result in register
+//   mem   Result in memory
+//   nil   No result, or implicit register result (i.e. calls)
 // Changing instruction encoding? Remember to also update vm.c, fmt.c and compile.c
-#define RSM_FOREACH_OP(_) /* _(name, arguments, asmname, semantics) */ \
-_( COPY , ABs , "copy"  /* RA = Bs -- aka "move" */)\
+#define RSM_FOREACH_OP(_) /* _(name, arguments, result, asmname, semantics) */ \
+_( COPY   , ABu  , reg , "copy"    /* RA = Bu -- aka "move" */)\
+_( COPYV  , ABv  , reg , "copyv"   /* RA = instr[...]; PC+=Bu */)\
+_( LOAD   , ABCs , reg , "load"    /* RA = mem[RB + Cs : 8]                           */)\
+_( LOAD4U , ABCs , reg , "load4u"  /* RA = mem[RB + Cs : 4] -- zero-extend i32 to i64 */)\
+_( LOAD4S , ABCs , reg , "load4s"  /* RA = mem[RB + Cs : 4] -- sign-extend i32 to i64 */)\
+_( LOAD2U , ABCs , reg , "load2u"  /* RA = mem[RB + Cs : 2] -- zero-extend i16 to i64 */)\
+_( LOAD2S , ABCs , reg , "load2s"  /* RA = mem[RB + Cs : 2] -- sign-extend i16 to i64 */)\
+_( LOAD1U , ABCs , reg , "load1u"  /* RA = mem[RB + Cs : 1] -- zero-extend i8 to i64  */)\
+_( LOAD1S , ABCs , reg , "load1s"  /* RA = mem[RB + Cs : 1] -- sign-extend i8 to i64  */)\
+_( STORE  , ABCs , mem , "store"   /* mem[RB + Cs : 8] = RA                           */)\
+_( STORE4 , ABCs , mem , "store4"  /* mem[RB + Cs : 4] = RA -- wrap i64 to i32        */)\
+_( STORE2 , ABCs , mem , "store2"  /* mem[RB + Cs : 2] = RA -- wrap i64 to i16        */)\
+_( STORE1 , ABCs , mem , "store1"  /* mem[RB + Cs : 1] = RA -- wrap i64 to i8         */)\
+_( PUSH   , Au   , mem , "push"    /* SP -= 8; mem[SP] = Au                           */)\
+_( POP    , A    , reg , "pop"     /* A = mem[SP]; SP += 8                            */)\
 \
-_( LOAD    , ABCs , "load"    /* RA = mem[RB + Cs : 8]                           */)\
-_( LOAD4U  , ABCs , "load4u"  /* RA = mem[RB + Cs : 4] -- zero-extend i32 to i64 */)\
-_( LOAD4S  , ABCs , "load4s"  /* RA = mem[RB + Cs : 4] -- sign-extend i32 to i64 */)\
-_( LOAD2U  , ABCs , "load2u"  /* RA = mem[RB + Cs : 2] -- zero-extend i16 to i64 */)\
-_( LOAD2S  , ABCs , "load2s"  /* RA = mem[RB + Cs : 2] -- sign-extend i16 to i64 */)\
-_( LOAD1U  , ABCs , "load1u"  /* RA = mem[RB + Cs : 1] -- zero-extend i8 to i64  */)\
-_( LOAD1S  , ABCs , "load1s"  /* RA = mem[RB + Cs : 1] -- sign-extend i8 to i64  */)\
+_( ADD   , ABCu , reg , "add"   /* RA = RB + Cu}                               */)\
+_( SUB   , ABCu , reg , "sub"   /* RA = RB - Cu}                               */)\
+_( MUL   , ABCu , reg , "mul"   /* RA = RB * Cu}                               */)\
+_( DIV   , ABCu , reg , "div"   /* RA = RB / Cu}                               */)\
+_( MOD   , ABCu , reg , "mod"   /* RA = RB % Cu}                               */)\
+_( AND   , ABCu , reg , "and"   /* RA = RB & Cu}                               */)\
+_( OR    , ABCu , reg , "or"    /* RA = RB | Cu}                               */)\
+_( XOR   , ABCu , reg , "xor"   /* RA = RB ^ Cu}                               */)\
+_( SHL   , ABCu , reg , "shl"   /* RA = RB << Cu                               */)\
+_( SHRS  , ABCu , reg , "shrs"  /* RA = RB >> Cu sign-replicating (arithmetic) */)\
+_( SHRU  , ABCu , reg , "shru"  /* RA = RB >> Cu zero-replicating (logical)    */)\
 \
-_( STORE   , ABCs , "store"   /* mem[RB + Cs : 8] = RA                    */)\
-_( STORE4  , ABCs , "store4"  /* mem[RB + Cs : 4] = RA -- wrap i64 to i32 */)\
-_( STORE2  , ABCs , "store2"  /* mem[RB + Cs : 2] = RA -- wrap i64 to i16 */)\
-_( STORE1  , ABCs , "store1"  /* mem[RB + Cs : 1] = RA -- wrap i64 to i8  */)\
+_( EQ    , ABCu , reg , "eq"   /* RA = RB == Cu */)\
+_( NEQ   , ABCu , reg , "neq"  /* RA = RB != Cu */)\
+_( LTU   , ABCu , reg , "ltu"  /* RA = RB <  Cu */)\
+_( LTS   , ABCs , reg , "lts"  /* RA = RB <  Cs */)\
+_( LTEU  , ABCu , reg , "lteu" /* RA = RB <= Cu */)\
+_( LTES  , ABCs , reg , "ltes" /* RA = RB <= Cs */)\
+_( GTU   , ABCu , reg , "gtu"  /* RA = RB >  Cu */)\
+_( GTS   , ABCs , reg , "gts"  /* RA = RB >  Cs */)\
+_( GTEU  , ABCu , reg , "gteu" /* RA = RB >= Cu */)\
+_( GTES  , ABCs , reg , "gtes" /* RA = RB >= Cs */)\
 \
-_( PUSH    , Au   , "push"    /* SP -= 8; mem[SP] = Au                   */)\
-_( POP     , A    , "pop"     /* A = mem[SP]; SP += 8                    */)\
+_( BR    , ABs  , nil , "br"    /* if RA!=0 PC += Bs */)\
+_( BRZ   , ABs  , nil , "brz"   /* if RA==0 PC += Bs */)\
+_( BRLT  , ABCs , nil , "brlt"  /* if RA<RB PC += Cs */)\
 \
-_( ADD   , ABCu , "add"   /* RA = RB + Cu}                               */)\
-_( SUB   , ABCu , "sub"   /* RA = RB - Cu}                               */)\
-_( MUL   , ABCu , "mul"   /* RA = RB * Cu}                               */)\
-_( DIV   , ABCu , "div"   /* RA = RB / Cu}                               */)\
-_( MOD   , ABCu , "mod"   /* RA = RB % Cu}                               */)\
-_( AND   , ABCu , "and"   /* RA = RB & Cu}                               */)\
-_( OR    , ABCu , "or"    /* RA = RB | Cu}                               */)\
-_( XOR   , ABCu , "xor"   /* RA = RB ^ Cu}                               */)\
-_( SHL   , ABCu , "shl"   /* RA = RB << Cu                               */)\
-_( SHRS  , ABCu , "shrs"  /* RA = RB >> Cu sign-replicating (arithmetic) */)\
-_( SHRU  , ABCu , "shru"  /* RA = RB >> Cu zero-replicating (logical)    */)\
+_( CALL  , Au   , nil , "call"  /* R0...R7 = push(PC); PC=Au */)\
+_( SCALL , Au   , nil , "scall" /* R0...R7 = system_call(Au) */)\
+_( JUMP  , Au   , nil , "jump"  /* PC = Au                   */)\
+_( RET   , _    , nil , "ret"   /* PC = pop()                */)\
 \
-_( EQ   , ABCu , "eq"   /* RA = RB == Cu */)\
-_( NEQ  , ABCu , "neq"  /* RA = RB != Cu */)\
-_( LTU  , ABCu , "ltu"  /* RA = RB <  Cu */)\
-_( LTS  , ABCs , "lts"  /* RA = RB <  Cs */)\
-_( LTEU , ABCu , "lteu" /* RA = RB <= Cu */)\
-_( LTES , ABCs , "ltes" /* RA = RB <= Cs */)\
-_( GTU  , ABCu , "gtu"  /* RA = RB >  Cu */)\
-_( GTS  , ABCs , "gts"  /* RA = RB >  Cs */)\
-_( GTEU , ABCu , "gteu" /* RA = RB >= Cu */)\
-_( GTES , ABCs , "gtes" /* RA = RB >= Cs */)\
-\
-_( BR    , ABs  , "br"    /* if RA!=0 PC += Bs */)\
-_( BRZ   , ABs  , "brz"   /* if RA==0 PC += Bs */)\
-_( BRLT  , ABCs , "brlt"  /* if RA<RB PC += Cs */)\
-\
-_( CALL  , Au   , "call"  /* R0...R7 = push(PC); PC=Au */)\
-_( SCALL , Au   , "scall" /* R0...R7 = system_call(Au) */)\
-_( JUMP  , Au   , "jump"  /* PC = Au                   */)\
-_( RET   , _    , "ret"   /* PC = pop()                */)\
-\
-_( WRITE , ABCDu , "write"  /* RA = write addr=RB size=R(C) fd=Du */)\
+_( WRITE , ABCDu , reg , "write" /* RA = write addr=RB size=R(C) fd=Du */)\
 \
 // end RSM_FOREACH_OP
 
@@ -197,6 +200,9 @@ _( WRITE , ABCDu , "write"  /* RA = write addr=RB size=R(C) fd=Du */)\
 #define RSM_MIN_Bs   (-RSM_MAX_Bs - 1) /*                      -131,072  -0x20000 */
 #define RSM_MIN_Cs   (-RSM_MAX_Cs - 1) /*                        -4,096   -0x1000 */
 #define RSM_MIN_Ds   (-RSM_MAX_Ds - 1) /*                          -128     -0x80 */
+
+#define RSM_NREGS    32
+#define RSM_MAX_REG  (RSM_NREGS - 1)
 
 // u32 RSM_GET_ARGN(rinstr, uint pos, uint size)
 // rinstr RSM_SET_ARGN(rinstr, uint pos, uint size, uint val)
@@ -256,6 +262,7 @@ _( WRITE , ABCDu , "write"  /* RA = write addr=RB size=R(C) fd=Du */)\
 
 #define RSM_MAKE_Au(op,a)          (RSM_MAKE_A(op,a)          | (1 << RSM_POS_i))
 #define RSM_MAKE_ABu(op,a,b)       (RSM_MAKE_AB(op,a,b)       | (1 << RSM_POS_i))
+#define RSM_MAKE_ABv(op,a,b)       RSM_MAKE_ABu((op),(a),(b))
 #define RSM_MAKE_ABCu(op,a,b,c)    (RSM_MAKE_ABC(op,a,b,c)    | (1 << RSM_POS_i))
 #define RSM_MAKE_ABCDu(op,a,b,c,d) (RSM_MAKE_ABCD(op,a,b,c,d) | (1 << RSM_POS_i))
 
@@ -317,7 +324,9 @@ RSMAPI void rsm_vmexec(u64* iregs, u32* inv, usize inlen, void* membase, usize m
 // Returns the number of characters that would have been printed if bufcap was
 // unlimited (not including the final `\0').
 RSMAPI usize rsm_fmtprog(char* buf, usize bufcap, rinstr* nullable ip, usize ilen, rfmtflag);
-RSMAPI usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in, rfmtflag);
+// if pcaddp is not null, it is set to the PC advance for the instruction,
+// which is 1 for all except COPYV.
+RSMAPI usize rsm_fmtinstr(char* buf, usize bufcap, rinstr, u32* nullable pcaddp, rfmtflag);
 
 // RMEM_MK_MIN is the minimum size for rmem_mk*alloc functions
 #define RMEM_MK_MIN (sizeof(void*)*4)
@@ -343,7 +352,7 @@ static void* nullable rmem_alloc(rmem m, usize size);
 static void* nullable rmem_resize(rmem m, void* nullable p, usize oldsize, usize newsize);
 static void rmem_free(rmem m, void* p, usize size);
 
-// enum to string
+// enum related functions
 RSMAPI const char* rop_name(rop);      // name of an opcode
 RSMAPI const char* rerror_str(rerror); // short description of an error
 
@@ -372,12 +381,15 @@ _( RT_EQ     ) /* = */ \
 _( RT_IREG   ) /* Rn   */ \
 _( RT_FREG   ) /* Fn   */ \
 _( RT_LABEL  ) /* foo: */ \
+_( RT_GNAME  ) /* @foo */ \
 _( RT_NAME   ) /* foo  */ \
 _( RT_OP     ) /* brz */ \
 /* literal numbers (order matters; see snumber) */ \
-_( RT_INT2   ) _( RT_SINT2   ) /* 0b1111011       */ \
-_( RT_INT10  ) _( RT_SINT10  ) /* 123, -123       */ \
-_( RT_INT16  ) _( RT_SINT16  ) /* 0x7b            */ \
+_( RT_INTLIT2  ) _( RT_SINTLIT2  ) /* 0b1111011       */ \
+_( RT_INTLIT   ) _( RT_SINTLIT   ) /* 123, -123       */ \
+_( RT_INTLIT16 ) _( RT_SINTLIT16 ) /* 0x7b            */ \
+/* synthetic tokens, used for AST only */ \
+_( RT_GDEF   ) \
 // end RSM_FOREACH_TOKEN
 // RSM_FOREACH_BINOP_TOKEN maps an infix binary operation to opcodes,
 // allowing "x + y" as an alternative to "add x y"
@@ -397,12 +409,13 @@ _( RT_LT    , LTU  , LTS  ) /* < */ \
 _( RT_GT    , GTU  , GTS  ) /* > */ \
 // end RSM_FOREACH_BINOP_TOKEN
 #define RSM_FOREACH_KEYWORD_TOKEN(_) \
-_( RT_FUN , "fun" ) \
-_( RT_I1  , "i1"  ) \
-_( RT_I8  , "i8"  ) \
-_( RT_I16 , "i16" ) \
-_( RT_I32 , "i32" ) \
-_( RT_I64 , "i64" ) \
+_( RT_I1   , "i1"   ) \
+_( RT_I8   , "i8"   ) \
+_( RT_I16  , "i16"  ) \
+_( RT_I32  , "i32"  ) \
+_( RT_I64  , "i64"  ) \
+_( RT_FUN  , "fun"  ) \
+_( RT_DATA , "data" ) \
 // end RSM_FOREACH_KEYWORD_TOKEN
 enum rtok {
   #define _(name, ...) name,
@@ -421,6 +434,7 @@ struct rdiag {
   int         code;      // error code (1=error, 0=warning)
   const char* msg;       // descriptive message including "srcname:line:col: type:"
   const char* msgshort;  // short descriptive message without source location
+  const char* srclines;  // source context (a few lines of the source; may be empty)
   const char* srcname;   // eg filename
   u32         line, col; // origin (0 if unknown or not line-specific)
 };
@@ -434,10 +448,7 @@ struct rasm {
   rdiag          diag;        // last diagnostic report
   rdiaghandler   diaghandler; // diagnostic report callback
   void* nullable userdata;    // passed along to diaghandler
-  // internal fields
-  char _diagmsg[128];     // storage for diag.msg
-  bool _stop;             // negated diaghandler return value
-  void* nullable _gstate; // reusable internal codegen state
+  void* _internal[8];
 };
 
 struct rsrcpos {
@@ -454,7 +465,7 @@ struct rnode {
   } children;
   union { // depends on value of t
     u64 ival;
-    struct { const char* p; usize len; } name; // points into source data
+    struct { const char* p; u32 len; } name; // points into source data
   };
 };
 

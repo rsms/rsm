@@ -17,10 +17,10 @@ IMPORT void log1(const char* s, usize len);
 extern u8 __heap_base, __data_end; // symbols provided by wasm-ld
 
 // WASM instance state
-static rmem                  mem; // the one memory allocator, owning the wasm heap
-static u64                   iregs[32] = {0}; // register state
-static char*                 tmpbuf;          // for temporary formatting etc
-static usize                 tmpbufcap;
+static rmem  mem;                    // the one memory allocator, owning the wasm heap
+static u64   iregs[RSM_NREGS] = {0}; // register state
+static char* tmpbuf;                 // for temporary formatting etc
+static usize tmpbufcap;
 struct { // wasm_compile result
   usize   c;
   rinstr* v;

@@ -64,6 +64,7 @@ Example:
      … │                00 06 75 70 63 61 73 65 00 02       kind=func 6 "upcase" code[2]
      … │                                              00    kind=func
   0080 │ 04 6d 61 69 6e 04                                  4 "main" code[4]
+     … │                   00 00 d2 04 00 00 2e 16 00 00    Reminder is constant data …
 
 
 module:

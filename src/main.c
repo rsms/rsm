@@ -31,7 +31,7 @@ static int setreg(u64* iregs, const char* s) {
   }
   if (parseu64(s, p-1, 10, &regno, 0xff) != 0)
     goto malformed;
-  if (regno > 31) {
+  if (regno > RSM_MAX_REG) {
     errmsg("invalid register -R%llu", regno);
     return 1;
   }
@@ -114,6 +114,9 @@ static void print_asm(rmem mem, rinstr* iv, usize icount) {
 static bool diaghandler(const rdiag* d, void* userdata) {
   // called by the compiler when an error occurs
   fwrite(d->msg, strlen(d->msg), 1, stderr); putc('\n', stderr);
+  if (d->srclines[0]) {
+    fwrite(d->srclines, strlen(d->srclines), 1, stderr); putc('\n', stderr);
+  }
   return true; // keep going (show all errors)
 }
 
@@ -145,7 +148,7 @@ int main(int argc, char*const* argv) {
   if (!rsm_init()) return 1;
 
   // vm execution state (can be initialized with e.g. -R3=0xff)
-  u64 iregs[32] = {0};
+  u64 iregs[RSM_NREGS] = {0};
 
   // parse command-line options
   int argi = parse_cli_opts(argc, argv, iregs);

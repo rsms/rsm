@@ -21,7 +21,7 @@ CC=${CC:-$CCDEF}
 
 # copy previous, compile new
 [ -f $S2 ] && cp $S2 $B
-$CC -Oz -std=c11 -g -S -o $S "$@" &
+$CC -Oz -std=c11 -S -o $S "$@" &
 $CC -Oz -std=c11 -g -c -o $O "$@"
 wait
 

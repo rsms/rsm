@@ -88,7 +88,6 @@ const char* rerror_str(rerror e) {
   return "(unknown error)";
 }
 
-
 rerror rerror_errno(int e) {
   switch (e) {
     case 0: return 0;
@@ -100,6 +99,16 @@ rerror rerror_errno(int e) {
   #endif
     default: return rerr_invalid;
   }
+}
+
+
+const char* rop_name(rop op) {
+  switch (op) {
+    #define _(name, enc, res, asmname, ...) case rop_##name: return asmname;
+    RSM_FOREACH_OP(_)
+    #undef _
+  }
+  return "?";
 }
 
 
@@ -275,15 +284,15 @@ void abuf_fill(abuf* s, char c, usize len) {
 }
 
 
-void abuf_repr(abuf* s, const char* srcp, usize len) {
-  static const char* hexchars = "0123456789abcdef";
+static const char* hexchars = "0123456789abcdef";
 
+void abuf_repr(abuf* s, const void* srcp, usize len) {
   char* p = s->p;
   char* lastp = s->lastp;
   usize nwrite = 0;
 
   for (usize i = 0; i < len; i++) {
-    u8 c = (u8)*srcp++;
+    u8 c = *(u8*)srcp++;
     switch (c) {
       // \xHH
       case '\1'...'\x08':
@@ -332,6 +341,35 @@ void abuf_repr(abuf* s, const char* srcp, usize len) {
     }
   }
 
+  if (check_add_overflow(s->len, nwrite, &s->len))
+    s->len = USIZE_MAX;
+  s->p = p;
+}
+
+void abuf_reprhex(abuf* s, const void* srcp, usize len) {
+  char* p = s->p;
+  char* lastp = s->lastp;
+  usize nwrite = 0;
+  for (usize i = 0; i < len; i++) {
+    u8 c = *(u8*)srcp++;
+    if (LIKELY( p + 2 < lastp )) {
+      if (i)
+        *p++ = ' ';
+      if (c < 0x10) {
+        p[0] = '0';
+        p[1] = hexchars[c];
+      } else {
+        p[0] = hexchars[c >> 4];
+        p[1] = hexchars[c & 0xf];
+      }
+      p += 2;
+    } else {
+      p = lastp;
+    }
+    if (i)
+      nwrite++;
+    nwrite += 2;
+  }
   if (check_add_overflow(s->len, nwrite, &s->len))
     s->len = USIZE_MAX;
   s->p = p;
@@ -510,17 +548,14 @@ bool vmem_free(void* ptr, usize nbytes) {
 
 
 void _rarray_remove(rarray* a, u32 elemsize, u32 start, u32 len) {
-  assert(a->len >= start+len);
+  safecheck(start+len <= a->len);
   if (len == 0)
     return;
-  void* dst = a->v + elemsize*start;
-  void* src = dst + elemsize*len;
-  // 0 1 2 3 4 5 6 7
-  //       |  |
-  // start 3
-  // len 2
-  //
-  memmove(dst, src, elemsize*(a->len - start - len));
+  if (start+len < a->len) {
+    void* dst = a->v + elemsize*start;
+    void* src = dst + elemsize*len;
+    memmove(dst, src, elemsize*(a->len - start - len));
+  }
   a->len -= len;
 }
 
@@ -536,6 +571,41 @@ bool rarray_grow(rarray* a, rmem m, usize elemsize, u32 addl) {
   a->cap = newcap;
   return true;
 }
+
+void _arotatemem(u32 stride, void* v, u32 first, u32 mid, u32 last) {
+  assert(first <= mid); // if equal (zero length), do nothing
+  assert(mid < last);
+  usize tmp[16]; assert(sizeof(u32) <= sizeof(tmp));
+  u32 next = mid;
+  while (first != next) {
+    // swap
+    memcpy(tmp, v + first*stride, stride); // tmp = v[first]
+    memcpy(v + first*stride, v + next*stride, stride); // v[first] = v[next]
+    memcpy(v + next*stride, tmp, stride); // v[next] = tmp
+    first++;
+    next++;
+    if (next == last) {
+      next = mid;
+    } else if (first == mid) {
+      mid = next;
+    }
+  }
+}
+
+#define DEF_AROTATE(NAME, T)                                   \
+  void NAME(T* const v, u32 first, u32 mid, u32 last) { \
+    assert(first <= mid);                                      \
+    assert(mid < last);                                        \
+    u32 next = mid;                                            \
+    while (first != next) {                                    \
+      T tmp = v[first]; v[first++] = v[next]; v[next++] = tmp; \
+      if (next == last) next = mid;                            \
+      else if (first == mid) mid = next;                       \
+    }                                                          \
+  }
+
+DEF_AROTATE(_arotate32, u32)
+DEF_AROTATE(_arotate64, u64)
 
 
 
@@ -685,50 +755,189 @@ const char* tokname(rtok t) {
   return "?";
 }
 
-void reportv(rasm* c, rsrcpos pos, int code, const char* fmt, va_list ap) {
-  if (c->_stop)
+static u32 u32log10(u32 u) {
+  return u >= 1000000000 ? 10 :
+         u >= 100000000 ? 9 :
+         u >= 10000000 ? 8 :
+         u >= 1000000 ? 7 :
+         u >= 100000 ? 6 :
+         u >= 10000 ? 5 :
+         u >= 1000 ? 4 :
+         u >= 100 ? 3 :
+         u >= 10 ? 2 :
+         1;
+}
+
+// nposrange computes the source position range for AST node n
+rposrange nposrange(rnode* n) {
+  rposrange pr = { .start=n->pos, .focus=n->pos };
+  switch (n->t) {
+    case RT_EQ:
+      if (n->children.head) {
+        pr.start = n->children.head->pos;
+        rnode* lastn = n->children.head;
+        while (lastn->next)
+          lastn = lastn->next;
+        rposrange lastpr = nposrange(lastn);
+        lastpr.end = lastpr.end.line ? lastpr.end : lastpr.focus;
+        pr.end = pr.focus;
+        if (lastpr.end.line >= pr.end.line && lastpr.end.col > pr.end.col)
+          pr.end = lastpr.end;
+      }
+      break;
+    case RT_SINTLIT2:
+    case RT_INTLIT2:
+      pr.end.line = pr.focus.line;
+      pr.end.col = pr.focus.col + ILOG2(n->ival) + 3;
+      break;
+    case RT_SINTLIT:
+    case RT_INTLIT:
+      pr.end.line = pr.focus.line;
+      pr.end.col = pr.focus.col + u32log10(n->ival);
+      break;
+    case RT_SINTLIT16:
+    case RT_INTLIT16:
+      pr.end.line = pr.focus.line;
+      pr.end.col = pr.focus.col + ((u32)ILOG2(n->ival) >> 2) + 3;
+      break;
+    default: if (tokhasname(n->t)) {
+      pr.end.line = n->pos.line;
+      pr.end.col = n->pos.col + n->name.len;
+    }
+  }
+  return pr;
+}
+
+static void diag_add_srclines(rasm* a, rposrange pr, abuf* s) {
+  a->diag.srclines = "";
+  if (abuf_avail(s) < 4 || pr.focus.line == 0 || a->srclen == 0)
+    return;
+
+  rsrcpos pos = pr.focus; // TODO: use start & end
+  dlog("start %u:%u, focus %u:%u, end %u:%u",
+    pr.start.line, pr.start.col,
+    pr.focus.line, pr.focus.col,
+    pr.end.line, pr.end.col);
+
+  u32 nlinesbefore = 1;
+  u32 nlinesafter = 1;
+  u32 startline = pos.line - MIN(pos.line - 1, nlinesbefore);
+  u32 endline = pos.line + nlinesafter + 1;
+  u32 line = startline;
+
+  const char* start = a->srcdata, *end = start; // start & end of line
+  const char* srcend = start + a->srclen;
+
+  // forward to startline
+  for (;;) {
+    if (*end == '\n') {
+      if (--startline == 0) break; // found
+      start = end + 1;
+    }
+    end++;
+    if (end == srcend) {
+      if (--startline == 0) break; // no trailing LF
+      return; // not found
+    }
+  }
+
+  a->diag.srclines = s->p;
+  int ndigits = u32log10(endline);
+
+  for (;;) {
+    int len = (int)(end - start);
+    if (line != pos.line) {
+      abuf_fmt(s, "%*u   │ %.*s", ndigits, line, len, start);
+    } else if (pr.end.line) {
+      assert(pr.start.line > 0);
+      assert(pr.start.col > 0);
+      assert(pr.focus.col > 0);
+      assert(pr.end.col > 0);
+      abuf_fmt(s, "%*u → │ %.*s\n"
+                  "%*s   │ %*s",
+        ndigits, line, len, start, ndigits, "", (int)(pr.start.col-1), "");
+      u32 c = pr.start.col - 1;
+      if (pr.focus.col == pr.start.col || pr.focus.col == pr.end.col) {
+        // focus point is at either start or end extremes; just draw a line
+        while (c++ < pr.end.col-1)
+         abuf_str(s, "~");
+      } else {
+        while (c++ < pr.focus.col-1)
+          abuf_str(s, "~");
+        abuf_str(s, "↑");
+        for (; c < pr.end.col-1; c++)
+          abuf_str(s, "~");
+      }
+    } else {
+      abuf_fmt(s, "%*u → │ %.*s\n"
+                  "%*s   │ %*s↑",
+        ndigits, line, len, start, ndigits, "", (int)pos.col - 1, "");
+    }
+
+    if (end == srcend || ++line == endline)
+      break;
+    abuf_c(s, '\n');
+    // find next line
+    start = ++end;
+    while (end != srcend) {
+      if (*end == '\n')
+        break;
+      end++;
+    }
+  }
+}
+
+void reportv(rasm* a, rposrange pr, int code, const char* fmt, va_list ap) {
+  if (rasm_stop(a))
     return; // previous call to diaghandler has asked us to stop
-  c->diag.code = code;
-  c->diag.msg = c->_diagmsg;
-  c->diag.srcname = c->srcname;
-  c->diag.line = pos.line;
-  c->diag.col = pos.col;
+
+  char msgbuf[4096];
+  msgbuf[0] = 0;
+
+  a->diag.code = code;
+  a->diag.msg = msgbuf;
+  a->diag.srcname = a->srcname;
+  a->diag.line = pr.focus.line;
+  a->diag.col = pr.focus.col;
 
   if (code)
-    c->errcount++;
+    a->errcount++;
 
-  abuf s = abuf_make(c->_diagmsg, sizeof(c->_diagmsg));
-  if (pos.line > 0) {
-    abuf_fmt(&s, "%s:%u:%u: ", c->srcname, pos.line, pos.col);
+  abuf s = abuf_make(msgbuf, sizeof(msgbuf));
+  if (pr.focus.line > 0) {
+    abuf_fmt(&s, "%s:%u:%u: ", a->srcname, pr.focus.line, pr.focus.col);
   } else {
-    abuf_fmt(&s, "%s: ", c->srcname);
+    abuf_fmt(&s, "%s: ", a->srcname);
   }
   abuf_str(&s, code ? "error: " : "warning: ");
-  c->diag.msgshort = s.p;
+  a->diag.msgshort = s.p;
   abuf_fmtv(&s, fmt, ap);
+  abuf_c(&s, '\0'); // separate message from srclines
+  diag_add_srclines(a, pr, &s);
   abuf_terminate(&s);
 
-  c->_stop = !c->diaghandler(&c->diag, c->userdata);
+  bool keepgoing = a->diaghandler(&a->diag, a->userdata);
+  rasm_stop_set(a, !keepgoing);
 }
 
-void errf(rasm* c, rsrcpos pos, const char* fmt, ...) {
+void errf(rasm* a, rposrange pr, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  reportv(c, pos, 1, fmt, ap);
+  reportv(a, pr, 1, fmt, ap);
   va_end(ap);
 }
 
-void warnf(rasm* c, rsrcpos pos, const char* fmt, ...) {
+void warnf(rasm* a, rposrange pr, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  reportv(c, pos, 0, fmt, ap);
+  reportv(a, pr, 0, fmt, ap);
   va_end(ap);
 }
 
-rerror rasm_loadfile(rasm* c, const char* filename) {
-  rerror err = mmapfile(filename, (void**)&c->srcdata, &c->srclen);
+rerror rasm_loadfile(rasm* a, const char* filename) {
+  rerror err = mmapfile(filename, (void**)&a->srcdata, &a->srclen);
   if (err == 0)
-    c->srcname = filename;
+    a->srcname = filename;
   return err;
 }
 

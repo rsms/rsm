@@ -11,32 +11,36 @@
 #define fu(N) ( RSM_GET_i(in) ? _fu(RSM_GET_##N##u(in)) : fr(N) )
 #define fs(N) ( RSM_GET_i(in) ? _fs(RSM_GET_##N##s(in)) : fr(N) )
 
-#define fi__
-#define fi_A     fr(A)
-#define fi_Au    fu(A)
-#define fi_As    fs(A)
-#define fi_AB    fr(A); fr(B)
-#define fi_ABu   fr(A); fu(B)
-#define fi_ABs   fr(A); fs(B)
-#define fi_ABC   fr(A); fr(B); fr(C)
-#define fi_ABCu  fr(A); fr(B); fu(C)
-#define fi_ABCs  fr(A); fr(B); fs(C)
-#define fi_ABCD  fr(A); fr(B); fr(C); fr(D)
-#define fi_ABCDu fr(A); fr(B); fr(C); fu(D)
-#define fi_ABCDs fr(A); fr(B); fr(C); fs(D)
 
-void fmtinstr(abuf* s, rinstr in, rfmtflag fl) {
+u32 fmtinstr(abuf* s, rinstr in, rfmtflag fl) {
+  #define fi__     break;
+  #define fi_A     fr(A); break;
+  #define fi_Au    fu(A); break;
+  #define fi_As    fs(A); break;
+  #define fi_AB    fr(A); fr(B); break;
+  #define fi_ABv   fr(A); fu(B); assert(RSM_GET_OP(in)==rop_COPYV); return 1+RSM_GET_Bu(in);
+  #define fi_ABu   fr(A); fu(B); break;
+  #define fi_ABs   fr(A); fs(B); break;
+  #define fi_ABC   fr(A); fr(B); fr(C); break;
+  #define fi_ABCu  fr(A); fr(B); fu(C); break;
+  #define fi_ABCs  fr(A); fr(B); fs(C); break;
+  #define fi_ABCD  fr(A); fr(B); fr(C); fr(D); break;
+  #define fi_ABCDu fr(A); fr(B); fr(C); fu(D); break;
+  #define fi_ABCDs fr(A); fr(B); fr(C); fs(D); break;
   abuf_str(s, rop_name(RSM_GET_OP(in)));
   switch (RSM_GET_OP(in)) {
-    #define _(OP, ENC, ...) case rop_##OP: fi_##ENC; break;
+    #define _(OP, ENC, ...) case rop_##OP: fi_##ENC
     RSM_FOREACH_OP(_)
     #undef _
   }
+  return 1;
 }
 
-usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in, rfmtflag fl) {
+usize rsm_fmtinstr(char* buf, usize bufcap, rinstr in, u32* pcaddp, rfmtflag fl) {
   abuf s = abuf_make(buf, bufcap);
-  fmtinstr(&s, in, fl);
+  u32 pcadd = fmtinstr(&s, in, fl);
+  if (pcaddp)
+    *pcaddp = pcadd;
   return abuf_terminate(&s);
 }
 
@@ -48,17 +52,11 @@ usize rsm_fmtprog(char* buf, usize bufcap, rinstr* nullable ip, usize ilen, rfmt
       abuf_c(s, '\n');
     rinstr in = ip[i];
     abuf_fmt(s, "%4lx  ", i);
-    fmtinstr(s, in, fl);
+    u32 pcadd = fmtinstr(s, in, fl);
+
+    // variable imm
+    while (--pcadd)
+      abuf_fmt(s, " 0x%08x", ip[++i]);
   }
   return abuf_terminate(s);
-}
-
-
-const char* rop_name(rop op) {
-  switch (op) {
-    #define _(name, enc, asmname, ...) case rop_##name: return asmname;
-    RSM_FOREACH_OP(_)
-    #undef _
-  }
-  return "?";
 }

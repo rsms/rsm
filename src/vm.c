@@ -26,7 +26,7 @@ struct vmstate {
     for (int i = 0; i < 6; i++)
       fprintf(stderr, REG_FMTVAL_PAT("%4llx"), REG_FMTVAL(i, iregs[i]));
     char buf[128];
-    rsm_fmtinstr(buf, sizeof(buf), inv[pc], RSM_FMT_COLOR);
+    rsm_fmtinstr(buf, sizeof(buf), inv[pc], NULL, RSM_FMT_COLOR);
     fprintf(stderr, "  │ %3ld  %s\n", pc, buf);
   }
 #else
@@ -39,7 +39,7 @@ struct vmstate {
 #define MAIN_RET_PC  USIZE_MAX  // special PC value representing the main return address
 
 // accessor macros
-#define SP  iregs[31]
+#define SP  iregs[RSM_MAX_REG]
 #define PC  pc
 
 #define RA  iregs[ar] // u64
@@ -76,6 +76,7 @@ enum vmerror {
   VM_E_STACK_OVERFLOW,
   VM_E_OOB_LOAD,
   VM_E_OOB_STORE,
+  VM_E_OOB_PC,
   VM_E_OPNOI,
   VM_E_SHIFT_EXP,
 } RSM_END_ENUM(vmerror)
@@ -91,6 +92,7 @@ static void _vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
     S(VM_E_STACK_OVERFLOW,  "stack overflow %llx (align %llu B)", arg1, arg2)
     S(VM_E_OOB_LOAD,        "memory load out of bounds %llx (align %llu B)", arg1, arg2)
     S(VM_E_OOB_STORE,       "memory store out of bounds %llx (align %llu B)", arg1, arg2)
+    S(VM_E_OOB_PC,          "PC out of bounds %llx", arg1)
     S(VM_E_OPNOI,           "op %s does not accept immediate value", rop_name(arg1))
     S(VM_E_SHIFT_EXP,       "shift exponent %llu is too large", arg1)
   }
@@ -103,7 +105,7 @@ static void _vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
 
   abuf_str(s, "Register state:");
 
-  for (u32 i = 0, endi = 31; i < endi; i++) {
+  for (u32 i = 0, endi = RSM_MAX_REG; i < endi; i++) {
     if (i % 8 == 0) {
       usize len = s->len;
       abuf_fmt(s, "\n  R%u…%u", i, MIN(i+7, endi-1));
@@ -189,6 +191,14 @@ static u64 pop(VMPARAMS, usize size) {
   return LOAD(u64, addr);
 }
 
+static u64 copyv(VMPARAMS, u64 n) {
+  // A = instr[PC+1] + instr[PC+2]; PC+=2
+  check(pc+n < vs->inlen, VM_E_OOB_PC, (u64)pc);
+  if (n == 1) return (u64)inv[pc+1];
+  assert(n == 2);
+  return (((u64)inv[pc+1]) << 32) | (u64)inv[pc+2];
+}
+
 isize write(int fd, const void* buf, usize nbyte); // libc
 
 static void vmexec(VMPARAMS) {
@@ -214,6 +224,7 @@ static void vmexec(VMPARAMS) {
       #define L__          L_r
       #define L_A          L_r
       #define L_AB         L_r
+      #define L_ABv        L_i
       #define L_ABC        L_r
       #define L_ABCD       L_r
       #define L_Au(OP)     L_r(OP) L_i(OP)
@@ -263,7 +274,8 @@ static void vmexec(VMPARAMS) {
     // operation handlers -- each op should have a do_OP(lastarg) macro defined here.
     // Ops that use the i(mmediate) flag will have their "do" macro used twice (reg & imm)
     // These macros are used like this: "case op_and_i: do_OP(lastarg); break;"
-    #define do_COPY(B) RA = B
+    #define do_COPY(B)  RA = B
+    #define do_COPYV(B) RA = copyv(VMARGS, B); pc += B;
 
     #define do_LOAD(C)   RA = LOAD(u64, (usize)((i64)RB+(i64)C))
     #define do_LOAD4U(C) RA = LOAD(u32, (usize)((i64)RB+(i64)C)) // zero-extend i32 to i64
@@ -328,6 +340,7 @@ static void vmexec(VMPARAMS) {
     #define CASE_ABC(OP)   R(OP) do_##OP(RC); NEXT
     #define CASE_ABCD(OP)  R(OP) do_##OP(RD); NEXT
     #define CASE_Au(OP)    R(OP) do_##OP(RA); NEXT   I(OP) do_##OP(RAu); NEXT
+    #define CASE_ABv(OP)   I(OP) do_##OP(RBu); NEXT
     #define CASE_ABu(OP)   R(OP) do_##OP(RB); NEXT   I(OP) do_##OP(RBu); NEXT
     #define CASE_ABCu(OP)  R(OP) do_##OP(RC); NEXT   I(OP) do_##OP(RCu); NEXT
     #define CASE_ABCDu(OP) R(OP) do_##OP(RD); NEXT   I(OP) do_##OP(RDu); NEXT

@@ -125,14 +125,16 @@ funbody    = "{" block0? block* "}"
 block0     = blockstmt*
 block      = name ":" blockstmt*
 blockstmt  = operation | assignment | binop
-operation  = op arg*
+operation  = op operand*
            ; brz R1 end
-binop      = arg ("-" | "+" | "*" | "/") arg
+binop      = operand ("-" | "+" | "*" | "/") operand
            ; x + 3
-assignment = (reg | local) "=" (operation | arg)
+assignment = assignreg | assigndata
+assignreg  = reg "=" (operation | operand) ";"
+assigndata = gname "=" type expr? ";"
            ; R3 = add R1 R4
-           ; x  = add y z
-arg        = reg | local | literal
+           ; @x = i32 123
+operand    = reg | literal
 literal    = intlit
 intlit     = "-"? (binlit | declit | hexlit)
 binlit     = "0b" ("0" | "1")+

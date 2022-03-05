@@ -4,7 +4,12 @@
 #include "rsmimpl.h"
 
 //#define LOG_TOKENS /* define to log() token scanning */
-//#define LOG_AST /* define to log() parsed top-level ast nodes */
+#define LOG_AST /* define to log() parsed top-level ast nodes */
+#define LOG_PRATT(args...) dlog(args) /* define to log pratt dispatch */
+
+#ifndef LOG_PRATT
+  #define LOG_PRATT(args...) ((void)0)
+#endif
 
 // parse state
 typedef struct pstate pstate;
@@ -18,8 +23,7 @@ struct pstate {
   rtok        tok;        // current token
   bool        insertsemi; // insert RT_SEMI before next newline
   bool        isneg;      // true when parsing a negative number
-  u64         ival;       // integer value for RT_INT* tokens
-  usize       nops;       // number of ops we encountered; a hint for codegen
+  u64         ival;       // integer value for RT_INTLIT* tokens
 };
 
 typedef u8 precedence;
@@ -27,16 +31,7 @@ enum precedence {
   PREC_LOWEST,
   PREC_ASSIGN,
   PREC_COMMA,
-  PREC_LOGICAL_OR,
-  PREC_LOGICAL_AND,
-  PREC_BITWISE_OR,
-  PREC_BITWISE_XOR,
-  PREC_BITWISE_AND,
-  PREC_EQUAL,
-  PREC_COMPARE,
-  PREC_SHIFT,
-  PREC_ADD,
-  PREC_MULTIPLY,
+  PREC_BINOP,
   PREC_UNARY_PREFIX,
   PREC_UNARY_POSTFIX,
   PREC_MEMBER,
@@ -54,24 +49,27 @@ struct parselet {
   precedence     prec;
 };
 
+typedef u8 ropres; // operation result type
+enum ropres {
+  ropres_nil,
+  ropres_reg,
+  ropres_mem,
+};
+
 
 static smap kwmap = {0}; // keywords map
 
-// istypetok returns true if t represents (or begins the description of) a type
-static bool istypetok(rtok t) {
-  switch (t) {
-    case RT_I1:
-    case RT_I8:
-    case RT_I16:
-    case RT_I32:
-    case RT_I64:
-      return true;
-    default:
-      return false;
+
+static ropres rop_result(rop op) {
+  switch (op) {
+    #define _(name, enc, res, ...) case rop_##name: return ropres_##res;
+    RSM_FOREACH_OP(_)
+    #undef _
+    default: return ropres_nil;
   }
 }
 
-static void appendchild(rnode* parent, rnode* child) {
+static rnode* appendchild(rnode* parent, rnode* child) {
   if (parent->children.tail) {
     parent->children.tail->next = child;
   } else {
@@ -79,13 +77,15 @@ static void appendchild(rnode* parent, rnode* child) {
   }
   parent->children.tail = child;
   assert(child->next == NULL);
+  return parent;
 }
 
-static void setchildren2(rnode* parent, rnode* child1, rnode* child2) {
+static rnode* setchildren2(rnode* parent, rnode* child1, rnode* child2) {
   parent->children.head = child1;
   parent->children.tail = child2;
   child1->next = child2;
   assert(child2->next == NULL);
+  return parent;
 }
 
 static usize toklen(pstate* p) { // length in bytes of current token
@@ -93,15 +93,25 @@ static usize toklen(pstate* p) { // length in bytes of current token
   return (usize)(uintptr)(p->inp - p->tokstart);
 }
 
+static usize toklen32(pstate* p) { // length in bytes of current token
+  assert((uintptr)p->inp >= (uintptr)p->tokstart);
+  assert((uintptr)(p->inp - p->tokstart) <= U32_MAX);
+  return (u32)(uintptr)(p->inp - p->tokstart);
+}
+
 static u32 pcolumn(pstate* p) { // source column of current token
   return (u32)((uintptr)p->tokstart - (uintptr)p->linestart) + 1;
+}
+
+static rposrange sposrange(pstate* p) {
+  return (rposrange){.focus={ p->lineno, pcolumn(p) }};
 }
 
 ATTR_FORMAT(printf, 2, 3)
 static void serr(pstate* p, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  reportv(p->a, (rsrcpos){p->lineno, pcolumn(p)}, 1, fmt, ap);
+  reportv(p->a, sposrange(p), 1, fmt, ap);
   va_end(ap);
   p->tok = RT_END;
 }
@@ -111,9 +121,9 @@ static void perr(pstate* p, rnode* nullable n, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
   if (n) {
-    reportv(p->a, n->pos, 1, fmt, ap);
+    reportv(p->a, nposrange(n), 1, fmt, ap);
   } else {
-    reportv(p->a, (rsrcpos){p->lineno, pcolumn(p)}, 1, fmt, ap);
+    reportv(p->a, sposrange(p), 1, fmt, ap);
   }
   va_end(ap);
 }
@@ -161,7 +171,6 @@ static void snameunicode(pstate* p) {
 }
 
 static void sname(pstate* p) {
-  p->tok = RT_NAME;
   while (p->inp < p->inend && isname(*p->inp))
     p->inp++;
   if (p->inp < p->inend && (u8)*p->inp >= UTF8_SELF)
@@ -172,6 +181,10 @@ static void sname(pstate* p) {
     return;
   }
   p->insertsemi = true;
+}
+
+static void sname_or_kw(pstate* p) { // "foo"
+  sname(p);
   uintptr* vp = smap_lookup(&kwmap, p->tokstart, toklen(p)); // look up keyword
   if (!vp)
     return;
@@ -215,7 +228,7 @@ end:
     if UNLIKELY(acc > 0x8000000000000000llu)
       err = rerr_overflow;
     if LIKELY(p->tok != RT_END) // tok is RT_END if an error occurred
-      p->tok++; // RT_INT -> RT_SINT
+      p->tok++; // RT_INTLIT -> RT_SINTLIT
     p->ival = -acc;
   } else {
     p->ival = acc;
@@ -237,7 +250,7 @@ static void snumber(pstate* p, int base) {
 static void sreg(pstate* p) {
   assert(p->isneg == false); // or snumber1 will return a garbage token
   rerror err = snumber1(p, 10);
-  if UNLIKELY(err || p->ival > 31)
+  if UNLIKELY(err || p->ival > RSM_MAX_REG)
     return serr(p, "invalid register");
 }
 
@@ -257,7 +270,7 @@ static void sadvance(pstate* p) { // scan the next token
     p->tok = RT_SEMI; return;
   }
 
-  if UNLIKELY(p->inp == p->inend || p->a->_stop) {
+  if UNLIKELY(p->inp == p->inend || rasm_stop(p->a)) {
     p->tokstart--;
     if (p->insertsemi) {
       p->insertsemi = false;
@@ -302,10 +315,10 @@ static void sadvance(pstate* p) { // scan the next token
       p->isneg = true;
       FALLTHROUGH;
     case '0': switch (*p->inp) {
-      case 'B': case 'b': p->inp++; p->tok = RT_INT2;  return snumber(p, 2);
-      case 'X': case 'x': p->inp++; p->tok = RT_INT16; return snumber(p, 16);
+      case 'B': case 'b': p->inp++; p->tok = RT_INTLIT2;  return snumber(p, 2);
+      case 'X': case 'x': p->inp++; p->tok = RT_INTLIT16; return snumber(p, 16);
     } FALLTHROUGH;
-    case '1' ... '9': p->inp--; p->tok = RT_INT10; return snumber(p, 10);
+    case '1' ... '9': p->inp--; p->tok = RT_INTLIT; return snumber(p, 10);
 
     case '/':
       if (*p->inp == '/') {
@@ -317,15 +330,17 @@ static void sadvance(pstate* p) { // scan the next token
       p->tok = RT_SLASH; return;
     case 'R': p->tok = RT_IREG; return sreg(p);
     case 'F': p->tok = RT_FREG; return sreg(p);
+    case '@': p->tok = RT_GNAME; return sname(p);
     default: // anything else is the start of a name
       if ((u8)c >= UTF8_SELF) {
         p->inp--;
         p->tok = RT_NAME;
         return snameunicode(p);
       }
-      if UNLIKELY(!isalnum(c) && c != '_' && c != '$')
+      if UNLIKELY(!isalnum(c) && c != '_')
         return serr(p, "unexpected character");
-      return sname(p);
+      p->tok = RT_NAME;
+      return sname_or_kw(p);
   }
 }
 
@@ -337,11 +352,11 @@ static void sadvance(pstate* p) { // scan the next token
     const char* tname = tokname(t);
     const char* tvalp = p->tokstart;
     int tvalc = (int)toklen(p);
-    if (t == RT_INT2 || t == RT_INT10 || t == RT_INT16 || t == RT_IREG || t == RT_FREG) {
+    if (t == RT_INTLIT2 || t == RT_INTLIT || t == RT_INTLIT16 || t == RT_IREG || t == RT_FREG) {
       return log("%3u:%-3u %-12s \"%.*s\"\t%llu\t0x%llx",
         line, col, tname, tvalc, tvalp, p->ival, p->ival);
     }
-    if (t == RT_SINT2 || t == RT_SINT10 || t == RT_SINT16) { // uses ival
+    if (t == RT_SINTLIT2 || t == RT_SINTLIT || t == RT_SINTLIT16) { // uses ival
       return log("%3u:%-3u %-12s \"%.*s\"\t%lld\t0x%llx",
         line, col, tname, tvalc, tvalp, (i64)p->ival, p->ival);
     }
@@ -349,13 +364,7 @@ static void sadvance(pstate* p) { // scan the next token
   }
 #endif
 
-// got comsumes the next token if p->tok == t
-static bool got(pstate* p, rtok t) {
-  if (p->tok != t)
-    return false;
-  sadvance(p);
-  return true;
-}
+static bool got(pstate* p, rtok t);
 
 // sfastforward advances the scanner until one of the tokens in stoplist is encountered.
 // stoplist should be NULL-terminated.
@@ -372,20 +381,44 @@ static void sfastforward(pstate* p, const rtok* stoplist) {
 end:
   if (inp == p->inp)
     sadvance(p);  // guarantee progress
-  got(p, RT_SEMI); // slurp a trailing semicolon
 }
 
-// --- parse
+static void sfastforward_semi(pstate* p) {
+  const rtok stoplist[] = { RT_SEMI, 0 };
+  sfastforward(p, stoplist);
+}
 
 
 static rnode* pstmt(PPARAMS);
 #define pexpr pstmt
+
+static const char* nname(rnode* n) {
+  // TODO improve with better names, e.g. "assignment" instead of "EQ"
+  return tokname(n->t);
+}
 
 // perrunexpected reports a syntax error along with the current token
 static void perrunexpected(
   pstate* p, rnode* nullable n, const char* expected, const char* got)
 {
   perr(p, n, "expected %s, got %s", expected, got);
+}
+
+// got comsumes the next token if p->tok == t
+static bool got(pstate* p, rtok t) {
+  if (p->tok != t)
+    return false;
+  sadvance(p);
+  return true;
+}
+
+// eat comsumes the next token if it's t, reporting a syntax error if p->tok != t
+static void eat(pstate* p, rtok t) {
+  if UNLIKELY(p->tok != t) {
+    perrunexpected(p, NULL, tokname(t), tokname(p->tok));
+    return;
+  }
+  sadvance(p);
 }
 
 // expect reports a syntax error if p->tok != t
@@ -395,8 +428,8 @@ static void expecttok(pstate* p, rtok t) {
 }
 
 static bool expecttype(pstate* p, rnode* n) {
-  if UNLIKELY(!istypetok(n->t)) {
-    perrunexpected(p, NULL, "type", tokname(n->t));
+  if UNLIKELY(!tokistype(n->t)) {
+    perrunexpected(p, n, "type", nname(n));
     return false;
   }
   return true;
@@ -404,30 +437,14 @@ static bool expecttype(pstate* p, rnode* n) {
 
 static bool expectname(pstate* p, rnode* n) {
   if UNLIKELY(n->t != RT_NAME) {
-    perrunexpected(p, n, "name", tokname(n->t));
+    perrunexpected(p, n, "name", nname(n));
     return false;
   }
   return true;
 }
 
 static bool nsigned(rnode* n) {
-  return n->t == RT_SINT2 || n->t == RT_SINT10 || n->t == RT_SINT16;
-}
-
-// eat comsumes the next token, reporting a syntax error if p->tok != t
-static void eat(pstate* p, rtok t) {
-  expecttok(p, t);
-  sadvance(p);
-}
-
-// mk* functions makes new nodes
-static rnode* mknode(pstate* p) {
-  rnode* n = rmem_alloc(p->a->mem, sizeof(rnode));
-  memset(n, 0, sizeof(rnode));
-  n->t = p->tok;
-  n->pos.line = p->lineno;
-  n->pos.col = pcolumn(p);
-  return n;
+  return n->t == RT_SINTLIT2 || n->t == RT_SINTLIT || n->t == RT_SINTLIT16;
 }
 
 void rasm_free_rnode(rasm* a, rnode* n) {
@@ -436,17 +453,19 @@ void rasm_free_rnode(rasm* a, rnode* n) {
   rmem_free(a->mem, n, sizeof(rnode));
 }
 
-static rnode* mklist(pstate* p) {
-  rnode* n = mknode(p);
-  n->t = RT_LPAREN;
+// mk* functions makes new nodes
+static rnode* mknodet(pstate* p, rtok t) {
+  rnode* n = rmem_alloc(p->a->mem, sizeof(rnode));
+  memset(n, 0, sizeof(rnode));
+  n->t = t;
+  n->pos.line = p->lineno;
+  n->pos.col = pcolumn(p);
   return n;
 }
 
-static rnode* mknil(pstate* p) {
-  rnode* n = mknode(p);
-  n->t = RT_END;
-  return n;
-}
+static rnode* mknode(pstate* p) { return mknodet(p, p->tok); }
+static rnode* mklist(pstate* p) { return mknodet(p, RT_LPAREN); }
+static rnode* mknil(pstate* p)  { return mknodet(p, RT_END); }
 
 static rnode* ptype(PPARAMS) {
   rnode* n = pstmt(PARGS);
@@ -454,65 +473,117 @@ static rnode* ptype(PPARAMS) {
   return n;
 }
 
-// parse any token with an ival
 static rnode* prefix_int(PPARAMS) {
   rnode* n = mknode(p);
   n->ival = p->ival;
-  sadvance(p); // consume token
+  sadvance(p);
   return n;
 }
 
-// assign = (reg | name) "=" expr ";"
-static rnode* infix_eq(PPARAMS, rnode* dst) {
+// assignreg = reg "=" (operation | operand) ";"
+static rnode* passignreg(PPARAMS, rnode* eq) {
+  rnode* rhs = pexpr(PARGS);
+  appendchild(eq, rhs);
+  switch (rhs->t) {
+    case RT_OP: {
+      ropres res = rop_result(rhs->ival);
+      if UNLIKELY(res != ropres_reg) {
+        // note: using srcpos of eq here to make hanging equal
+        perr(p, rhs, "register store of operation %s which does not produce a %sresult",
+          rop_name(rhs->ival), res == ropres_nil ? "" : "register ");
+      }
+      break;
+    }
+    default:
+      if UNLIKELY(!tokisoperand(rhs->t))
+        perrunexpected(p, rhs, "operation or operand", nname(rhs));
+  }
+  return eq;
+}
+
+// assigndata = gname "=" type expr? ";"
+static rnode* passigndata(PPARAMS, rnode* eq) {
+  eq->t = RT_GDEF;
+  rnode* rhs = ptype(PARGS);
+  appendchild(eq, rhs);
+  if (p->tok != RT_SEMI) { // initializer
+    rnode* init = pexpr(PARGS);
+    appendchild(rhs, init);
+  }
+  return eq;
+}
+
+// assignment = assignreg | assigndata
+// assignreg  = reg "=" (operation | operand) ";"
+// assigndata = gname "=" type expr? ";"
+static rnode* infix_eq(PPARAMS, rnode* lhs) {
   rnode* n = mknode(p);
   sadvance(p);
-  p->nops++;
-  rnode* src = pexpr(PARGS);
-  setchildren2(n, dst, src);
+  appendchild(n, lhs);
+  switch (lhs->t) {
+    case RT_GNAME:              return passigndata(PARGS, n);
+    case RT_IREG: case RT_FREG: return passignreg(PARGS, n);
+  }
+  perrunexpected(p, lhs, "@name or register", nname(lhs));
+  if (p->tok != RT_SEMI) // attempt to recover and also improve error message
+    appendchild(n, pexpr(PARGS));
   return n;
 }
 
 static rnode* prefix_name(PPARAMS) {
   rnode* n = mknode(p);
   n->name.p = p->tokstart;
-  n->name.len = toklen(p);
+  n->name.len = toklen32(p);
   sadvance(p);
   return n;
 }
 
-#define prefix_type prefix_name
+static rnode* prefix_type(PPARAMS) {
+  rnode* n = mknode(p);
+  sadvance(p);
+  return n;
+}
 
-static rnode* pargs(PPARAMS, rnode* n) {
+// operand = reg | literal
+static rnode* poperand(PPARAMS) {
+  rnode* operand = pstmt(PARGS);
+  if UNLIKELY(!tokisoperand(operand->t)) {
+    perrunexpected(p, operand, "register or literal", nname(operand));
+    sfastforward_semi(p);
+  }
+  return operand;
+}
+
+// operands = operand*
+static rnode* poperands(PPARAMS, rnode* n) {
   while (p->tok != RT_SEMI && p->tok != RT_END) {
-    rnode* arg = pstmt(PARGS);
-    appendchild(n, arg);
+    rnode* operand = poperand(PARGS);
+    appendchild(n, operand);
   }
   return n;
 }
 
-// operation = op arg*
+// operation = op operand*
 static rnode* prefix_op(PPARAMS) {
   rnode* n = prefix_int(PARGS);
-  p->nops++;
-  return pargs(PARGS, n);
+  return poperands(PARGS, n);
 }
 
-// (reg | name) op expr
-static rnode* infix_op(PPARAMS, rnode* arg0) {
+// binop = operand ("-" | "+" | "*" | "/") operand
+static rnode* infix_binop(PPARAMS, rnode* lhs) {
   rnode* n = mknode(p);
-  // map token to opcode
+  sadvance(p);
+  // set n->ival by mapping token to opcode
   switch (n->t) {
-    #define _(tok, op_u, op_s) \
-      case tok: n->ival = nsigned(arg0) ? rop_##op_s : rop_##op_u; break;
+    #define _(TOK, op_u, op_s) \
+      case TOK: n->ival = nsigned(lhs) ? rop_##op_s : rop_##op_u; break;
     RSM_FOREACH_BINOP_TOKEN(_)
     #undef _
-    default: UNREACHABLE;
+    default: assertf(0,"n->t %u (%s)", n->t, tokname(n->t));
   }
   n->t = RT_OP;
-  sadvance(p);
-  p->nops++;
-  appendchild(n, arg0);
-  return pargs(PARGS, n);
+  rnode* rhs = poperand(PARGS);
+  return setchildren2(n, lhs, rhs);
 }
 
 // blockbody = blockstmt*
@@ -525,23 +596,23 @@ static rnode* pblockbody(PPARAMS, rnode* block) {
       case RT_END:
       case RT_LABEL:
         return block;
-      // will-parse tokens
-      case RT_OP:
-      case RT_EQ:
-      case RT_IREG:
-      case RT_FREG:
-        break;
-      // unexpected
-      default: {
-        if (p->tok == RT_NAME) {
-          perr(p, NULL, "unknown operation \"%.*s\"", (int)toklen(p), p->tokstart);
-        } else {
-          perrunexpected(p, NULL, "operation or assignment", tokname(p->tok));
-        }
-        const rtok stoplist[] = { RT_SEMI, 0 };
-        sfastforward(p, stoplist);
-        continue;
-      }
+      // // will-parse tokens
+      // case RT_OP:
+      // case RT_EQ:
+      // case RT_IREG:
+      // case RT_FREG:
+      //   break;
+      // // unexpected
+      // default: {
+      //   if (p->tok == RT_NAME) {
+      //     perr(p, NULL, "unknown operation \"%.*s\"", (int)toklen(p), p->tokstart);
+      //   } else {
+      //     perrunexpected(p, NULL, "operation or assignment", tokname(p->tok));
+      //   }
+      //   const rtok stoplist[] = { RT_SEMI, 0 };
+      //   sfastforward(p, stoplist);
+      //   continue;
+      // }
     }
     rnode* cn = pstmt(PARGS);
     appendchild(block, cn);
@@ -560,15 +631,14 @@ static rnode* prefix_label(PPARAMS) {
 // param = (name type | type)
 static rnode* pparam(PPARAMS) {
   rnode* n = pexpr(PARGS);
-  if (!istypetok(p->tok)) {
+  if (!tokistype(p->tok)) {
     expecttype(p, n); // n should be a type
     return n; // just type
   }
   // both name and type
   expectname(p, n);
   rnode* typ = ptype(PARGS);
-  appendchild(n, typ);
-  return n;
+  return appendchild(n, typ);
 }
 
 // params = param ("," param)*
@@ -581,6 +651,14 @@ static rnode* pparams(PPARAMS) {
   }
 }
 
+// datadef = "data" name type "[]"? dataval*
+// dataval = literal
+// strlit  = "\"" <c string literal> "\""
+static rnode* prefix_data(PPARAMS) {  // prefix_data
+  // TODO
+  return mknil(p);
+}
+
 // fundef = "fun" name "(" params? ")" result? "{" body "}"
 // result = params
 // body   = (stmt ";")*
@@ -591,7 +669,7 @@ static rnode* prefix_fun(PPARAMS) {
   // name
   expecttok(p, RT_NAME);
   n->name.p = p->tokstart;
-  n->name.len = toklen(p);
+  n->name.len = toklen32(p);
   sadvance(p);
 
   // parameters
@@ -641,31 +719,32 @@ static rnode* prefix_fun(PPARAMS) {
 }
 
 static const parselet parsetab[rtok_COUNT] = {
-  [RT_IREG]  = {prefix_int, NULL, PREC_MEMBER},
-  [RT_FREG]  = {prefix_int, NULL, PREC_MEMBER},
-  [RT_OP]    = {prefix_op, NULL, PREC_MEMBER},
-  [RT_LABEL] = {prefix_label, NULL, PREC_MEMBER},
-  [RT_NAME]  = {prefix_name, NULL, PREC_MEMBER},
-  [RT_I1]    = {prefix_type, NULL, PREC_MEMBER},
-  [RT_I8]    = {prefix_type, NULL, PREC_MEMBER},
-  [RT_I16]   = {prefix_type, NULL, PREC_MEMBER},
-  [RT_I32]   = {prefix_type, NULL, PREC_MEMBER},
-  [RT_I64]   = {prefix_type, NULL, PREC_MEMBER},
+  [RT_IREG]  = {prefix_int, NULL, 0},
+  [RT_FREG]  = {prefix_int, NULL, 0},
+  [RT_OP]    = {prefix_op, NULL, 0},
+  [RT_LABEL] = {prefix_label, NULL, 0},
+  [RT_NAME]  = {prefix_name, NULL, 0},
+  [RT_GNAME] = {prefix_name, NULL, 0},
+  [RT_I1]    = {prefix_type, NULL, 0},
+  [RT_I8]    = {prefix_type, NULL, 0},
+  [RT_I16]   = {prefix_type, NULL, 0},
+  [RT_I32]   = {prefix_type, NULL, 0},
+  [RT_I64]   = {prefix_type, NULL, 0},
+  [RT_EQ]    = {NULL, infix_eq, PREC_ASSIGN},
 
-  [RT_EQ]    = {NULL, infix_eq, PREC_MEMBER},
-
-  #define _(tok, ...) [tok] = {NULL, infix_op, PREC_MEMBER},
+  #define _(tok, ...) [tok] = {NULL, infix_binop, PREC_BINOP},
   RSM_FOREACH_BINOP_TOKEN(_)
   #undef _
 
-  [RT_INT2]   = {prefix_int, NULL, PREC_MEMBER},
-  [RT_SINT2]  = {prefix_int, NULL, PREC_MEMBER},
-  [RT_INT10]  = {prefix_int, NULL, PREC_MEMBER},
-  [RT_SINT10] = {prefix_int, NULL, PREC_MEMBER},
-  [RT_INT16]  = {prefix_int, NULL, PREC_MEMBER},
-  [RT_SINT16] = {prefix_int, NULL, PREC_MEMBER},
+  [RT_INTLIT2]   = {prefix_int, NULL, 0},
+  [RT_SINTLIT2]  = {prefix_int, NULL, 0},
+  [RT_INTLIT]    = {prefix_int, NULL, 0},
+  [RT_SINTLIT]   = {prefix_int, NULL, 0},
+  [RT_INTLIT16]  = {prefix_int, NULL, 0},
+  [RT_SINTLIT16] = {prefix_int, NULL, 0},
 
-  [RT_FUN] = {prefix_fun, NULL, PREC_MEMBER},
+  [RT_FUN]  = {prefix_fun, NULL, 0},
+  [RT_DATA] = {prefix_data, NULL, 0},
 };
 
 // stmt = anynode ";"
@@ -673,13 +752,14 @@ static rnode* pstmt(PPARAMS) {
   const parselet* ps = &parsetab[p->tok];
 
   if UNLIKELY(!ps->prefix) {
+    LOG_PRATT("PREFIX %s not found", tokname(p->tok));
     perrunexpected(p, NULL, "statement", tokname(p->tok));
     rnode* n = mknil(p);
-    const rtok stoplist[] = { RT_SEMI, 0 };
-    sfastforward(p, stoplist);
+    sfastforward_semi(p);
     return n;
   }
 
+  LOG_PRATT("PREFIX %s call", tokname(p->tok));
   ATTR_UNUSED const void* p1 = p->inp;
   ATTR_UNUSED bool insertsemi = p->insertsemi;
   rnode* n = ps->prefix(PARGS);
@@ -687,14 +767,67 @@ static rnode* pstmt(PPARAMS) {
     "parselet did not advance scanner");
 
   // infix
-  while (p->tok != RT_END) {
+  for (;;) {
     ps = &parsetab[p->tok];
-    if (ps->infix == NULL || ps->prec < prec)
+    if (ps->infix == NULL || ps->prec < prec) {
+      if (ps->infix) {
+        LOG_PRATT("INFIX %s skip (ps->prec %d < prec %d)", tokname(p->tok), ps->prec, prec);
+      } else if (p->tok != RT_SEMI) {
+        LOG_PRATT("INFIX %s not found", tokname(p->tok));
+      }
       return n;
+    }
+    LOG_PRATT("INFIX %s call", tokname(p->tok));
     n = ps->infix(PARGS, n);
   }
   return n;
 }
+
+
+static usize fmtnode(char* buf, usize bufcap, rnode* n);
+
+rnode* rasm_parse(rasm* a) {
+  rasm_stop_set(a, false);
+  a->errcount = 0;
+  pstate p = {
+    .a         = a,
+    .inp       = a->srcdata,
+    .inend     = a->srcdata + a->srclen,
+    .linestart = a->srcdata,
+    .lineno    = 1,
+  };
+
+  #ifdef LOG_AST
+    char buf[4096*8];
+  #endif
+
+  dlog("parsing \"%s\"", a->srcname);
+  sadvance(&p); // prime parser with initial token
+  rnode* module = mklist(&p);
+
+  while (p.tok != RT_END && !rasm_stop(a)) {
+    rnode* n = pstmt(&p, PREC_LOWEST);
+    if LIKELY(p.tok != RT_END) // every statement ends with a semicolon
+      eat(&p, RT_SEMI);
+    appendchild(module, n);
+
+    if UNLIKELY(n->t != RT_FUN && n->t != RT_GDEF) {
+      perr(&p, n, "unexpected top-level statement");
+      #ifdef LOG_AST
+        fmtnode(buf, sizeof(buf), n);
+        log("%s", buf);
+      #endif
+    }
+  }
+
+  #ifdef LOG_AST
+    fmtnode(buf, sizeof(buf), module);
+    log("\"%s\" module parsed as:\n%s", a->srcname, buf);
+  #endif
+
+  return module;
+}
+
 
 // --- ast formatter
 
@@ -716,12 +849,6 @@ static rnode* pstmt(PPARAMS) {
 
     // atoms
     switch ((enum rtok)n->t) {
-      case RT_I1:
-      case RT_I8:
-      case RT_I16:
-      case RT_I32:
-      case RT_I64:
-        return abuf_str(s, tokname(n->t));
       case RT_END:
         return abuf_str(s, "nil");
       default: break;
@@ -741,6 +868,7 @@ static rnode* pstmt(PPARAMS) {
 
     // complex
     abuf_str(s, tokname(n->t));
+    char* sp = s->p;
     abuf_c(s, ' ');
     switch ((enum rtok)n->t) {
       case RT_IREG:
@@ -748,6 +876,7 @@ static rnode* pstmt(PPARAMS) {
         abuf_u64(s, n->ival, 10); break;
 
       case RT_NAME:
+      case RT_GNAME:
       case RT_COMMENT:
       case RT_LABEL:
       case RT_FUN:
@@ -756,15 +885,23 @@ static rnode* pstmt(PPARAMS) {
       case RT_OP:
         abuf_str(s, rop_name((rop)n->ival)); break;
 
-      case RT_SINT2:  abuf_c(s, '-'); FALLTHROUGH;
-      case RT_INT2:   abuf_str(s, "0b"); abuf_u64(s, n->ival, 2); break;
-      case RT_SINT10: abuf_c(s, '-'); FALLTHROUGH;
-      case RT_INT10:  abuf_u64(s, n->ival, 10); break;
-      case RT_SINT16: abuf_c(s, '-'); FALLTHROUGH;
-      case RT_INT16:  abuf_str(s, "0x"); abuf_u64(s, n->ival, 16); break;
+      case RT_SINTLIT2:  abuf_c(s, '-'); FALLTHROUGH;
+      case RT_INTLIT2:   abuf_str(s, "0b"); abuf_u64(s, n->ival, 2); break;
+      case RT_SINTLIT: abuf_c(s, '-'); FALLTHROUGH;
+      case RT_INTLIT:  abuf_u64(s, n->ival, 10); break;
+      case RT_SINTLIT16: abuf_c(s, '-'); FALLTHROUGH;
+      case RT_INTLIT16:  abuf_str(s, "0x"); abuf_u64(s, n->ival, 16); break;
 
+      // only list
       case RT_EQ:
-        break; // only list
+      case RT_GDEF:
+      case RT_I1:
+      case RT_I8:
+      case RT_I16:
+      case RT_I32:
+      case RT_I64:
+        s->p = sp; s->len--; // undo abuf_c(s, ' ')
+        break;
 
       default:
         abuf_str(s, "[TODO fmtnode1]");
@@ -784,49 +921,6 @@ static rnode* pstmt(PPARAMS) {
   }
 
 #endif // LOG_AST
-
-
-rnode* rasm_parse(rasm* a) {
-  a->_stop = false;
-  a->errcount = 0;
-  pstate p = {
-    .a         = a,
-    .inp       = a->srcdata,
-    .inend     = a->srcdata + a->srclen,
-    .linestart = a->srcdata,
-    .lineno    = 1,
-  };
-
-  #ifdef LOG_AST
-    char buf[4096];
-  #endif
-
-  dlog("parsing \"%s\"", a->srcname);
-  sadvance(&p); // prime parser with initial token
-  rnode* module = mklist(&p);
-
-  while (p.tok != RT_END && !a->_stop) {
-    rnode* n = pstmt(&p, PREC_MEMBER);
-    if (p.tok != RT_END) // every statement ends with a semicolon
-      eat(&p, RT_SEMI);
-    appendchild(module, n);
-
-    if UNLIKELY(n->t != RT_FUN)
-      perr(&p, n, "expected function, got %s", tokname(n->t));
-
-    #ifdef LOG_AST
-      fmtnode(buf, sizeof(buf), n);
-      log("input:%u:%u: parsed top-level statement:\n%s", n->pos.line, n->pos.col, buf);
-    #endif
-  }
-
-  #ifdef LOG_AST
-    fmtnode(buf, sizeof(buf), module);
-    log("\"%s\" module parsed as:\n%s", a->srcname, buf);
-  #endif
-
-  return module;
-}
 
 
 // print_keywords
@@ -871,7 +965,7 @@ rerror parse_init() {
     *vp = token;
   RSM_FOREACH_KEYWORD_TOKEN(_)
   #undef _
-  #define _(op, enc, kw, ...) \
+  #define _(op, enc, res, kw, ...) \
     vp = assertnotnull(smap_assign(m, kw, strlen(kw))); \
     *vp = (RT_OP | ((uintptr)rop_##op << (sizeof(rtok)*8)));
   RSM_FOREACH_OP(_)

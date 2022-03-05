@@ -89,6 +89,16 @@ typedef unsigned long       usize;
 #else
   #define ATTR_UNUSED
 #endif
+#if __has_attribute(always_inline)
+  #define ALWAYS_INLINE __attribute__((always_inline)) inline
+#else
+  #define ALWAYS_INLINE inline
+#endif
+#if __has_attribute(noinline)
+  #define NOINLINE __attribute__((noinline)) inline
+#else
+  #define NOINLINE
+#endif
 
 // ATTR_FORMAT(archetype, string-index, first-to-check)
 // archetype determines how the format string is interpreted, and should be printf, scanf,
@@ -176,17 +186,37 @@ typedef unsigned long       usize;
   usize: __builtin_ctzl,      \
   u64:   __builtin_ctzll)(x)
 
-// __fls finds the last (most-significant) bit set
-#define __fls(x) (x ? sizeof(x) * 8 - __builtin_clz(x) : 0)
+// fls(uint n) finds the last (most-significant) bit set
+#define fls(n) ((sizeof(n) <= 4) ? __fls32(n) : __fls64(n))
+static ALWAYS_INLINE int __fls32(unsigned int x) {
+  return x ? sizeof(x) * 8 - __builtin_clz(x) : 0;
+}
+static ALWAYS_INLINE unsigned long __flsl(unsigned long x) {
+  return (sizeof(x) * 8) - 1 - __builtin_clzl(x);
+}
+#if USIZE_MAX < 0xffffffffffffffff
+  static ALWAYS_INLINE int __fls64(u64 x) {
+    u32 h = x >> 32;
+    if (h)
+      return __fls32(h) + 32;
+    return __fls32(x);
+  }
+#else
+  static ALWAYS_INLINE int __fls64(u64 x) {
+    if (x == 0)
+      return 0;
+    return __flsl(x) + 1;
+  }
+#endif
 
 // ILOG2 calculates the log of base 2
-#define ILOG2(n) ( __builtin_constant_p(n) ? ((n) < 2 ? 0 : 63 - __builtin_clzll(n)) \
-                                           : __fls(n) )
+#define ILOG2(n) ( \
+  __builtin_constant_p(n) ? ((n) < 2 ? 0 : 63 - __builtin_clzll(n)) : fls(n) - 1 )
 
 // CEIL_POW2 rounds up n to nearest power of two. Result is undefined when n is 0.
 #define CEIL_POW2(n) ( \
   __builtin_constant_p(n) ? ( ((n) == 1) ? 1 : (1UL << (ILOG2((n) - 1) + 1)) ) \
-                          : (1UL << __fls(n - 1)) )
+                          : (1UL << fls(n - 1)) )
 
 static inline RSM_WARN_UNUSED_RESULT bool __must_check_unlikely(bool unlikely) {
   return UNLIKELY(unlikely);
@@ -303,10 +333,10 @@ typedef __builtin_va_list va_list;
 
 // RSM_SAFE -- checks enabled in "debug" and "safe" builds (but not in "fast" builds.)
 //
-// void safecheck(EXPR)      -- elided from non-safe builds
-// EXPR safecheckexpr(EXPR)  -- included in non-safe builds (without check)
-// void safecheckf(EXPR, const char* fmt, ...)
-// typeof(EXPR) safenotnull(EXPR)
+// void safecheck(COND)                        -- elided from non-safe builds
+// void safecheckf(COND, const char* fmt, ...) -- elided from non-safe builds
+// EXPR safecheckexpr(EXPR, EXPECT)            -- included in non-safe builds (without check)
+// typeof(EXPR) safenotnull(EXPR)              -- included in non-safe builds (without check)
 //
 #if defined(RSM_SAFE)
   #undef RSM_SAFE
@@ -407,8 +437,8 @@ RSM_ASSUME_NONNULL_BEGIN
 #endif // printf
 
 // rsm_qsort is qsort_r aka qsort_s
-void rsm_qsort(void* base, usize nmemb, usize size,
-  int(*cmp)(const void* x, const void* y, void* nullable ctx), void* nullable ctx);
+typedef int(*rsm_qsort_cmp)(const void* x, const void* y, void* nullable ctx);
+void rsm_qsort(void* base, usize nmemb, usize size, rsm_qsort_cmp cmp, void* nullable ctx);
 
 // --------------------------------------------------------------------------------------
 // internal utility functions, like a string buffer. Not namespaced. See util.c
@@ -465,14 +495,12 @@ struct rarray {
   u8* nullable v; // u8 so we get -Wincompatible-pointer-types if we access .v directly
   u32 len, cap;
 };
-#define rarray_at(TYPE, a, index)           ( ((TYPE*)(a)->v) + (index) )
-#define rarray_push(TYPE, a, m)             ((TYPE*)rarray_zpush(sizeof(TYPE),(a),(m)))
-#define rarray_remove(TYPE, a, start, len)  rarray_zremove(sizeof(TYPE),(a),(start),(len))
-#define rarray_free(TYPE, a, m)             rarray_zfree(sizeof(TYPE),(a),(m))
-
-#define rarray_zpush(esize, a, m)             _rarray_push((a), (m), esize)
-#define rarray_zremove(esize, a, start, len)  _rarray_remove((a), esize, (start), (len))
-#define rarray_zfree(esize, a, m)  if ((a)->v) rmem_free((m),(a)->v,(usize)(a)->cap*esize)
+#define rarray_at(T, a, index)             (((T*)(a)->v) + (index))
+#define rarray_at_safe(T, a, i)            ({safecheck((i)<(a)->len);rarray_at(T,(a),(i));})
+#define rarray_push(T, a, m)               ((T*)_rarray_push((a),(m),sizeof(T)))
+#define rarray_remove(T, a, start, len)    _rarray_remove((a),sizeof(T),(start),(len))
+#define rarray_move(T, a, dst, start, end) _array_move(sizeof(T),(a)->v,(dst),(start),(end))
+#define rarray_free(T, a, m)   if ((a)->v)rmem_free((m),(a)->v,(usize)(a)->cap*sizeof(T))
 
 bool rarray_grow(rarray* a, rmem, usize elemsize, u32 addl);
 void _rarray_remove(rarray* a, u32 elemsize, u32 start, u32 len);
@@ -481,6 +509,29 @@ inline static void* nullable _rarray_push(rarray* a, rmem m, u32 elemsize) {
     return NULL;
   return a->v + elemsize*(a->len++);
 }
+
+// _array_move moves the chunk [src,src+len) to index dst. For example:
+//   _array_move(z, v, 5, 1, 1+2) = [1  2 3  4 5|6 7 8] ⟹ [1 4 5  2 3  6 7 8]
+//   _array_move(z, v, 1, 4, 4+2) = [1|2 3 4  5 6  7 8] ⟹ [1  5 6  2 3 4 7 8]
+#define _array_move(elemsize, v, dst, start, end) (                                 \
+  (elemsize) == 4 ? _AMOVE_ROTATE(_arotate32,(dst),(start),(end),(u32* const)(v)) : \
+  (elemsize) == 8 ? _AMOVE_ROTATE(_arotate64,(dst),(start),(end),(u64* const)(v)) : \
+                    _AMOVE_ROTATE(_arotatemem,(dst),(start),(end),(elemsize),(v)) )
+#define _AMOVE_ROTATE(f, dst, start, end, args...) (     \
+  ((start)==(dst)||(start)==(end)) ? ((void)0) :         \
+  ((start) > (dst)) ? (f)(args, (dst), (start), (end)) : \
+  (f)(args, (start), (end), (dst)) )
+
+// arotate rotates the order of v in the range [first,last) in such a way
+// that the element pointed to by "mid" becomes the new "first" element.
+// Assumes first <= mid < last.
+#define arotate(elemsize, v, first, mid, last) (                          \
+  (elemsize) == 4 ? _arotate32((u32* const)(v), (first), (mid), (last)) : \
+  (elemsize) == 8 ? _arotate64((u64* const)(v), (first), (mid), (last)) : \
+  _arotatemem((elemsize), (v), (first), (mid), (last)) )
+void _arotatemem(u32 stride, void* v, u32 first, u32 mid, u32 last);
+void _arotate32(u32* const v, u32 first, u32 mid, u32 last);
+void _arotate64(u64* const v, u32 first, u32 mid, u32 last);
 
 // fastrand updates the PRNG and returns the next "random" number
 u32 fastrand();
@@ -616,7 +667,8 @@ void abuf_append(abuf* s, const char* p, usize len);
 void abuf_c(abuf* s, char c);
 void abuf_u64(abuf* s, u64 v, u32 base);
 void abuf_fill(abuf* s, char c, usize len); // like memset
-void abuf_repr(abuf* s, const char* srcp, usize len);
+void abuf_repr(abuf* s, const void* p, usize len);
+void abuf_reprhex(abuf* s, const void* p, usize len);
 void abuf_fmt(abuf* s, const char* fmt, ...) ATTR_FORMAT(printf, 2, 3);
 void abuf_fmtv(abuf* s, const char* fmt, va_list);
 inline static void abuf_str(abuf* s, const char* cstr) { abuf_append(s, cstr, strlen(cstr)); }
@@ -626,7 +678,7 @@ inline static usize abuf_avail(const abuf* s) { return (usize)(uintptr)(s->lastp
 bool abuf_endswith(const abuf* s, const char* str, usize len);
 
 // fmtinstr appends to s a printable representation of in
-void fmtinstr(abuf* s, rinstr in, rfmtflag fl);
+u32 fmtinstr(abuf* s, rinstr in, rfmtflag fl);
 
 // unixtime stores the number of seconds + nanoseconds since Jan 1 1970 00:00:00 UTC
 // at *sec and *nsec
@@ -646,15 +698,36 @@ usize fmtduration(char buf[25], u64 duration_ns);
 #ifndef RSM_NO_ASM
 #define kBlock0Name "b0" // name of first block
 
+typedef struct rposrange rposrange;
+struct rposrange { rsrcpos start, focus, end; };
+
+// rasm._internal[0] -- negated diaghandler return value
+#define rasm_stop(a)        ( (bool)(a)->_internal[0] )
+#define rasm_stop_set(a,v)  ( *(bool*)&(a)->_internal[0] = (v) )
+
+// rasm._internal[1]-- reusable internal codegen state
+#define rasm_gstate(a)        ( (gstate*)(a)->_internal[1] )
+#define rasm_gstate_set(a,v)  ( *(gstate**)&(a)->_internal[1] = (v) )
+
 const char* tokname(rtok t);
+
+// tokis* returns true if t is classified as such in the language
+#define tokistype(t)    ( RT_I1 <= (t) && (t) <= RT_I64 )
+#define tokislit(t)     ( RT_INTLIT2 <= (t) && (t) <= RT_SINTLIT16 )
+#define tokisoperand(t) ( (t) == RT_IREG || (t) == RT_FREG || tokislit(t) || \
+                          (t) == RT_GNAME || (t) == RT_NAME )
+#define tokhasname(t) ( (t) == RT_NAME || (t) == RT_GNAME || (t) == RT_COMMENT || \
+                        (t) == RT_LABEL || (t) == RT_FUN )
 
 inline static bool nodename_eq(const rnode* n, const char* str, usize len) {
   return n->name.len == len && memcmp(n->name.p, str, len) == 0;
 }
 
-void errf(rasm*, rsrcpos, const char* fmt, ...) ATTR_FORMAT(printf, 3, 4);
-void warnf(rasm*, rsrcpos, const char* fmt, ...) ATTR_FORMAT(printf, 3, 4);
-void reportv(rasm*, rsrcpos, int code, const char* fmt, va_list ap);
+rposrange nposrange(rnode*);
+
+void errf(rasm*, rposrange, const char* fmt, ...) ATTR_FORMAT(printf, 3, 4);
+void warnf(rasm*, rposrange, const char* fmt, ...) ATTR_FORMAT(printf, 3, 4);
+void reportv(rasm*, rposrange, int code, const char* fmt, va_list ap);
 
 #endif // RSM_NO_ASM
 // --------------------------------------------------------------------------------------

@@ -32,10 +32,7 @@
 #include "rsmimpl.h"
 #if !defined(RSM_NO_LIBC) && defined(__linux__)
 #include <stdlib.h>
-void rsm_qsort(
-  void* base, usize nmemb, usize size,
-  int(*cmp)(const void* x, const void* y, void* nullable ctx), void* nullable ctx)
-{
+void rsm_qsort(void* base, usize nmemb, usize size, rsm_qsort_cmp cmp, void* nullable ctx) {
   return qsort_r(base, nmemb, size, cmp, ctx);
 }
 #else
@@ -73,7 +70,7 @@ void rsm_qsort(
 
 #define ntz(x) rsm_ctz((x))
 
-typedef int (*cmpfun)(const void *, const void *, void* nullable);
+typedef rsm_qsort_cmp cmpfun;
 typedef usize size_t;
 
 static inline int pntz(size_t p[2]) {

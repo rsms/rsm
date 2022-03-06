@@ -131,14 +131,14 @@ _( STORE1 , ABCs , mem , "store1"  /* mem[RB + Cs : 1] = RA -- wrap i64 to i8   
 _( PUSH   , Au   , mem , "push"    /* SP -= 8; mem[SP] = Au                           */)\
 _( POP    , A    , reg , "pop"     /* A = mem[SP]; SP += 8                            */)\
 \
-_( ADD   , ABCu , reg , "add"   /* RA = RB + Cu}                                    */)\
-_( SUB   , ABCu , reg , "sub"   /* RA = RB - Cu}                                    */)\
-_( MUL   , ABCu , reg , "mul"   /* RA = RB * Cu}                                    */)\
-_( DIV   , ABCu , reg , "div"   /* RA = RB / Cu}                                    */)\
-_( MOD   , ABCu , reg , "mod"   /* RA = RB % Cu}                                    */)\
-_( AND   , ABCu , reg , "and"   /* RA = RB & Cu}                                    */)\
-_( OR    , ABCu , reg , "or"    /* RA = RB | Cu}                                    */)\
-_( XOR   , ABCu , reg , "xor"   /* RA = RB ^ Cu}                                    */)\
+_( ADD   , ABCu , reg , "add"   /* RA = RB + Cu                                     */)\
+_( SUB   , ABCu , reg , "sub"   /* RA = RB - Cu                                     */)\
+_( MUL   , ABCu , reg , "mul"   /* RA = RB * Cu                                     */)\
+_( DIV   , ABCu , reg , "div"   /* RA = RB / Cu                                     */)\
+_( MOD   , ABCu , reg , "mod"   /* RA = RB % Cu                                     */)\
+_( AND   , ABCu , reg , "and"   /* RA = RB & Cu                                     */)\
+_( OR    , ABCu , reg , "or"    /* RA = RB | Cu                                     */)\
+_( XOR   , ABCu , reg , "xor"   /* RA = RB ^ Cu                                     */)\
 _( SHL   , ABCu , reg , "shl"   /* RA = RB << Cu                                    */)\
 _( SHRS  , ABCu , reg , "shrs"  /* RA = RB >> Cu -- sign-replicating (arithmetic)   */)\
 _( SHRU  , ABCu , reg , "shru"  /* RA = RB >> Cu -- zero-replicating (logical)      */)\

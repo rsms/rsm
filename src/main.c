@@ -213,13 +213,6 @@ int main(int argc, char*const* argv) {
     return 1;
   }
 
-  // rrom rom2 = { .img = rom.img, .imgsize = rom.imgsize };
-  // rerror err = rsm_loadrom(&rom2);
-  // if (err) {
-  //   errmsg("rsm_loadrom: %s", rerror_str(err));
-  //   return 1;
-  // }
-
   // execute program
   if (opt_run) {
     u8 memory[1024*1024];

@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
 
-typedef u8 rromseckind;
-enum rromseckind {
+typedef u8 rrom_skind; // section kind
+enum rrom_skind {
   RSM_ROM_DATA = 0x03,
   RSM_ROM_CODE = 0x04,
 
-  rromseckind_MIN = RSM_ROM_DATA,
-  rromseckind_MAX = RSM_ROM_CODE,
-} RSM_END_ENUM(rromseckind)
+  rrom_skind_MIN = RSM_ROM_DATA,
+  rrom_skind_MAX = RSM_ROM_CODE,
+} RSM_END_ENUM(rrom_skind)
 
 #define CODE_ALIGNMENT sizeof(rinstr) // alignment of CODE section body
 
@@ -206,14 +206,14 @@ rerror rom_build(rrombuild* rb, rmem mem, rrom* rom) {
   // Calculate image size
   // Important: CALC_SECTION_SIZE order must match START_SECTION order
   usize imgz = sizeof(rromimg);
-  usize sechsize[rromseckind_MAX+1] = {0}; // header size with padding
-  usize secbsize[rromseckind_MAX+1] = {0}; // body size with padding (duplicate)
-  usize secalign[rromseckind_MAX+1] = {0};
+  usize sechsize[rrom_skind_MAX+1] = {0}; // header size with padding
+  usize secbsize[rrom_skind_MAX+1] = {0}; // body size with padding (duplicate)
+  usize secalign[rrom_skind_MAX+1] = {0};
 
-  for (rromseckind kind = rromseckind_MIN; kind <= rromseckind_MAX; kind++) {
+  for (rrom_skind kind = rrom_skind_MIN; kind <= rrom_skind_MAX; kind++) {
     usize bsize = 0;
     usize align = 1;
-    switch ((enum rromseckind)kind) {
+    switch ((enum rrom_skind)kind) {
       case RSM_ROM_DATA: calc_DATA(rb, &bsize, &align); break;
       case RSM_ROM_CODE: calc_CODE(rb, &bsize, &align); break;
     }
@@ -245,7 +245,7 @@ rerror rom_build(rrombuild* rb, rmem mem, rrom* rom) {
   void* base = img;
   u8* p = base + sizeof(rromimg);
 
-  for (rromseckind kind = rromseckind_MIN; kind <= rromseckind_MAX; kind++) {
+  for (rrom_skind kind = rrom_skind_MIN; kind <= rrom_skind_MAX; kind++) {
     usize bodysize = secbsize[kind];
     if (bodysize == 0)
       continue;
@@ -269,7 +269,7 @@ rerror rom_build(rrombuild* rb, rmem mem, rrom* rom) {
     dlog("        body at %08lx: %zu B", (uintptr)((void*)p-base), bodysize);
     assertf(IS_ALIGN2((uintptr)((void*)p-base), secalign[kind]), "misaligned");
     rerror err = 0;
-    switch ((enum rromseckind)kind) {
+    switch ((enum rrom_skind)kind) {
       case RSM_ROM_DATA: p = build_DATA(rb, rom, p, &err); break;
       case RSM_ROM_CODE: p = build_CODE(rb, rom, p, &err); break;
     }

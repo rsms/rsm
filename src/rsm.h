@@ -131,17 +131,18 @@ _( STORE1 , ABCs , mem , "store1"  /* mem[RB + Cs : 1] = RA -- wrap i64 to i8   
 _( PUSH   , Au   , mem , "push"    /* SP -= 8; mem[SP] = Au                           */)\
 _( POP    , A    , reg , "pop"     /* A = mem[SP]; SP += 8                            */)\
 \
-_( ADD   , ABCu , reg , "add"   /* RA = RB + Cu}                               */)\
-_( SUB   , ABCu , reg , "sub"   /* RA = RB - Cu}                               */)\
-_( MUL   , ABCu , reg , "mul"   /* RA = RB * Cu}                               */)\
-_( DIV   , ABCu , reg , "div"   /* RA = RB / Cu}                               */)\
-_( MOD   , ABCu , reg , "mod"   /* RA = RB % Cu}                               */)\
-_( AND   , ABCu , reg , "and"   /* RA = RB & Cu}                               */)\
-_( OR    , ABCu , reg , "or"    /* RA = RB | Cu}                               */)\
-_( XOR   , ABCu , reg , "xor"   /* RA = RB ^ Cu}                               */)\
-_( SHL   , ABCu , reg , "shl"   /* RA = RB << Cu                               */)\
-_( SHRS  , ABCu , reg , "shrs"  /* RA = RB >> Cu sign-replicating (arithmetic) */)\
-_( SHRU  , ABCu , reg , "shru"  /* RA = RB >> Cu zero-replicating (logical)    */)\
+_( ADD   , ABCu , reg , "add"   /* RA = RB + Cu}                                    */)\
+_( SUB   , ABCu , reg , "sub"   /* RA = RB - Cu}                                    */)\
+_( MUL   , ABCu , reg , "mul"   /* RA = RB * Cu}                                    */)\
+_( DIV   , ABCu , reg , "div"   /* RA = RB / Cu}                                    */)\
+_( MOD   , ABCu , reg , "mod"   /* RA = RB % Cu}                                    */)\
+_( AND   , ABCu , reg , "and"   /* RA = RB & Cu}                                    */)\
+_( OR    , ABCu , reg , "or"    /* RA = RB | Cu}                                    */)\
+_( XOR   , ABCu , reg , "xor"   /* RA = RB ^ Cu}                                    */)\
+_( SHL   , ABCu , reg , "shl"   /* RA = RB << Cu                                    */)\
+_( SHRS  , ABCu , reg , "shrs"  /* RA = RB >> Cu -- sign-replicating (arithmetic)   */)\
+_( SHRU  , ABCu , reg , "shru"  /* RA = RB >> Cu -- zero-replicating (logical)      */)\
+_( BINV  , ABu  , reg , "binv"  /* RA = ~Bu      -- bitwise complement, invert bits */)\
 \
 _( EQ    , ABCu , reg , "eq"   /* RA = RB == Cu */)\
 _( NEQ   , ABCu , reg , "neq"  /* RA = RB != Cu */)\
@@ -271,6 +272,12 @@ _( WRITE , ABCDu , reg , "write" /* RA = write addr=RB size=R(C) fd=Du */)\
 #define RSM_MAKE_ABCs(op,a,b,c)    RSM_MAKE_ABCu(op,a,b,((rinstr)(c))    + (RSM_MAX_Cu / 2))
 #define RSM_MAKE_ABCDs(op,a,b,c,d) RSM_MAKE_ABCDu(op,a,b,c,((rinstr)(d)) + (RSM_MAX_Du / 2))
 
+#if RSM_LITTLE_ENDIAN
+  #define RSM_ROM_MAGIC 0x52534d00 // "RSM\0"
+#else
+  #define RSM_ROM_MAGIC 0x004d5352 // "RSM\0"
+#endif
+
 typedef u8 rop; // opcode
 enum rop {
   #define _(name, ...) rop_##name,
@@ -278,12 +285,6 @@ enum rop {
   #undef _
   RSM_OP_COUNT,
 } RSM_END_ENUM(rop)
-
-typedef struct rmem rmem; // memory allocator
-struct rmem {
-  void* nullable (*a)(void* state, void* nullable p, usize oldsize, usize newsize);
-  void* state;
-};
 
 typedef u8 rfmtflag; // string formatting flags
 enum rfmtflag {
@@ -309,12 +310,42 @@ enum rerror {
   rerr_overflow      = -14, // value too large
 };
 
+typedef struct rmem rmem; // memory allocator
+struct rmem {
+  void* nullable (*a)(void* state, void* nullable p, usize oldsize, usize newsize);
+  void* state;
+};
+
+// ROM -- read only media; the container for an RSM program
+typedef struct rrom    rrom;
+typedef struct rromimg rromimg; // portable binary blob
+struct rromimg {
+  u8 magic[4]; // RSM_ROM_MAGIC
+  u8 version;
+  u8 data[];
+};
+struct rrom {
+  const rromimg* img;       // ROM image
+  usize          imgsize;   // size of img, in bytes
+  const rinstr*  code;      // vm instructions array
+  usize          codelen;   // vm instructions array length
+  const void*    data;      // data segment initializer
+  usize          datasize;  // data segment size
+  u32            dataalign; // data segment alignment (in bytes)
+};
+
+
 // rsm_init initializes global state; must be called before using the rest of the API.
 // Returns false if initialization failed.
 RSMAPI bool rsm_init();
 
 // rsm_vmexec executes a program, starting with instruction inv[0]
-RSMAPI void rsm_vmexec(u64* iregs, u32* inv, usize inlen, void* membase, usize memsize);
+// Loads the ROM if needed.
+RSMAPI rerror rsm_vmexec(rrom* rom, u64* iregs, void* membase, usize memsize);
+
+// rsm_loadrom parses rom->img of rom->imgsize bytes,
+// filling the rest of the fields of the rrom struct.
+RSMAPI rerror rsm_loadrom(rrom* rom);
 
 // rsm_fmtprog formats an array of instructions ip as "assembly" text to buf.
 // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th
@@ -323,7 +354,8 @@ RSMAPI void rsm_vmexec(u64* iregs, u32* inv, usize inlen, void* membase, usize m
 // discarded. The output is always null-terminated, unless size is 0.
 // Returns the number of characters that would have been printed if bufcap was
 // unlimited (not including the final `\0').
-RSMAPI usize rsm_fmtprog(char* buf, usize bufcap, rinstr* nullable ip, usize ilen, rfmtflag);
+RSMAPI usize rsm_fmtprog(
+  char* buf, usize bufcap, const rinstr* nullable ip, usize ilen, rfmtflag);
 // if pcaddp is not null, it is set to the PC advance for the instruction,
 // which is 1 for all except COPYV.
 RSMAPI usize rsm_fmtinstr(char* buf, usize bufcap, rinstr, u32* nullable pcaddp, rfmtflag);
@@ -356,9 +388,13 @@ static void rmem_free(rmem m, void* p, usize size);
 RSMAPI const char* rop_name(rop);      // name of an opcode
 RSMAPI const char* rerror_str(rerror); // short description of an error
 
+// rsm_loadfile loads a file into memory
+rerror rsm_loadfile(const char* filename, void** p, usize* size);
+void rsm_unloadfile(void* p, usize size); // unload file loaded with rsm_loadfile
+
 
 // --------------------------------------------------------------------------------------
-// optional assembler API
+// assembler API (optional)
 #ifndef RSM_NO_ASM
 
 typedef struct rasm    rasm;    // assembly session (think of it as one source file)
@@ -469,19 +505,15 @@ struct rnode {
   };
 };
 
-// rasm_loadfile loads a source file, populating a->src{name,data,len} on success.
-rerror rasm_loadfile(rasm* a, const char* filename);
-
 // rasm_parse parses assembly source text into an AST.
-// Uses a->mem for temporary storage, allocates *resp in resm. a can be reused.
+// Uses a->mem for allocating AST nodes. a can be reused.
 // Returns AST representing the source (a->src* fields) module.
 // Caller should check a->errcount on return.
 RSMAPI rnode* rasm_parse(rasm* a);
 
 // rasm_gen builds VM code from AST.
-// Uses a->mem for temporary storage, allocates *resp in resm. a can be reused.
-// Returns the number of instructions at *resp on success, or 0 on failure.
-RSMAPI usize rasm_gen(rasm* a, rnode* module, rmem imem, rinstr** resp);
+// Uses a->mem for temporary storage, allocates data for rom with rommem. a can be reused.
+RSMAPI rerror rasm_gen(rasm* a, rnode* module, rmem rommem, rrom* rom);
 
 // rasm_dispose frees resources of a
 RSMAPI void rasm_dispose(rasm* a);

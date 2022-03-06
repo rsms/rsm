@@ -1,8 +1,11 @@
 // this tests memory loads -- returns 0 on success
 fun main() {
+  // set all bits in R8 (0xffffffffffffffff)
+  // note: we avoid using data constants to reduce the test surface
+  R8 = 0 ; R8 = binv R8
 
   // i64
-  R1 = -1       // 0xffffffffffffffff
+  R1 = R8
   store  R1 R31 -8  // store 0xffffffffffffffff to stack
   load   R5 R31 -8  // R5 should be 0xffffffffffffffff
     R0 = neq R5 R1 ; br R0 fail
@@ -14,7 +17,7 @@ fun main() {
     R1 = 0xff ; R0 = neq R5 R1 ; br R0 fail
 
   // i32
-  R1 = -1 ; R1 = R1 >> 32 // 0xffffffff
+  R1 = R8 >> 32 // 0xffffffff
   store4 R1 R31 -4  // store 0xffffffff to stack
   load4u R5 R31 -4  // R5 should be 0xffffffff
     R0 = neq R5 R1 ; br R0 fail

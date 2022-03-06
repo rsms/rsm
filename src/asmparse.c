@@ -4,8 +4,8 @@
 #include "rsmimpl.h"
 
 //#define LOG_TOKENS /* define to log() token scanning */
-#define LOG_AST /* define to log() parsed top-level ast nodes */
-#define LOG_PRATT(args...) dlog(args) /* define to log pratt dispatch */
+//#define LOG_AST /* define to log() parsed top-level ast nodes */
+//#define LOG_PRATT(args...) dlog(args) /* define to log pratt dispatch */
 
 #ifndef LOG_PRATT
   #define LOG_PRATT(args...) ((void)0)
@@ -783,8 +783,9 @@ static rnode* pstmt(PPARAMS) {
   return n;
 }
 
-
+#ifdef LOG_AST
 static usize fmtnode(char* buf, usize bufcap, rnode* n);
+#endif
 
 rnode* rasm_parse(rasm* a) {
   rasm_stop_set(a, false);
@@ -954,9 +955,10 @@ enum {
 };
 
 rerror parse_init() {
-  static u8 memory[4640];
+  static u8 memory[3104];
   rmem mem = rmem_mkbufalloc(memory, sizeof(memory));
   smap* m = smap_make(&kwmap, mem, kwcount, MAPLF_2); // increase sizeof(memory)
+  m->hash0 = 0x89f025ba;
   if UNLIKELY(m == NULL)
     return rerr_nomem;
   uintptr* vp;
@@ -971,6 +973,7 @@ rerror parse_init() {
   RSM_FOREACH_OP(_)
   #undef _
   #ifdef DEBUG
+    // dlog("kwmap hash0 0x%lx", m->hash0);
     void* p = rmem_alloc(mem,1);
     if (p) dlog("kwmap uses only %zu B memory -- trim memory", (usize)(p - (void*)memory));
   #endif

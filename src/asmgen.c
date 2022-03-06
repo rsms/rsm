@@ -11,17 +11,47 @@ typedef struct gbhead gbhead; // head of gblock and gfun
 typedef struct gref   gref;
 typedef u8            grefflag;
 typedef struct gdata  gdata;
+typedef struct gdatav gdatav;
+
+struct gdata {
+  const char*    name;
+  u32            namelen;
+  u32            nrefs;
+  u32            align; // byte alignment (1, 2, 4, 8, 16 ...)
+  usize          size;  // length of data in bytes
+  void* nullable initp; // pointer to initial value, if any
+  u64            addr;  // address (valid only after layout)
+
+  gdata* nullable next; // for gstate.datalist
+};
+
+struct gdatav {
+  gdatav* nullable next;
+  usize len; // data[len] == next free entry
+  gdata data[32];
+};
 
 struct gstate {
-  rasm*          a;      // compilation session/context
-  rmem           imem;   // allocator for iv
-  rarray         iv;     // rinstr[]; instructions
-  rarray         ufv;    // gref[]; pending undefined function references
-  rarray         udv;    // gref[]; pending undefined data references
-  rarray         data;   // gdata[]
-  rarray         funs;   // gfun[]; functions
-  smap           namem;  // name => index in either funs or data fields
-  gfun* nullable fn;     // current function
+  rasm*  a;          // compilation session/context
+  rarray iv;         // rinstr[]; instructions
+  rarray ufv;        // gref[]; pending undefined function references
+  rarray udv;        // gref[]; pending undefined data references
+  rarray funs;       // gfun[]; functions
+  smap   names;      // name => index in either funs or data fields
+
+  // gdata blocks may change order and may grow with separate memory allocations.
+  // Referencing and patching data is made simpler (better?) by using gdata pointers
+  // instead of secondary generated IDs. The downside is that we can't use a simple
+  // rarray for this since as it grows, the addresses of gdata elements might change.
+  // So, we use a list of gdata arrays that we never grow; used as a slab allocator.
+  gdatav          datavhead; // first slab + list of additional data slabs
+  gdatav*         datavcurr; // current slab
+  rarray          dataorder; // gdata*[]; valid after layout, points to gdatav entries
+  gdata* nullable datalist;  // list of all in-use gdata (TODO: is this really needed?)
+  usize           datasize;  // size of data segment
+  u32             dataalign; // alignment of data segment (in bytes)
+
+  gfun* nullable fn; // current function
 };
 
 #define GBLOCK_HEAD                                       \
@@ -55,15 +85,6 @@ enum grefflag {
   REF_ABS = 1 << 1, // target is an address, not a delta
 } RSM_END_ENUM(grefflag)
 
-struct gdata {
-  const char*    name;
-  u32            namelen;
-  u32            nrefs;
-  u8             align; // byte alignment (1, 2, 4, 8, 16 ...)
-  usize          size;  // length of data in bytes
-  void* nullable initp; // pointer to initial value, if any
-  u64            addr;  // address (valid only after layout)
-};
 
 #define ERRN(n, fmt, args...) errf(g->a, nposrange(n), fmt, ##args)
 
@@ -82,7 +103,7 @@ static bool check_alloc(gstate* g, void* nullable p) {
 static gfun* nullable find_target_gfun(gstate* g, rnode* referrer) {
   assert(referrer->name.len > 0);
   assert(referrer->name.p[0] != '@'); // we use this to encode what vp means
-  uintptr* vp = smap_lookup(&g->namem, referrer->name.p, referrer->name.len);
+  uintptr* vp = smap_lookup(&g->names, referrer->name.p, referrer->name.len);
   if (!vp)
     return NULL;
   // using function instruction index means we can address
@@ -351,15 +372,16 @@ static void gpostresolve_data(gstate* g) {
     assert(name[0] == '@'); // we use this to encode what vp means
     dlog("looking for data reference %.*s", (int)namelen, name);
 
-    uintptr* vp = smap_lookup(&g->namem, name, namelen);
+    uintptr* vp = smap_lookup(&g->names, name, namelen);
     if UNLIKELY(!vp) {
       ERRN(ref->n, "undefined data reference %.*s", (int)namelen, name);
       continue;
     }
-    gdata* d = rarray_at_safe(gdata, &g->data, *vp);
+    gdata* d = (gdata*)*vp;
     d->nrefs++;
+    dlog("patching data reference %.*s (gdata %p, addr 0x%llx)",
+      (int)namelen, name, d, d->addr);
     patch_imm(g, ref->n, ref->i, d->addr);
-    dlog("patching data reference %.*s", (int)namelen, name);
   }
   g->udv.len = 0;
 }
@@ -603,16 +625,31 @@ static void genblock(gstate* g, rnode* block) {
   }
 }
 
-static void namem_assign(gstate* g, rnode* name, u32 index) {
-  uintptr* vp = smap_assign(&g->namem, name->name.p, name->name.len);
+static void names_assign(gstate* g, rnode* name, uintptr v) {
+  uintptr* vp = smap_assign(&g->names, name->name.p, name->name.len);
   if (check_alloc(g, vp))
     return;
-  *vp = (uintptr)index;
+  *vp = (uintptr)v;
 }
+
 
 static void gendata(gstate* g, rnode* datn) {
   assert(datn->t == RT_GDEF);
-  gdata* d = GARRAY_PUSH_OR_RET(gdata, &g->data);
+
+  // allocate gdata
+  gdatav* dv = g->datavcurr;
+  if UNLIKELY(dv->len == countof(dv->data)) {
+    // out of space; allocate a new gdatav slab
+    dv = rmem_alloc(g->a->mem, sizeof(gdatav));
+    if (check_alloc(g, dv))
+      return;
+    dv->next = g->datavcurr;
+    dv->len = 0;
+    g->datavcurr = dv;
+  }
+  gdata* d = &dv->data[dv->len++];
+  d->next = g->datalist;
+  g->datalist = d;
 
   // example: "hello = i32 123"
   // (GDEF (NAME hello)
@@ -623,7 +660,7 @@ static void gendata(gstate* g, rnode* datn) {
   d->namelen = name->name.len;
   d->nrefs = 0;
 
-  namem_assign(g, name, g->data.len - 1);
+  names_assign(g, name, (uintptr)d);
 
   switch (type->t) {
     case RT_I1:  d->align = 1; d->size = 1; break;
@@ -644,6 +681,7 @@ static void gendata(gstate* g, rnode* datn) {
     case RT_INTLIT:
     case RT_SINTLIT16:
     case RT_INTLIT16:
+      init->ival = htole64(init->ival); // make sure byte order is LE
       d->initp = &init->ival;
       break;
     default:
@@ -665,7 +703,7 @@ static void genfun(gstate* g, rnode* fun) {
   fn->fi = g->funs.len - 1; // TODO only exported functions' table index
   fn->ulv = (rarray){0};
 
-  namem_assign(g, fun, g->funs.len - 1);
+  names_assign(g, fun, g->funs.len - 1);
 
   // resolve pending references
   gpostresolve_pc(g, &g->ufv, (gbhead*)fn);
@@ -716,83 +754,139 @@ static void genfun(gstate* g, rnode* fun) {
   }
 }
 
-
-static int gdata_sort(const gdata* x, const gdata* y, void* ctx) {
-  return (int)y->align - (int)x->align;
+static void dlog_gdata(gdata* nullable d) {
+  #ifdef DEBUG
+  if (!d) {
+    dlog("data:\nADDRESS            NAME             SIZE  ALIGN  DATA");
+    return;
+  }
+  char buf[1024];
+  abuf s = abuf_make(buf, sizeof(buf));
+  if (d->initp) {
+    abuf_reprhex(&s, d->initp, d->size);
+    if (d->size < (usize)d->align) {
+      // pad
+      abuf_c(&s, ' ');
+      memset(buf + sizeof(buf)/2, 0, sizeof(buf) - sizeof(buf)/2);
+      abuf_reprhex(&s, buf + sizeof(buf)/2, d->align - d->size);
+    }
+  } else {
+    memset(buf + sizeof(buf)/2, 0, sizeof(buf) - sizeof(buf)/2);
+    abuf_reprhex(&s, buf + sizeof(buf)/2, d->size);
+  }
+  int namemax = 10, datamax = 30;
+  int namelen = d->namelen, datalen = (int)s.len;
+  const char* nametail = "", *datatail = "";
+  if (namelen > namemax) { namemax--; namelen = namemax; nametail = "…"; }
+  if (datalen > datamax) { datamax--; datalen = datamax; datatail = "…"; }
+  log("0x%016llx %-*.*s%s %10zu     %2u  %.*s%s",
+    d->addr,
+    namemax, namelen, d->name, nametail,
+    d->size, d->align,
+    datalen, buf, datatail);
+  #endif
 }
 
-static void gdata_genall(gstate* g) {
-  if (g->data.len == 0)
-    return;
+static int gdata_sort(const gdata** x, const gdata** y, void* ctx) {
+  return (int)(*y)->align - (int)(*x)->align;
+}
 
-  // sort chunks by alignment
-  rsm_qsort(g->data.v, g->data.len, sizeof(gdata), (rsm_qsort_cmp)&gdata_sort, NULL);
+static void layout_gdata(gstate* g) {
+  if (g->datavcurr->len == 0) {
+    g->datasize = 0;
+    return;
+  }
+
+  // Sort data chunks by alignment.
+  // Put them in an array (dataorder) so we can sort them.
+  usize datacount = 0;
+  for (gdatav* dv = &g->datavhead; dv && dv->len; dv = dv->next)
+    datacount += dv->len;
+  if UNLIKELY(!rarray_reserve(gdata*, &g->dataorder, g->a->mem, datacount))
+    return errf(g->a, (rposrange){0}, "out of memory");
+  g->dataorder.len = datacount;
+  for (gdatav* dv = &g->datavhead; dv; dv = dv->next) {
+    if (dv->len == 0)
+      break;
+    for (usize i = 0; i < dv->len; i++) {
+      assert(datacount > 0);
+      *rarray_at(gdata*, &g->dataorder, --datacount) = &dv->data[i];
+    }
+  }
+  rsm_qsort(g->dataorder.v, g->dataorder.len, sizeof(void*),
+    (rsm_qsort_cmp)&gdata_sort, NULL);
 
   // align is what we will use for the "align" field in the ROMs "data" table header
-  u8 align = rarray_at(gdata, &g->data, 0)->align; // note: largest alignment after sorting
-  dlog("align %u", align);
-
-  char buf[1024];
+  // (note: largest alignment is g->data.v[0] after sorting)
+  g->dataalign = (*rarray_at(gdata*, &g->dataorder, 0))->align;
   u64 addr = 0;
+  dlog_gdata(NULL); // header
 
-  for (u32 i = 0; i < g->data.len; i++) {
-    gdata* d = rarray_at(gdata, &g->data, i);
-
-    // assign address
+  for (u32 i = 0; i < g->dataorder.len; i++) {
+    gdata* d = *rarray_at(gdata*, &g->dataorder, i);
     assert(d->align != 0);
     assert(d->align == 1 || CEIL_POW2(d->align) == d->align);
     d->addr = ALIGN2(addr, d->align);
     addr += d->size;
-
-    // visualize data
-    abuf s = abuf_make(buf, sizeof(buf));
-    if (d->initp) {
-      abuf_reprhex(&s, d->initp, d->size);
-      if (d->size < (usize)d->align) {
-        // pad
-        abuf_c(&s, ' ');
-        memset(buf + sizeof(buf)/2, 0, sizeof(buf) - sizeof(buf)/2);
-        abuf_reprhex(&s, buf + sizeof(buf)/2, d->align - d->size);
-      }
-    } else {
-      memset(buf + sizeof(buf)/2, 0, sizeof(buf) - sizeof(buf)/2);
-      abuf_reprhex(&s, buf + sizeof(buf)/2, d->size);
-    }
-    dlog("data[%u] \"%.*s\" size %zu, align %u : %.*s",
-      i, (int)d->namelen, d->name, d->size, d->align, (int)s.len, buf);
+    dlog_gdata(d);
   }
-  dlog("total data segment size: %llu", addr);
+  g->datasize = addr;
 }
 
-static gstate* init_gstate(rasm* a, rmem imem) {
+static rerror rom_on_filldata(void* base, void* gp) {
+  gstate* g = gp;
+  for (u32 i = 0; i < g->dataorder.len; i++) {
+    gdata* d = *rarray_at(gdata*, &g->dataorder, i);
+    void* dst = base + d->addr;
+    if (d->initp) {
+      // copy initial value
+      memcpy(dst, d->initp, d->size);
+      if (d->size < (usize)d->align) // zero pad
+        memset(dst + d->size, 0, (usize)d->align - d->size);
+    } else {
+      // zero initial value
+      memset(dst, 0, MAX(d->align, d->size));
+    }
+  }
+  return 0;
+}
+
+static gstate* nullable init_gstate(rasm* a, rmem rommem) {
   gstate* g = rasm_gstate(a);
   if (!g) {
     g = rmem_alloc(a->mem, sizeof(gstate));
+    if (!g)
+      return NULL;
     memset(g, 0, sizeof(gstate));
     g->a = a;
     rasm_gstate_set(a, g);
-    smap_make(&g->namem, a->mem, 16, MAPLF_2);
+    smap_make(&g->names, a->mem, 16, MAPLF_2);
+    // preallocate instruction buffer
+    rarray_grow(&g->iv, a->mem, sizeof(rinstr), 512/sizeof(rinstr));
   } else {
     // recycle gstate
     g->ufv.len = 0;
     g->udv.len = 0;
     g->funs.len = 0;
-    g->data.len = 0;
-    g->iv.v = NULL; g->iv.len = 0; g->iv.cap = 0;
-    assertf(g->namem.mem.state == a->mem.state, "allocator changed");
-    smap_clear(&g->namem);
+    g->iv.len = 0;
+    g->dataorder.len = 0;
+    g->datasize = 0;
+    g->dataalign = 0;
+    for (gdatav* v = &g->datavhead; v; v = v->next)
+      v->len = 0;
+    assertf(g->names.mem.state == a->mem.state, "allocator changed");
+    smap_clear(&g->names);
   }
-  g->imem = imem;
+  g->datavcurr = &g->datavhead;
   return g;
 }
 
-usize rasm_gen(rasm* a, rnode* module, rmem imem, rinstr** resp) {
+rerror rasm_gen(rasm* a, rnode* module, rmem rommem, rrom* rom) {
   dlog("assembling \"%s\"", a->srcname);
-  gstate* g = init_gstate(a, imem);
-
-  // preallocate instruction buffer to avoid excessive rarray_grow calls
-  rarray_grow(&g->iv, imem, sizeof(rinstr), 512/sizeof(rinstr));
   assert(module->t == RT_LPAREN);
+  gstate* g = init_gstate(a, rommem);
+  if UNLIKELY(g == NULL)
+    return rerr_nomem;
 
   // generate data and functions
   for (rnode* cn = module->children.head; cn; cn = cn->next) {
@@ -804,12 +898,10 @@ usize rasm_gen(rasm* a, rnode* module, rmem imem, rinstr** resp) {
   }
 
   if UNLIKELY(rasm_stop(a) || a->errcount)
-    return 0;
+    return rerr_invalid;
 
-  // compute data layout
-  gdata_genall(g);
-
-  // resolve data references
+  // compute data layout and resolve data references
+  layout_gdata(g);
   gpostresolve_data(g);
 
   // report unresolved function references
@@ -820,8 +912,20 @@ usize rasm_gen(rasm* a, rnode* module, rmem imem, rinstr** resp) {
       (ref->flags&REF_ANY) ? " or label" : "", (int)n->name.len, n->name.p);
   }
 
-  *resp = (void*)g->iv.v;
-  return g->iv.len;
+  if (a->errcount)
+    return rerr_invalid;
+
+  // build ROM image
+  // return gen_romimg(g, rommem, rom);
+  rrombuild rb = {
+    .code = (const rinstr*)g->iv.v,
+    .codelen = g->iv.len,
+    .datasize = g->datasize,
+    .dataalign = g->dataalign,
+    .userdata = g,
+    .filldata = &rom_on_filldata,
+  };
+  return rom_build(&rb, rommem, rom);
 }
 
 static void gstate_dispose(gstate* g) {
@@ -835,8 +939,14 @@ static void gstate_dispose(gstate* g) {
   rarray_free(gref, &g->ufv, mem);
   rarray_free(gref, &g->udv, mem);
   rarray_free(gfun, &g->funs, mem);
-  rarray_free(gdata, &g->data, mem);
-  smap_dispose(&g->namem);
+  rarray_free(gfun, &g->dataorder, mem);
+  smap_dispose(&g->names);
+
+  for (gdatav* dv = g->datavhead.next; dv; ) {
+    gdatav* tmp = dv->next;
+    rmem_free(mem, dv, sizeof(gdatav));
+    dv = tmp;
+  }
 
   #ifdef DEBUG
   memset(g, 0, sizeof(gstate));

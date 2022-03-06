@@ -1,0 +1,22 @@
+// This demonstrates use of global data which the assembler places in the data section
+// of the ROM, which acts as a template at runtime: the data's initial values are copied
+// into an execution instance's memory by the virtual machine when loading a ROM.
+// The data's addresses can be referenced with "@name" in instructions.
+// Global data is mutable and can be edited.
+
+@small  = i8 123
+@large  = i64 0xdeadfacebeef
+@large2 = i64 // zero initialized
+@medium = i32 -123456
+
+fun main(i32) {
+  // load some of the data values from memory into registers
+  R0 = 0 // base of data in memory is always at address 0x0
+  R1 = load R0 @large
+  R2 = load1u R0 @small
+  R3 = load4s R0 @medium
+  // store value in R1 to global (data memory) @large2
+  store R1 R0 @large2
+  R4 = load R0 @large2 // load back into a register so we can inspect it
+  ret
+}

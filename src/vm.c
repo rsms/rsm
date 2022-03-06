@@ -11,7 +11,7 @@ struct vmstate {
 };
 
 // vm interperter functions signature
-#define VMPARAMS vmstate* vs, u64* iregs, rinstr* inv, void* membase, usize pc
+#define VMPARAMS vmstate* vs, u64* iregs, const rinstr* inv, void* membase, usize pc
 #define VMARGS   vs, iregs, inv, membase, pc
 
 #if defined(DEBUG) && !defined(RSM_NO_LIBC)
@@ -304,6 +304,7 @@ static void vmexec(VMPARAMS) {
     #define do_SHL(C)  check_shift(C); RA = RB << C
     #define do_SHRS(C) check_shift(C); RA = (u64)((i64)RB >> C)
     #define do_SHRU(C) check_shift(C); RA = RB >> C
+    #define do_BINV(B) RA = ~B
 
     #define do_EQ(C)   RA = RB == C
     #define do_NEQ(C)  RA = RB != C
@@ -357,7 +358,7 @@ static void vmexec(VMPARAMS) {
   } // loop
 }
 
-void rsm_vmexec(u64* iregs, rinstr* inv, usize inlen, void* membase, usize memsize) {
+rerror rsm_vmexec(rrom* rom, u64* iregs, void* membase, usize memsize) {
   // memory layout:
   //    ┌─────────────┬─────────────┬───────────···
   //    │ data        │     ← stack │ heap →
@@ -365,44 +366,74 @@ void rsm_vmexec(u64* iregs, rinstr* inv, usize inlen, void* membase, usize memsi
   // membase      datasize      heapbase
   //              stacktop      stackbase
 
-  // make sure memory is aligned to most stringent alignment of data (TODO: read ROM)
-  uintptr ma = ALIGN2((uintptr)membase, 8);
+  // load ROM if needed
+  if (rom->img == NULL || rom->imgsize == 0)
+    return rerr_invalid;
+  if (rom->code == NULL) {
+    rerror err = rsm_loadrom(rom);
+    if (err)
+      return err;
+    if (rom->code == NULL || rom->codelen == 0) // can't execute a ROM without code
+      return rerr_invalid;
+  }
+
+  // configure memory
+  // make sure memory is aligned to most stringent alignment of data
+  uintptr ma = ALIGN2((uintptr)membase, (uintptr)rom->dataalign);
   if UNLIKELY(ma != (uintptr)membase) {
     uintptr diff = ma - (uintptr)membase;
     memsize = diff > memsize ? 0 : memsize - diff;
     membase = (void*)ma;
     dlog("adjusting membase+%lu memsize-%lu (address alignment)", (usize)diff, (usize)diff);
   }
-  usize datasize  = 64; // TODO: read from ROM
-  usize stacktop  = ALIGN2(datasize, STK_ALIGN);
-  usize stackbase = stacktop + ALIGN2_FLOOR(MIN((memsize-datasize)/2, 4096), STK_ALIGN);
+  usize stacktop = ALIGN2(rom->datasize, STK_ALIGN);
+  usize stackbase =
+    stacktop + ALIGN2_FLOOR(MIN((memsize - rom->datasize)/2, 4096), STK_ALIGN);
 
+  // print memory layout
   dlog(
     "Memory layout: (%.3f MB total)\n"
-    "   ┌─────────────────────┬────────────────────┬───────────────────────┐\n"
-    "   │ data %12lu B │ %8lu B ← stack │ heap → %12lu B │\n"
-    "   ├─────────────────────┼────────────────────┼───────────────────────┘\n"
-    "   0                   0x%-8lx           0x%-8lx\n",
+    "     ┌─────────────────────┬────────────────────┬───────────────────────┐\n"
+    "segm │ data %12lu B │ %8lu B ← stack │ heap → %12lu B │\n"
+    "     ├─────────────────────┼────────────────────┼───────────────────────┘\n"
+    "addr 0             %8lx│%-8lx           %-8lx\n",
     (double)memsize/1024.0/1024.0,
-    datasize, /*stacksize=*/stackbase - stacktop, /*heapsize=*/memsize - stackbase,
-    stacktop, stackbase
+    rom->datasize, /*stacksize=*/stackbase - stacktop, /*heapsize=*/memsize - stackbase,
+    rom->datasize, stacktop, stackbase
   );
 
+  // initialize vm state
   vmstate vs = {
-    .inlen    = inlen,
+    .inlen    = rom->codelen,
     .memsize  = memsize,
-    .datasize = datasize,
+    .datasize = rom->datasize,
     .heapbase = stackbase,
   };
+  const rinstr* inv = rom->code;
 
   // initialize stack pointer and push main return address on stack
   SP = (u64)stackbase;
   push(&vs, iregs, inv, membase, 0, 8, MAIN_RET_PC);
 
-  // initialize data (TODO: copy from ROM)
-  memset(membase, 0, datasize);
-  memcpy(membase, "hello\n", 6);
+  // initialize global data by copying from ROM
+  if (rom->datasize > 0) {
+    memcpy(membase, rom->data, rom->datasize);
+    // print data layout
+    #if DEBUG
+    char buf[1024];
+    abuf s = abuf_make(buf, sizeof(buf));
+    if (rom->datasize > sizeof(buf)/3) {
+      abuf_reprhex(&s, membase, sizeof(buf)/3 - strlen("…"));
+      abuf_str(&s, "…");
+    } else {
+      abuf_reprhex(&s, membase, rom->datasize);
+    }
+    abuf_terminate(&s);
+    dlog("Initial data contents:\n%s", buf);
+    #endif
+  }
 
   logstate_header();
-  return vmexec(&vs, iregs, inv, membase, 0);
+  vmexec(&vs, iregs, inv, membase, 0);
+  return 0;
 }

@@ -172,6 +172,25 @@ rerror read_stdin_data(rmem m, usize maxlen, void** p_put, usize* len_out) {
   #endif
 }
 
+rerror writefile(const char* filename, u32 mode, const void* data, usize size) {
+  assert(size <= ISIZE_MAX);
+  int fd = open(filename, O_WRONLY|O_CREAT|O_TRUNC, 0777);
+  if (fd < 0)
+    return rerror_errno(errno);
+  rerror err = 0;
+  while (size) {
+    isize n = write(fd, data, size);
+    if (n < (isize)size) {
+      err = n < 0 ? rerror_errno(errno) : rerr_canceled;
+      break;
+    }
+    data += n;
+    size -= (usize)n;
+  }
+  close(fd);
+  return err;
+}
+
 static char* strrevn(char* s, usize len) {
   for (usize i = 0, j = len - 1; i < j; i++, j--) {
     char tmp = s[i];
@@ -572,6 +591,15 @@ bool rarray_grow(rarray* a, rmem m, usize elemsize, u32 addl) {
   return true;
 }
 
+bool _rarray_reserve(rarray* a, rmem m, usize elemsize, u32 addl) {
+  u32 len;
+  if (check_add_overflow(a->len, addl, &len))
+    return false;
+  if (len >= a->cap && UNLIKELY(!rarray_grow(a, m, elemsize, addl)))
+    return false;
+  return true;
+}
+
 void _arotatemem(u32 stride, void* v, u32 first, u32 mid, u32 last) {
   assert(first <= mid); // if equal (zero length), do nothing
   assert(mid < last);
@@ -934,11 +962,12 @@ void warnf(rasm* a, rposrange pr, const char* fmt, ...) {
   va_end(ap);
 }
 
-rerror rasm_loadfile(rasm* a, const char* filename) {
-  rerror err = mmapfile(filename, (void**)&a->srcdata, &a->srclen);
-  if (err == 0)
-    a->srcname = filename;
-  return err;
+rerror rsm_loadfile(const char* filename, void** p, usize* size) {
+  return mmapfile(filename, p, size);
+}
+
+void rsm_unloadfile(void* p, usize size) {
+  unmapfile(p, size);
 }
 
 #endif // RSM_NO_ASM

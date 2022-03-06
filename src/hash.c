@@ -20,7 +20,7 @@ u32 fastrand() {
     fastrand_state += 0xa0761d6478bd642f;
     __uint128_t r =
       (__uint128_t)fastrand_state * (__uint128_t)(fastrand_state ^ 0xe7037ed1a0b428db);
-    #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    #if RSM_LITTLE_ENDIAN
       u64 hi = ((u64*)&r)[0], lo = ((u64*)&r)[1];
     #else
       u64 hi = ((u64*)&r)[1], lo = ((u64*)&r)[0];
@@ -141,7 +141,7 @@ typedef unsigned long long du_int;
 typedef union {
   ti_int all;
   struct {
-  #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+  #if RSM_LITTLE_ENDIAN
     du_int low;
     di_int high;
   #else

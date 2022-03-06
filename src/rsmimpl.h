@@ -113,6 +113,56 @@ typedef unsigned long       usize;
   #define ATTR_FORMAT(...)
 #endif
 
+// RSM_LITTLE_ENDIAN=0|1
+#ifndef RSM_LITTLE_ENDIAN
+  #if defined(__LITTLE_ENDIAN__) || \
+      (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+    #define RSM_LITTLE_ENDIAN 1
+  #elif defined(__BIG_ENDIAN__) || defined(__ARMEB__) \
+        (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+    #define RSM_LITTLE_ENDIAN 0
+  #else
+    #error Can't determine endianness -- please define RSM_LITTLE_ENDIAN=0|1
+  #endif
+#endif
+
+#if __has_builtin(__builtin_bswap32)
+  #define bswap32(x) __builtin_bswap32(x)
+#elif defined(_MSC_VER)
+  #define bswap32(x) _byteswap_ulong(x)
+#else
+  static inline u32 bswap32(u32 x) {
+    return ((( x & 0xff000000u ) >> 24 )
+          | (( x & 0x00ff0000u ) >> 8  )
+          | (( x & 0x0000ff00u ) << 8  )
+          | (( x & 0x000000ffu ) << 24 ));
+  }
+#endif
+
+#if __has_builtin(__builtin_bswap64)
+  #define bswap64(x) __builtin_bswap64(x)
+#elif defined(_MSC_VER)
+  #define bswap64(x) _byteswap_uint64(x)
+#else
+  static inline u64 bswap64(u64 x) {
+    u64 hi = bswap32((u32)x);
+    u32 lo = bswap32((u32)(x >> 32));
+    return (hi << 32) | lo;
+  }
+#endif
+
+#if RSM_LITTLE_ENDIAN
+  #define htole32(n) (n)
+  #define htobe32(n) bswap32(n)
+  #define htole64(n) (n)
+  #define htobe64(n) bswap64(n)
+#else
+  #define htole32(n) bswap32(n)
+  #define htobe32(n) (n)
+  #define htole64(n) bswap64(n)
+  #define htobe64(n) (n)
+#endif
+
 // UNLIKELY(integralexpr)->bool
 #if __has_builtin(__builtin_expect)
   #define LIKELY(x)   (__builtin_expect((bool)(x), true))
@@ -466,6 +516,7 @@ void logbin(u32 v);
 rerror mmapfile(const char* filename, void** p_put, usize* len_out);
 void unmapfile(void* p, usize len);
 rerror read_stdin_data(rmem, usize maxlen, void** p_put, usize* len_out);
+rerror writefile(const char* filename, u32 mode, const void* data, usize size);
 
 rerror rerror_errno(int errnoval);
 
@@ -501,11 +552,14 @@ struct rarray {
 #define rarray_remove(T, a, start, len)    _rarray_remove((a),sizeof(T),(start),(len))
 #define rarray_move(T, a, dst, start, end) _array_move(sizeof(T),(a)->v,(dst),(start),(end))
 #define rarray_free(T, a, m)   if ((a)->v)rmem_free((m),(a)->v,(usize)(a)->cap*sizeof(T))
+#define rarray_reserve(T, a, m, addl)      _rarray_reserve((a),(m),sizeof(T),(addl))
 
 bool rarray_grow(rarray* a, rmem, usize elemsize, u32 addl);
+bool _rarray_reserve(rarray* a, rmem, usize elemsize, u32 addl);
 void _rarray_remove(rarray* a, u32 elemsize, u32 start, u32 len);
+
 inline static void* nullable _rarray_push(rarray* a, rmem m, u32 elemsize) {
-  if (UNLIKELY(a->len == a->cap) && !rarray_grow(a, m, (usize)elemsize, 1))
+  if (a->len == a->cap && UNLIKELY(!rarray_grow(a, m, (usize)elemsize, 1)))
     return NULL;
   return a->v + elemsize*(a->len++);
 }
@@ -692,6 +746,18 @@ u64 nanotime();
 // fmtduration appends human-readable time duration to buf, including a null terminator.
 // Returns number of bytes written, excluding the null terminator.
 usize fmtduration(char buf[25], u64 duration_ns);
+
+typedef struct rrombuild rrombuild;
+struct rrombuild {
+  const rinstr* code;      // vm instructions array
+  usize         codelen;   // vm instructions array length
+  usize         datasize;  // data segment size
+  u8            dataalign; // data segment alignment
+  void*         userdata;
+  rerror(*filldata)(void* dst, void* userdata);
+};
+
+rerror rom_build(rrombuild* rb, rmem mem, rrom* rom);
 
 // --------------------------------------------------------------------------------------
 // assembler internals, shared by all asm*.c files

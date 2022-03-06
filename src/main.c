@@ -78,18 +78,17 @@ static int parse_cli_opts(int argc, char*const* argv, u64* iregs) {
   return optind;
 }
 
-static bool load_srcfile(rasm* a, const char* nullable infile) {
+static bool loadfile(rmem mem, const char* nullable infile, void** p, usize* size) {
   if (infile) {
-    rerror err = rasm_loadfile(a, infile);
+    rerror err = rsm_loadfile(infile, p, size);
     if (err) {
       fprintf(stderr, "%s: %s\n", infile, rerror_str(err));
       return false;
     }
     return true;
   }
-  a->srcname = "stdin";
   usize limit = 1024*1024; // 1MB
-  rerror err = read_stdin_data(a->mem, limit, (void**)&a->srcdata, &a->srclen);
+  rerror err = read_stdin_data(mem, limit, p, size);
   if (err == 0)
     return true;
   if (err == rerr_badfd) { // stdin is a tty
@@ -100,7 +99,7 @@ static bool load_srcfile(rasm* a, const char* nullable infile) {
   return false;
 }
 
-static void print_asm(rmem mem, rinstr* iv, usize icount) {
+static void print_asm(rmem mem, const rinstr* iv, usize icount) {
   char* buf = rmem_alloc(mem, 512); if (!buf) panic("out of memory");
   rfmtflag fl = isatty(1) ? RSM_FMT_COLOR : 0;
   usize n = rsm_fmtprog(buf, 512, iv, icount, fl);
@@ -109,6 +108,28 @@ static void print_asm(rmem mem, rinstr* iv, usize icount) {
     rsm_fmtprog(buf, n, iv, icount, fl);
   }
   fwrite(buf, n, 1, stdout); putc('\n', stdout);
+}
+
+static void print_regstate(u64* iregs) {
+  printf("register state:\n");
+  for(u32 i=0;i<4;i++)
+    printf(i==3 ? " R%u" : i ? " R%-19u" : "                      R%-19u", i);
+  printf("\nU64 "); for(u32 i=0;i<4;i++) printf(i ? " %20llx" : "%20llx", iregs[i]);
+  printf("\nU64 "); for(u32 i=0;i<4;i++) printf(i ? " %20llu" : "%20llu", iregs[i]);
+  printf("\nS64 "); for(u32 i=0;i<4;i++) printf(i ? " %20lld" : "%20lld", (i64)iregs[i]);
+  printf("\nS32 "); for(u32 i=0;i<4;i++) printf(i ? " %20d"   : "%20d",   (i32)iregs[i]);
+  printf("\nS16 "); for(u32 i=0;i<4;i++) printf(i ? " %20d"   : "%20d",   (i16)iregs[i]);
+  printf("\nS8  "); for(u32 i=0;i<4;i++) printf(i ? " %20d"   : "%20d",   (i8)iregs[i]);
+  printf("\n\n");
+  for(u32 i=4;i<8;i++)
+    printf(i==7 ? " R%u" : i>4 ? " R%-19u" : "                      R%-19u", i);
+  printf("\nU64 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20llx" : "%20llx", iregs[i]);
+  printf("\nU64 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20llu" : "%20llu", iregs[i]);
+  printf("\nS64 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20lld" : "%20lld", (i64)iregs[i]);
+  printf("\nS32 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20d"   : "%20d",   (i32)iregs[i]);
+  printf("\nS16 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20d"   : "%20d",   (i16)iregs[i]);
+  printf("\nS8  "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20d"   : "%20d",   (i8)iregs[i]);
+  printf("\n");
 }
 
 static bool diaghandler(const rdiag* d, void* userdata) {
@@ -120,28 +141,41 @@ static bool diaghandler(const rdiag* d, void* userdata) {
   return true; // keep going (show all errors)
 }
 
-static usize compile(const char* nullable srcfile, rinstr** ivp) {
-  rmem mem = rmem_mkvmalloc(0);
-  if (mem.state == NULL) {
-    errmsg("failed to allocate virtual memory");
-    return 0;
-  }
-  rasm a = { .mem = mem, .diaghandler = diaghandler };
-  if (!load_srcfile(&a, srcfile))
-    exit(1);
+static bool compile(
+  rmem mem,
+  const char* nullable srcfile, void* srcdata, usize srclen,
+  rrom* rom)
+{
+  rasm a = {
+    .mem = mem,
+    .diaghandler = diaghandler,
+    .srcname = srcfile ? srcfile : "stdin",
+    .srcdata = srcdata,
+    .srclen = srclen,
+  };
+
   rnode* mod = rasm_parse(&a);
   if (a.errcount) // note: errors have been reported by diaghandler
-    return 0;
-  usize icount = rasm_gen(&a, mod, mem, ivp);
-  if (a.errcount)
-    return 0;
-  if (icount == 0) {
-    errmsg("empty program");
-    return 0;
+    return false;
+
+  rerror err = rasm_gen(&a, mod, mem, rom);
+  if (err) {
+    errmsg("(rasm_gen) %s", rerror_str(err));
+    return false;
   }
+
+  if (outfile) {
+    dlog("writing ROM to %s (%zu B)", outfile, rom->imgsize);
+    rerror err = writefile(outfile, 0777, rom->img, rom->imgsize);
+    if (err) {
+      errmsg("%s: %s", outfile, rerror_str(err));
+      return false;
+    }
+  }
+
   if (opt_print_asm)
-    print_asm(mem, *ivp, icount);
-  return icount;
+    print_asm(mem, rom->code, rom->codelen);
+  return true;
 }
 
 int main(int argc, char*const* argv) {
@@ -158,21 +192,48 @@ int main(int argc, char*const* argv) {
     if (argi < argc-1) errmsg("ignoring %d extra command-line arguments", argc-1 - argi);
   }
 
-  // compile input source file
-  rinstr* iv;
-  usize icount = compile(infile, &iv);
-  if (icount == 0) return 1;
+  // memory allocator for compiler and for buffering stdin
+  rmem mem = rmem_mkvmalloc(0);
+  if (mem.state == NULL) {
+    errmsg("failed to allocate virtual memory");
+    return 1;
+  }
+
+  // load input file or read stdin
+  void* indata; usize insize;
+  if (!loadfile(mem, infile, &indata, &insize))
+    return 1;
+
+  // input: load ROM or compile source
+  rrom rom = {0};
+  if (insize > 4 && *(u32*)indata == RSM_ROM_MAGIC) {
+    rom.img = indata;
+    rom.imgsize = insize;
+  } else if (!compile(mem, infile, indata, insize, &rom)) {
+    return 1;
+  }
+
+  // rrom rom2 = { .img = rom.img, .imgsize = rom.imgsize };
+  // rerror err = rsm_loadrom(&rom2);
+  // if (err) {
+  //   errmsg("rsm_loadrom: %s", rerror_str(err));
+  //   return 1;
+  // }
 
   // execute program
   if (opt_run) {
     u8 memory[1024*1024];
-    u64 starttime = nanotime();
-    rsm_vmexec(iregs, iv, icount, memory, sizeof(memory));
+    u64 time = nanotime();
+    rerror err = rsm_vmexec(&rom, iregs, memory, sizeof(memory));
+    time = nanotime() - time;
+    if (err) {
+      errmsg("vmexec: %s", rerror_str(err));
+      return 1;
+    }
     char duration[25];
-    fmtduration(duration, nanotime() - starttime);
+    fmtduration(duration, time);
     log("execution finished in %s", duration);
-    printf("%llu\t%llu\t%llu\t%llu\t%llu\t%llu\t%llu\t%llu\n",
-      iregs[0], iregs[1], iregs[2], iregs[3], iregs[4], iregs[5], iregs[6], iregs[7]);
+    print_regstate(iregs);
   }
 
   return 0;

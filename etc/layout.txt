@@ -31,49 +31,47 @@ Example:
 
          0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
        ┌─────────────────────────────────────────────────
-  0000 │ 52 53 4d 00                                        "RSM" version 0
-     … │             00 01                                  types section, 10 bytes
-     … │                   02                               2 types
-     … │                      00 00                         type 0  ()->()
-     … │                            01 03 01 03             type 1  (i32)->(i32)
-     … │                                        01 03 00    type 2  (i32)->()
-  0010 │ 01 10                                              import section, 16 bytes
-     … │       01                                           1 import
-     … │          07 63 6f 6e 73 6f 6c 65 01                "console", 1 function
-     … │                                     05 70 75 74    5 "put …
-  0020 │ 63 68 02                                           … ch" (i32)->()
+  0000 │ 52 53 4d 00 00                                     "RSM\0" version 0
+     … │                00 01                               types section, 10 bytes
+     … │                      02                            2 types
+     … │                         00 00                      type 0  ()->()
+     … │                               01 03 01 03          type 1  (i32)->(i32)
+     … │                                           01 03    type 2  (i32)->() …
+  0010 │ 00                                                 …
+     … │    01 10                                           import section, 16 bytes
+     … │          01                                        1 import
+     … │             07 63 6f 6e 73 6f 6c 65 01             "console", 1 function
+     … │                                        05 70 75    5 "pu …
+  0020 │ 74 63 02                                           … tc" (i32)->()
      … │          02 11                                     export section, 17 bytes
      … │                02                                  2 exports
      … │                   06 75 70 63 61 73 65 01 02       "upcase" (i32)->(i32) code[2]
      … │                                              04    4 …
   0030 │ 6d 61 69 6e 00 04                                  … "main" ()->() code[4]
-     … │                   03 0c                            data section, 12 bytes
+     … │                   03 05                            data section, 5 bytes
      … │                         02                         4B alignment of data
-     … │                            00 00 00                padding as index is 4B aligned
-     … │                                     00 00 00 00    index[0] = offset 0
-  0040 │ 00 00 00 63                                        i32 0x63 (at offset 0)
-     … │             04 22                                  code section, 34 bytes
-     … │                   00 00                            padding
-     … │                         ff ff ff ff ff ff ff ff    vmcode …
-  0050 │ ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff    … vmcode …
-  0060 │ ff ff ff ff ff ff ff ff                            … vmcode
-     … │                         05 1c                      name section, 28 bytes
-     … │                               03                   3 entries
-     … │                                  01 07 5f 68 65    kind=func 7 "_he …
-  0070 │ 6c 70 65 72 00                                     … lper"  code[0]
-     … │                00 06 75 70 63 61 73 65 00 02       kind=func 6 "upcase" code[2]
-     … │                                              00    kind=func
-  0080 │ 04 6d 61 69 6e 04                                  4 "main" code[4]
-     … │                   00 00 d2 04 00 00 2e 16 00 00    Reminder is constant data …
+     … │                            00 00 00 63             data i32 0x63
+     … │                                        04 22       code section, 34 bytes
+     … │                                              00    padding
+  0040 │ ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff    vmcode …
+  0050 │ ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff    … vmcode
+  0060 │ 05 1c                                              name section, 28 bytes
+     … │       03                                           3 entries
+     … │          01 07 5f 68 65 6c 70 65 72 00             kind=func 7 "_helper" code[0]
+     … │                                        00 06 75    kind=func 6 "u …
+  0070 │ 70 63 61 73 65 00 02                               … pcase" code[2]
+     … │                      00 04 6d 61 69 6e 04          kind=func 4 "main" code[4]
+     … │                                           00 00    padding for constant data
+  0080 │ 00 00 d2 04 00 00 2e 16 00 00                      constant data rest of file …
 
 
 module:
-  ┌──────────┬────────────┬─────────────┬──────────┬────────────────────┐
-  │ R  S  M  │ version u8 │ section ... │ padding? │ vmcode u32[icount] │
-  └──────────┴────────────┴─────────────┴──────────┴────────────────────┘
+  ┌────────────┬────────────┬─────────────┬──────────┬───────────────────┐
+  │ R  S  M 00 │ version u8 │ section ... │ padding? │ constdata u8[...] │
+  └────────────┴────────────┴─────────────┴──────────┴───────────────────┘
 section:
   ┌─────────┬──────────────┬───────────────────┐
-  │ type u8 │ size varuint │ contents u8[size] │
+  │ kind u8 │ size varuint │ contents u8[size] │
   └─────────┴──────────────┴───────────────────┘
   0x00 types section:
     ┌───────────────┬────────────────┐
@@ -100,13 +98,13 @@ section:
       │ namelen varuint │ namestr u8[namelen] │ typei varuint │ codei varuint │
       └─────────────────┴─────────────────────┴───────────────┴───────────────┘
   0x03 data section:
-    ┌──────────┬───────────────┬─────────────────┬──────┐
-    │ align u8 │ count varuint │ offs u32[count] │ data │
-    └──────────┴───────────────┴─────────────────┴──────┘
+    ┌──────────┬──────┐
+    │ align u8 │ data │
+    └──────────┴──────┘
   0x04 code section:
-    ┌───────────────┬─────────────────┬──────┐
-    │ count varuint │ offs u32[count] │ data │
-    └───────────────┴─────────────────┴──────┘
+    ┌─────────────────┐
+    │ instr u32[...]  │
+    └─────────────────┘
   0x05 name section:
     ┌───────────────┬─────────────┐
     │ count varuint │ name[count] │

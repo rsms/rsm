@@ -22,7 +22,6 @@ the recursive acronym "RSM smol machine" (in case you miss the golden days of PH
 anything you'd like it to mean! Your imagination is really the limit here my friend.
 
 TODO
-- memory (program layout, load & store, grow?)
 - syscalls..? Some way to interface with peripherals/devices, time, file system etc
 - display framebuffer
 - audio
@@ -47,8 +46,13 @@ $ echo 'fun x() { R0 = R0 * 2; ret; }' | out/rsm -R0=123
 246
 ```
 
-If you're a bit crazy you can also embed it by copying the source files
-into your project and using the API in `rsm.h`.
+RSM assembly can be compiled into a ROM file which can later be executed:
+
+```sh
+$ echo 'fun x() { R0 = R0 * 2; ret; }' | out/rsm -o multiply.rom
+$ out/rsm -R0=123 multiply.rom
+246
+```
 
 ## Example
 
@@ -70,6 +74,7 @@ $ out/rsm -R0=15 example.rsm
 1307674368000
 ```
 
+See the `examples/` directory for more.
 
 <a name="isa"></a>
 ## Instruction Set Architecture
@@ -140,4 +145,7 @@ intlit     = "-"? (binlit | declit | hexlit)
 binlit     = "0b" ("0" | "1")+
 declit     = (0-9)+
 hexlit     = "0x" (0-9A-Fa-f)+
+gname      = "@" name
+name       = ("_" | A-Za-z | uniprint) ("_" | A-Za-z | 0-9 | uniprint)
+uniprint   = <utf8 encoding of printable unicode codepoint>
 ```

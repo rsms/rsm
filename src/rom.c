@@ -11,6 +11,127 @@ enum rromseckind {
   rromseckind_MAX = RSM_ROM_CODE,
 } RSM_END_ENUM(rromseckind)
 
+#define CODE_ALIGNMENT sizeof(rinstr) // alignment of CODE section body
+
+// --------------------------------------------------------------------------------------
+// ROM loader
+
+#define LPARAMS  rrom* rom, const u8* p, const u8* end, u64 size
+#define LARGS    rom, p, end, size
+#define POFFS    ( (usize)((const void*)p - (const void*)rom->img) )
+#define perr(fmt, args...) ({ \
+  log("error while loading rom, at offset %zu: " fmt, POFFS, ##args); \
+  rerr_invalid; })
+
+rerror leb_u64_read(u64* resultp, u32 nbit, const u8** input, const u8* inputend) {
+  rerror err = rerr_invalid;
+  u64 v = 0;
+  u32 shift = 0;
+  const u8* p = *input;
+  while (p != inputend) {
+    u64 b = *p++;
+    v |= ((b & 0x7f) << shift);
+    shift += 7;
+    if ((b & 0x80) == 0) {
+      err = 0;
+      break;
+    }
+    if (shift >= nbit) {
+      err = rerr_overflow;
+      break;
+    }
+  }
+  *resultp = v;
+  *input = p;
+  return err;
+}
+
+static rerror load_section(LPARAMS);
+static rerror load_next_section(LPARAMS) {
+  if (p >= end) return 0;
+  MUSTTAIL return load_section(LARGS);
+}
+
+// skip_section skips the current section (or the remainder of the current section)
+ATTR_UNUSED static rerror skip_section(LPARAMS) {
+  p = MIN(end, p + size);
+  MUSTTAIL return load_next_section(LARGS);
+}
+
+static rerror load_section_DATA(LPARAMS) {
+  dlog("DATA section of size %llu", size);
+  u8 align_log2 = *p++; size--;
+  if UNLIKELY(size == 0)
+    return perr("DATA section ended prematurely");
+  if UNLIKELY(align_log2 < 1 || align_log2 > 3)
+    return perr("DATA section has invalid alignment (%u)", *(p-1));
+  rom->dataalign = 1u << align_log2;
+  rom->datasize = size;
+  rom->data = p;
+  dlog("data alignment: %u B (at runtime)", rom->dataalign);
+  p = MIN(end, p + size);
+  MUSTTAIL return load_next_section(LARGS);
+}
+
+static rerror load_section_CODE(LPARAMS) {
+  dlog("CODE section of size %llu", size);
+  const void* code = (const void*)ALIGN2((uintptr)p, CODE_ALIGNMENT);
+  usize codesize = size - (usize)(code - (const void*)p);
+  if UNLIKELY(!IS_ALIGN2(codesize, CODE_ALIGNMENT))
+    return perr("CODE section size %lu not aligned at %zu", codesize, CODE_ALIGNMENT);
+  rom->code = code;
+  rom->codelen = codesize / CODE_ALIGNMENT; // compiler replaces w/ shr; ie codesize>>2
+  p += size;
+  MUSTTAIL return load_next_section(LARGS);
+}
+
+static rerror load_section(LPARAMS) {
+  assert(p < end);
+  u8 kind = *p++;
+  rerror err = leb_u64_read(&size, 64, &p, end);
+  if UNLIKELY(err)
+    return perr("invalid section 0x%02x header size: %s", kind, rerror_str(err));
+  if UNLIKELY(size > (usize)(end - p))
+    return perr("corrupt section 0x%02x", kind);
+  switch (kind) {
+    case RSM_ROM_DATA: MUSTTAIL return load_section_DATA(LARGS);
+    case RSM_ROM_CODE: MUSTTAIL return load_section_CODE(LARGS);
+    default:
+      // TODO: consider 0x00 for "named custom sections", like WASM
+      return perr("unknown section kind 0x%02x", kind);
+  }
+}
+
+rerror rsm_loadrom(rrom* rom) {
+  // default values
+  rom->code      = NULL;
+  rom->codelen   = 0;
+  rom->data      = NULL;
+  rom->datasize  = 0;
+  rom->dataalign = 1;
+
+  if UNLIKELY(rom->imgsize < 6 || *(u32*)rom->img->magic != RSM_ROM_MAGIC) {
+    const void* p = rom->img; // for perr
+    return perr("invalid ROM image");
+  }
+
+  if UNLIKELY(rom->img->version != 0) {
+    const void* p = &rom->img->version; // for perr
+    perr("unsupported ROM version %u", rom->img->version);
+    return rerr_not_supported;
+  }
+
+  const u8* p = (const u8*)rom->img->data;
+  const u8* end = p + rom->imgsize - sizeof(rromimg);
+  if UNLIKELY(p == end)
+    return 0;
+  return load_section(rom, p, end, 0);
+}
+
+
+// --------------------------------------------------------------------------------------
+// ROM builder
+#ifndef RSM_NO_ASM
 
 #define LEB_NBYTE_64 10  // number of bytes needed to represent all 64-bit integer values
 #define LEB_NBYTE_32 5   // number of bytes needed to represent all 32-bit integer values
@@ -46,29 +167,6 @@ _LEB_DEF_WRITE(leb_u64_write, u64, LEB_NBYTE_64, _LEB_MORE_U)
 // static usize leb_i32_write(u8 out[LEB_NBYTE_32], i32 val);
 // _LEB_DEF_WRITE(leb_i32_write, i32, LEB_NBYTE_32, _LEB_MORE_S)
 
-rerror leb_u64_read(u64* resultp, u32 nbit, const u8** input, const u8* inputend) {
-  rerror err = rerr_invalid;
-  u64 v = 0;
-  u32 shift = 0;
-  const u8* p = *input;
-  while (p != inputend) {
-    u64 b = *p++;
-    v |= ((b & 0x7f) << shift);
-    shift += 7;
-    if ((b & 0x80) == 0) {
-      err = 0;
-      break;
-    }
-    if (shift >= nbit) {
-      err = rerr_overflow;
-      break;
-    }
-  }
-  *resultp = v;
-  *input = p;
-  return err;
-}
-
 
 static void calc_DATA(rrombuild* rb, usize* bsize, usize* align) {
   if (rb->datasize)
@@ -87,8 +185,6 @@ static u8* build_DATA(rrombuild* rb, rrom* rom, u8* p, rerror* errp) {
   p += rb->datasize;
   return p;
 }
-
-#define CODE_ALIGNMENT sizeof(rinstr)
 
 static void calc_CODE(rrombuild* rb, usize* bsize, usize* align) {
   *bsize = rb->codelen * sizeof(rinstr);
@@ -190,93 +286,4 @@ rerror rom_build(rrombuild* rb, rmem mem, rrom* rom) {
   return 0;
 }
 
-// -- rsm_loadrom --
-
-#define LPARAMS  rrom* rom, const u8* p, const u8* end, u64 size
-#define LARGS    rom, p, end, size
-#define POFFS    ( (usize)((const void*)p - (const void*)rom->img) )
-#define perr(fmt, args...) ({ \
-  log("error while loading rom, at offset %zu: " fmt, POFFS, ##args); \
-  rerr_invalid; })
-
-static rerror load_section(LPARAMS);
-static rerror load_next_section(LPARAMS) {
-  if (p >= end) return 0;
-  MUSTTAIL return load_section(LARGS);
-}
-
-// skip_section skips the current section (or the remainder of the current section)
-ATTR_UNUSED static rerror skip_section(LPARAMS) {
-  p = MIN(end, p + size);
-  MUSTTAIL return load_next_section(LARGS);
-}
-
-static rerror load_section_DATA(LPARAMS) {
-  dlog("DATA section of size %llu", size);
-  u8 align_log2 = *p++; size--;
-  if UNLIKELY(size == 0)
-    return perr("DATA section ended prematurely");
-  if UNLIKELY(align_log2 < 1 || align_log2 > 3)
-    return perr("DATA section has invalid alignment (%u)", *(p-1));
-  rom->dataalign = 1u << align_log2;
-  rom->datasize = size;
-  rom->data = p;
-  dlog("data alignment: %u B (at runtime)", rom->dataalign);
-  p = MIN(end, p + size);
-  MUSTTAIL return load_next_section(LARGS);
-}
-
-static rerror load_section_CODE(LPARAMS) {
-  dlog("CODE section of size %llu", size);
-  const void* code = (const void*)ALIGN2((uintptr)p, CODE_ALIGNMENT);
-  usize codesize = size - (usize)(code - (const void*)p);
-  if UNLIKELY(!IS_ALIGN2(codesize, CODE_ALIGNMENT))
-    return perr("CODE section size %lu not aligned at %zu", codesize, CODE_ALIGNMENT);
-  rom->code = code;
-  rom->codelen = codesize / CODE_ALIGNMENT; // compiler replaces w/ shr; ie codesize>>2
-  p += size;
-  MUSTTAIL return load_next_section(LARGS);
-}
-
-static rerror load_section(LPARAMS) {
-  assert(p < end);
-  u8 kind = *p++;
-  rerror err = leb_u64_read(&size, 64, &p, end);
-  if UNLIKELY(err)
-    return perr("invalid section 0x%02x header size: %s", kind, rerror_str(err));
-  if UNLIKELY(size > (usize)(end - p))
-    return perr("corrupt section 0x%02x", kind);
-  switch (kind) {
-    case RSM_ROM_DATA: MUSTTAIL return load_section_DATA(LARGS);
-    case RSM_ROM_CODE: MUSTTAIL return load_section_CODE(LARGS);
-    default:
-      // TODO: consider 0x00 for "named custom sections", like WASM
-      return perr("unknown section kind 0x%02x", kind);
-  }
-}
-
-rerror rsm_loadrom(rrom* rom) {
-  // default values
-  rom->code      = NULL;
-  rom->codelen   = 0;
-  rom->data      = NULL;
-  rom->datasize  = 0;
-  rom->dataalign = 1;
-
-  if UNLIKELY(rom->imgsize < 6 || *(u32*)rom->img->magic != RSM_ROM_MAGIC) {
-    const void* p = rom->img; // for perr
-    return perr("invalid ROM image");
-  }
-
-  if UNLIKELY(rom->img->version != 0) {
-    const void* p = &rom->img->version; // for perr
-    perr("unsupported ROM version %u", rom->img->version);
-    return rerr_not_supported;
-  }
-
-  const u8* p = (const u8*)rom->img->data;
-  const u8* end = p + rom->imgsize - sizeof(rromimg);
-  if UNLIKELY(p == end)
-    return 0;
-  return load_section(rom, p, end, 0);
-}
+#endif // RSM_NO_ASM

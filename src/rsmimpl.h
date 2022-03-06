@@ -747,18 +747,6 @@ u64 nanotime();
 // Returns number of bytes written, excluding the null terminator.
 usize fmtduration(char buf[25], u64 duration_ns);
 
-typedef struct rrombuild rrombuild;
-struct rrombuild {
-  const rinstr* code;      // vm instructions array
-  usize         codelen;   // vm instructions array length
-  usize         datasize;  // data segment size
-  u8            dataalign; // data segment alignment
-  void*         userdata;
-  rerror(*filldata)(void* dst, void* userdata);
-};
-
-rerror rom_build(rrombuild* rb, rmem mem, rrom* rom);
-
 // --------------------------------------------------------------------------------------
 // assembler internals, shared by all asm*.c files
 #ifndef RSM_NO_ASM
@@ -794,6 +782,18 @@ rposrange nposrange(rnode*);
 void errf(rasm*, rposrange, const char* fmt, ...) ATTR_FORMAT(printf, 3, 4);
 void warnf(rasm*, rposrange, const char* fmt, ...) ATTR_FORMAT(printf, 3, 4);
 void reportv(rasm*, rposrange, int code, const char* fmt, va_list ap);
+
+typedef struct rrombuild rrombuild;
+struct rrombuild {
+  const rinstr* code;      // vm instructions array
+  usize         codelen;   // vm instructions array length
+  usize         datasize;  // data segment size
+  u8            dataalign; // data segment alignment
+  void*         userdata;
+  rerror(*filldata)(void* dst, void* userdata);
+};
+
+rerror rom_build(rrombuild* rb, rmem mem, rrom* rom);
 
 #endif // RSM_NO_ASM
 // --------------------------------------------------------------------------------------

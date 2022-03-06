@@ -45,15 +45,16 @@ malformed:
 static void usage() {
   printf(
     "RSM virtual machine <https://rsms.me/rsm/>\n"
-    "Usage: %s [options] [<asmfile>]\n"
+    "Usage: %s [options] [<infile>]\n"
     "Options:\n"
     "  -h           Show help and exit\n"
     "  -r           Run the program (implied unless -o or -p are set)\n"
     "  -p           Print assembly on stdout\n"
     "  -R<N>=<val>  Initialize register R<N> to <val> (e.g. -R0=4, -R3=0xff)\n"
     "  -o <file>    Write compiled ROM to <file>\n"
-    "<asmfile>\n"
-    "  If not given or if it's \"-\", read from stdin (stdin can't be a TTY.)\n"
+    "<infile>\n"
+    "  Either a ROM image or an assembly source file.\n"
+    "  If not given, or if it's \"-\", read from stdin if it's not a TTY.\n"
     "Example:\n"
     "  echo 'fun main() { R0=R1*R1; }' | out/rsm -R1=18\n"
     ,prog);
@@ -92,7 +93,7 @@ static bool loadfile(rmem mem, const char* nullable infile, void** p, usize* siz
   if (err == 0)
     return true;
   if (err == rerr_badfd) { // stdin is a tty
-    errmsg("missing <srcfile>");
+    errmsg("missing <infile>");
   } else {
     errmsg("error reading stdin: %s", rerror_str(err));
   }

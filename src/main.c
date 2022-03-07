@@ -12,6 +12,7 @@ static const char* prog = ""; // argv[0]
 static const char* outfile = NULL;
 static bool opt_run = false;
 static bool opt_print_asm = false;
+static usize vm_memsize = 1024*1024;
 
 #define errmsg(fmt, args...) fprintf(stderr, "%s: " fmt "\n", prog, ##args)
 
@@ -42,6 +43,37 @@ malformed:
   return 1;
 }
 
+static int parse_bytesize_opt(char opt, const char* arg, usize* resultp) {
+  u64 result;
+  usize len = strlen(arg);
+  rerror err;
+  if (len == 0) {
+    err = rerr_invalid;
+    goto error;
+  }
+  // parse suffix -- G[iga], M[ega], k[ilo]
+  u64 multiplier = 1;
+  switch (arg[len-1]) {
+    case 'G': case 'g': len--; multiplier = 1024*1024*1024; break;
+    case 'M': case 'm': len--; multiplier = 1024*1024; break;
+    case 'k': case 'K': len--; multiplier = 1024; break;
+  }
+  err = parseu64(arg, len, 10, &result, USIZE_MAX);
+  if (err) goto error;
+  if (result == 0) { err = rerr_invalid; goto error; }
+
+  if (check_mul_overflow(result, multiplier, &result)) {
+    err = rerr_overflow;
+    goto error;
+  }
+
+  *resultp = (usize)result;
+  return 0;
+error:
+  errmsg("-%c %s: invalid value: %s", opt, arg, rerror_str(err));
+  return 1;
+}
+
 static void usage() {
   printf(
     "RSM virtual machine <https://rsms.me/rsm/>\n"
@@ -51,13 +83,16 @@ static void usage() {
     "  -r           Run the program (implied unless -o or -p are set)\n"
     "  -p           Print assembly on stdout\n"
     "  -R<N>=<val>  Initialize register R<N> to <val> (e.g. -R0=4, -R3=0xff)\n"
+    "  -m <nbytes>  Set VM memory to <nbytes> (default: %zu)\n"
     "  -o <file>    Write compiled ROM to <file>\n"
     "<infile>\n"
     "  Either a ROM image or an assembly source file.\n"
     "  If not given, or if it's \"-\", read from stdin if it's not a TTY.\n"
     "Example:\n"
     "  echo 'fun main() { R0=R1*R1; }' | out/rsm -R1=18\n"
-    ,prog);
+    ,prog
+    ,vm_memsize
+  );
 }
 
 static int parse_cli_opts(int argc, char*const* argv, u64* iregs) {
@@ -65,12 +100,13 @@ static int parse_cli_opts(int argc, char*const* argv, u64* iregs) {
   extern char* optarg; // global state in libc... coolcoolcool
   extern int optind, optopt;
   int nerrs = 0;
-  for (int c; (c = getopt(argc, argv, ":hrpR:o:")) != -1;) switch(c) {
+  for (int c; (c = getopt(argc, argv, ":hrpR:o:m:")) != -1;) switch(c) {
     case 'h': usage(); exit(0);
     case 'r': opt_run = true; break;
     case 'p': opt_print_asm = true; break;
     case 'R': nerrs += setreg(iregs, optarg); break;
     case 'o': outfile = optarg; break;
+    case 'm': nerrs += parse_bytesize_opt(optopt, optarg, &vm_memsize); break;
     case ':': errmsg("option -%c requires a value", optopt); nerrs++; break;
     case '?': errmsg("unrecognized option -%c", optopt); nerrs++; break;
   }
@@ -214,22 +250,28 @@ int main(int argc, char*const* argv) {
     return 1;
   }
 
-  // execute program
-  if (opt_run) {
-    u8 memory[1024*1024];
-    u64 time = nanotime();
-    rerror err = rsm_vmexec(&rom, iregs, memory, sizeof(memory));
-    time = nanotime() - time;
-    if (err) {
-      errmsg("vmexec: %s", rerror_str(err));
-      return 1;
-    }
-    char duration[25];
-    fmtduration(duration, time);
-    log("execution finished in %s", duration);
-    print_regstate(iregs);
+  if (!opt_run)
+    return 0;
+
+  // allocate memory and execute program
+  void* membase = rmem_alloc(mem, vm_memsize);
+  if UNLIKELY(membase == NULL) {
+    errmsg("failed to allocate %zu B of memory", vm_memsize);
+    return 1;
   }
 
+  u64 time = nanotime();
+  rerror err = rsm_vmexec(&rom, iregs, membase, vm_memsize);
+  time = nanotime() - time;
+  if (err) {
+    errmsg("vmexec: %s", err == rerr_nomem ? "not enough memory" : rerror_str(err));
+    return 1;
+  }
+
+  char duration[25];
+  fmtduration(duration, time);
+  log("execution finished in %s", duration);
+  print_regstate(iregs);
   return 0;
 }
 

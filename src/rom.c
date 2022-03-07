@@ -59,7 +59,6 @@ ATTR_UNUSED static rerror skip_section(LPARAMS) {
 }
 
 static rerror load_section_DATA(LPARAMS) {
-  dlog("DATA section of size %llu", size);
   u8 align_log2 = *p++; size--;
   if UNLIKELY(size == 0)
     return perr("DATA section ended prematurely");
@@ -68,13 +67,11 @@ static rerror load_section_DATA(LPARAMS) {
   rom->dataalign = 1u << align_log2;
   rom->datasize = size;
   rom->data = p;
-  dlog("data alignment: %u B (at runtime)", rom->dataalign);
   p = MIN(end, p + size);
   MUSTTAIL return load_next_section(LARGS);
 }
 
 static rerror load_section_CODE(LPARAMS) {
-  dlog("CODE section of size %llu", size);
   const void* code = (const void*)ALIGN2((uintptr)p, CODE_ALIGNMENT);
   usize codesize = size - (usize)(code - (const void*)p);
   if UNLIKELY(!IS_ALIGN2(codesize, CODE_ALIGNMENT))
@@ -104,9 +101,7 @@ static rerror load_section(LPARAMS) {
 
 rerror rsm_loadrom(rrom* rom) {
   // default values
-  rom->code      = NULL;
   rom->codelen   = 0;
-  rom->data      = NULL;
   rom->datasize  = 0;
   rom->dataalign = 1;
 
@@ -252,7 +247,7 @@ rerror rom_build(rrombuild* rb, rmem mem, rrom* rom) {
     usize headsize = sechsize[kind];
 
     // write section header
-    dlog("section 0x%02x at %08lx: %zu B (head)", kind, (uintptr)((void*)p-base), headsize);
+    dlog("section 0x%02x at %08lx: %zu B head", kind, (uintptr)((void*)p-base), headsize);
     #if DEBUG
     void* secstart = p; // used for assertion
     #endif
@@ -282,7 +277,7 @@ rerror rom_build(rrombuild* rb, rmem mem, rrom* rom) {
   // finalize rrom fields
   rom->img = img;
   rom->imgsize = (usize)((void*)p - base);
-  dlog("final ROM image size: %zu", rom->imgsize);
+  dlog("final ROM image size: %zu B", rom->imgsize);
   return 0;
 }
 

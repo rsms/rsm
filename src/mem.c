@@ -62,9 +62,8 @@ static void* nullable ba_alloc(void* state, void* nullable p, usize oldsize, usi
   // new -- ba_alloc(s,NULL,0,>0)
   assert(oldsize == 0);
   assert(newsize > 0);
-  if UNLIKELY(ba_avail(a) < newsize) {
+  if UNLIKELY(ba_avail(a) < newsize)
     return NULL; // out of memory
-  }
   void* p2 = a->buf + a->len;
   a->len += newsize;
   return p2;

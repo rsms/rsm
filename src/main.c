@@ -87,11 +87,18 @@ static void usage() {
     "  -o <file>    Write compiled ROM to <file>\n"
     "<infile>\n"
     "  Either a ROM image or an assembly source file.\n"
-    "  If not given, or if it's \"-\", read from stdin if it's not a TTY.\n"
-    "Example:\n"
-    "  echo 'fun main() { R0=R1*R1; }' | out/rsm -R1=18\n"
+    "  If \"-\" or not given, read from stdin (unless stdin is a TTY.)\n"
+    "Examples:\n"
+    "  %s -R1=6 examples/factorial.rsm     # compile & run\n"
+    "  %s -o compiled.rom source.rsm       # compile & save\n"
+    "  %s compiled.rom                     # run precompiled ROM\n"
+    "  echo 'fun main() { R0=123; }' | %s  # compile & run stdin\n"
     ,prog
     ,vm_memsize
+    ,prog
+    ,prog
+    ,prog
+    ,prog
   );
 }
 
@@ -129,7 +136,7 @@ static bool loadfile(rmem mem, const char* nullable infile, void** p, usize* siz
   if (err == 0)
     return true;
   if (err == rerr_badfd) { // stdin is a tty
-    errmsg("missing <infile>");
+    errmsg("missing <infile> (see %s -h for help)", prog);
   } else {
     errmsg("error reading stdin: %s", rerror_str(err));
   }

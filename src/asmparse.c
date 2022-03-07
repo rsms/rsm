@@ -955,12 +955,12 @@ enum {
 };
 
 rerror parse_init() {
-  static u8 memory[3104];
+  static void* memory[3104/sizeof(void*)];
   rmem mem = rmem_mkbufalloc(memory, sizeof(memory));
   smap* m = smap_make(&kwmap, mem, kwcount, MAPLF_2); // increase sizeof(memory)
-  m->hash0 = 0x89f025ba;
   if UNLIKELY(m == NULL)
     return rerr_nomem;
+  m->hash0 = 0x89f025ba;
   uintptr* vp;
   #define _(token, kw) \
     vp = assertnotnull(smap_assign(m, kw, strlen(kw))); \

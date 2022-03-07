@@ -3,6 +3,8 @@
 #ifndef RSM_NO_ASM
 #include "rsmimpl.h"
 
+#define DEBUG_LOG_DATA // define to log debug messages about data layout
+
 // codegen
 typedef struct gstate gstate;
 typedef struct gfun   gfun;
@@ -370,7 +372,6 @@ static void gpostresolve_data(gstate* g) {
     u32 namelen = ref->n->name.len;
     assert(namelen > 0);
     assert(name[0] == '@'); // we use this to encode what vp means
-    dlog("looking for data reference %.*s", (int)namelen, name);
 
     uintptr* vp = smap_lookup(&g->names, name, namelen);
     if UNLIKELY(!vp) {
@@ -379,8 +380,12 @@ static void gpostresolve_data(gstate* g) {
     }
     gdata* d = (gdata*)*vp;
     d->nrefs++;
+
+    #ifdef DEBUG_LOG_DATA
     dlog("patching data reference %.*s (gdata %p, addr 0x%llx)",
       (int)namelen, name, d, d->addr);
+    #endif
+
     patch_imm(g, ref->n, ref->i, d->addr);
   }
   g->udv.len = 0;
@@ -755,7 +760,7 @@ static void genfun(gstate* g, rnode* fun) {
 }
 
 static void dlog_gdata(gdata* nullable d) {
-  #ifdef DEBUG
+  #if defined(DEBUG) && defined(DEBUG_LOG_DATA)
   if (!d) {
     dlog("data:\nADDRESS            NAME             SIZE  ALIGN  DATA");
     return;

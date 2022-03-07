@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
 
+//#define DEBUG_VM_LOG_LOADSTORE // define to dlog LOAD and STORE operations
+
 typedef struct vmstate vmstate;
 struct vmstate {
   usize inlen;   // number of instructions at inv
@@ -29,8 +31,14 @@ struct vmstate {
     rsm_fmtinstr(buf, sizeof(buf), inv[pc], NULL, RSM_FMT_COLOR);
     fprintf(stderr, "  │ %3ld  %s\n", pc, buf);
   }
+  #ifdef DEBUG_VM_LOG_LOADSTORE
+    #define log_loadstore dlog
+  #else
+    #define log_loadstore(...) ((void)0)
+  #endif
 #else
-  #define logstate(...) ((void)0)
+  #define logstate(...)      ((void)0)
+  #define log_loadstore(...) ((void)0)
 #endif
 
 // constants
@@ -160,22 +168,19 @@ static void scall(VMPARAMS, u8 ar, rinstr in) {
 
 // u64 LOAD(TYPE, usize addr)
 #define LOAD(TYPE, addr) ({ \
-  usize a__ = (usize)(addr); TYPE t__; \
+  usize a__ = (usize)(addr); \
   check_loadstore(a__, sizeof(TYPE), VM_E_UNALIGNED_LOAD, VM_E_OOB_LOAD); \
-  void* p = membase + a__; \
-  u64 val = (u64)*_Generic(t__, u64:(u64*)p, u32:(u32*)p, u16:(u16*)p, u8:(u8*)p ); \
-  /*dlog("load  %s mem[0x%lx] => 0x%llx", #TYPE, a__, val);*/ \
-  val; \
+  log_loadstore("LOAD  %s mem[0x%lx] => 0x%llx", #TYPE, a__, (u64)*(TYPE*)(membase + a__)); \
+  (u64)*(TYPE*)(membase + a__); \
 })
 
 // void STORE(TYPE, usize addr, u64 value)
-#define STORE(TYPE, addr, value) ({ \
+#define STORE(TYPE, addr, value) { \
   usize a__ = (usize)(addr); TYPE v__ = (TYPE)(value); \
   check_loadstore(a__, sizeof(TYPE), VM_E_UNALIGNED_STORE, VM_E_OOB_STORE); \
-  void* p = membase + a__; \
-  /*dlog("store %s mem[0x%lx] <= 0x%llx", #TYPE, a__, (u64)v__);*/ \
-  *_Generic(v__, u64:(u64*)p, u32:(u32*)p, u16:(u16*)p, u8:(u8*)p ) = v__; \
-})
+  log_loadstore("STORE %s mem[0x%lx] <= 0x%llx", #TYPE, a__, (u64)v__); \
+  *(TYPE*)(membase + a__) = v__; \
+}
 
 static void push(VMPARAMS, usize size, u64 val) {
   usize addr = SP;
@@ -312,13 +317,13 @@ static void vmexec(VMPARAMS) {
 
     #define do_EQ(C)   RA = RB == C
     #define do_NEQ(C)  RA = RB != C
-    #define do_LTU(C)  RA = RB < C
-    #define do_LTS(C)  RA = (i64)RB < (i64)C
+    #define do_LTU(C)  RA = RB <  C
     #define do_LTEU(C) RA = RB <= C
-    #define do_LTES(C) RA = (i64)RB <=(i64)C
-    #define do_GTU(C)  RA = RB > C
-    #define do_GTS(C)  RA = (i64)RB > (i64)C
+    #define do_GTU(C)  RA = RB >  C
     #define do_GTEU(C) RA = RB >= C
+    #define do_LTS(C)  RA = (i64)RB <  (i64)C
+    #define do_LTES(C) RA = (i64)RB <= (i64)C
+    #define do_GTS(C)  RA = (i64)RB >  (i64)C
     #define do_GTES(C) RA = (i64)RB >= (i64)C
 
     #define do_BR(B)    if (RA)      pc = (isize)((i64)pc + (i64)B)
@@ -424,15 +429,16 @@ rerror rsm_vmexec(rrom* rom, u64* iregs, void* membase, usize memsize) {
   if (memsize < STK_MIN || rom->datasize > memsize - STK_MIN)
     return rerr_nomem;
 
-  // calculate stack size and check if we have enough memory for STK_MIN.
-  // stacksize = clamp([STK_MIN-STK_MAX], (memsize - datasize) / 2)
-  usize stacksize = MAX(STK_MIN, MIN((memsize - rom->datasize)/2, STK_MAX));
-  usize stacktop = ALIGN2(rom->datasize, STK_ALIGN);
-  usize stackbase = stacktop + ALIGN2_FLOOR(stacksize, STK_ALIGN);
-  // note: At this point stacksize is no longer logically correct.
-  //       The correct value is now: stacksize = stackbase - stacktop
-  if (stackbase > memsize)
-    return rerr_nomem; // not enough memory for STK_MIN
+  // calculate stackbase and check if we have enough memory
+  usize stackbase; {
+    usize stacksize = MAX(STK_MIN, MIN(STK_MAX, (memsize - rom->datasize)/2));
+    usize stacktop = ALIGN2(rom->datasize, STK_ALIGN);
+    stackbase = stacktop + ALIGN2_FLOOR(stacksize, STK_ALIGN);
+    // note: At this point stacksize is no longer logically correct.
+    //       The correct value is now: stacksize = stackbase - stacktop
+    if (stackbase > memsize)
+      return rerr_nomem; // not enough memory for STK_MIN
+  }
 
   // initialize vm state
   vmstate vs = {
@@ -441,11 +447,14 @@ rerror rsm_vmexec(rrom* rom, u64* iregs, void* membase, usize memsize) {
     .datasize  = rom->datasize,
     .stackbase = stackbase,
   };
-  const rinstr* inv = rom->code;
 
-  // initialize stack pointer and push main return address on stack
-  SP = (u64)stackbase;
-  push(&vs, iregs, inv, membase, 0, 8, MAIN_RET_PC);
+  // initialize registers
+  SP = (u64)stackbase;       // stack pointer
+  iregs[8] = (u64)stackbase; // R8 = heapstart
+  iregs[9] = (u64)memsize;   // R9 = heapend
+
+  // push main return address on stack
+  push(&vs, iregs, rom->code, membase, 0, 8, MAIN_RET_PC);
 
   // initialize global data by copying from ROM
   if (rom->datasize > 0)
@@ -456,6 +465,6 @@ rerror rsm_vmexec(rrom* rom, u64* iregs, void* membase, usize memsize) {
     logstate_header();
   #endif
 
-  vmexec(&vs, iregs, inv, membase, 0);
+  vmexec(&vs, iregs, rom->code, membase, 0);
   return 0;
 }

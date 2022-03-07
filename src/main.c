@@ -254,7 +254,7 @@ int main(int argc, char*const* argv) {
     return 0;
 
   // allocate memory and execute program
-  void* membase = rmem_alloc(mem, vm_memsize);
+  void* membase = vmem_alloc(vm_memsize);
   if UNLIKELY(membase == NULL) {
     errmsg("failed to allocate %zu B of memory", vm_memsize);
     return 1;

@@ -34,7 +34,7 @@ struct vmstate {
 #endif
 
 // constants
-#define STK_ALIGN    8           // stack alignment
+#define STK_ALIGN    8           // stack alignment (== sizeof(u64))
 #define STK_MIN      2048        // minium stack size (TODO: consider making part of ROM)
 #define STK_MAX      (1024*1024) // maximum stack size
 #define MAIN_RET_PC  USIZE_MAX   // special PC value representing the main return address
@@ -412,7 +412,7 @@ rerror rsm_vmexec(rrom* rom, u64* iregs, void* membase, usize memsize) {
   //              stacktop      stackbase
   //
   // make sure membase is aligned to most stringent alignment of data
-  uintptr ma = ALIGN2((uintptr)membase, (uintptr)rom->dataalign);
+  uintptr ma = ALIGN2((uintptr)membase, MAX((uintptr)rom->dataalign, STK_ALIGN));
   if UNLIKELY(ma != (uintptr)membase) {
     uintptr diff = ma - (uintptr)membase;
     memsize = diff > memsize ? 0 : memsize - diff;

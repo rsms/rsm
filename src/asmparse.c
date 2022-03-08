@@ -489,7 +489,7 @@ static rnode* passignreg(PPARAMS, rnode* eq) {
       ropres res = rop_result(rhs->ival);
       if UNLIKELY(res != ropres_reg) {
         // note: using srcpos of eq here to make hanging equal
-        perr(p, rhs, "register store of operation %s which does not produce a %sresult",
+        perr(p, rhs, "register assignment of operation %s which does not produce a %sresult",
           rop_name(rhs->ival), res == ropres_nil ? "" : "register ");
       }
       break;

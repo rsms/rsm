@@ -21,7 +21,7 @@ CC=${CC:-$CCDEF}
 
 # copy previous, compile new
 [ -f $S2 ] && cp $S2 $B
-$CC -Oz -std=c11 -S -o $S "$@" &
+$CC -Oz -std=c11 -g -S -o $S "$@" &
 $CC -Oz -std=c11 -g -c -o $O "$@"
 wait
 
@@ -32,16 +32,22 @@ OBJDUMP=$(command -v clang)
 
 eval "$(cat "$PF" 2>/dev/null)" || true
 
-IGN_PAT='^(?:\s*[;#]|\s+\.|Ltmp\d+:)'
-LABEL_PAT='^\.?[0-9A-Za-z_]+:'
+IGN_PAT='^(?:\s*[;#]|\s*\.|Ltmp\d+:)'
+LABEL_PAT='^[0-9A-Za-z_\.]+:'
 ARCH=$(uname -m)
 case "$(command -v $CC)" in
   */clang) ARCH=$(clang -print-effective-triple "$@" | cut -d- -f1) ;;
 esac
 
 case "$ARCH" in
-arm64)  BR_PAT='^\s*(?:B(?:\.\w+)?|Bcc|BLR|CBN?Z|TBN?Z)\s+[^_]' ;; # excludes "BR"
-x86_64) BR_PAT='^\s*J[A-LN-Z][A-Z]*\b' ;; # excludes "JMP"
+arm64)
+  BR_PAT='^\s*(?:B(?:\.\w+)?|Bcc|BLR|CBN?Z|TBN?Z)\s+[^_]' # excludes "BR"
+  CALL_PAT='^\s*XXX\b' # TODO
+  ;;
+x86_64)
+  BR_PAT='^\s*J[A-LN-Z][A-Z]*\b' # excludes "JMP"
+  CALL_PAT='^\s*call[A-Z]?\b'
+  ;;
 *)
   echo "don't know how to find stats for $ARCH" >&2
   exit 1
@@ -50,8 +56,9 @@ esac
 grep -Ev "$IGN_PAT" $S > $S2  # strip comments
 
 NBYTE=$(stat -f %z $S2)
-NINSTR=$(grep -Ev "$LABEL_PAT" $S2 | wc -l | awk '{print $1}')
-NLABEL=$(grep -E "$LABEL_PAT" $S2 | wc -l | awk '{print $1}')
+NINSTR=$(grep -Eiv "$LABEL_PAT" $S2 | wc -l | awk '{print $1}')
+NLABEL=$(grep -Ei "$LABEL_PAT" $S2 | wc -l | awk '{print $1}')
+NCALL=$(grep -Ei "$CALL_PAT" $S2 | wc -l | awk '{print $1}')
 NBR=$(grep -Ei "$BR_PAT" $S2 | wc -l | awk '{print $1}')
 
 cat <<END > "$PF"
@@ -59,6 +66,7 @@ PREV_NBYTE=$NBYTE
 PREV_NINSTR=$NINSTR
 PREV_NBR=$NBR
 PREV_NLABEL=$NLABEL
+PREV_NCALL=$NCALL
 END
 
 if [ -f $B ]; then
@@ -88,5 +96,6 @@ _report() {
 
 _report "instructions" $NINSTR $PREV_NINSTR
 _report "branches"     $NBR    $PREV_NBR
+_report "calls"        $NCALL  $PREV_NCALL
 _report "labels"       $NLABEL $PREV_NLABEL
 _report "file size"    $NBYTE  $PREV_NBYTE

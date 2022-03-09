@@ -149,3 +149,11 @@ gname      = "@" name
 name       = ("_" | A-Za-z | uniprint) ("_" | A-Za-z | 0-9 | uniprint)
 uniprint   = <utf8 encoding of printable unicode codepoint>
 ```
+
+Comments are ignored and can appear wherever whitespace can appear
+
+```abnf
+comment      = linecomment | blockcomment
+linecomment  = "//" <any character except LF> <LF>
+blockcomment = "/*" <any character> "*/"
+```

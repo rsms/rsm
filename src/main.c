@@ -178,9 +178,11 @@ static void print_regstate(u64* iregs) {
 
 static bool diaghandler(const rdiag* d, void* userdata) {
   // called by the compiler when an error occurs
-  fwrite(d->msg, strlen(d->msg), 1, stderr); putc('\n', stderr);
-  if (d->srclines[0]) {
-    fwrite(d->srclines, strlen(d->srclines), 1, stderr); putc('\n', stderr);
+  fwrite(d->msg, strlen(d->msg), 1, stderr);
+  putc('\n', stderr);
+  if (d->code > 0 && d->srclines[0]) {
+    fwrite(d->srclines, strlen(d->srclines), 1, stderr);
+    putc('\n', stderr);
   }
   return true; // keep going (show all errors)
 }

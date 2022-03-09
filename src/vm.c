@@ -4,17 +4,25 @@
 
 //#define DEBUG_VM_LOG_LOADSTORE // define to dlog LOAD and STORE operations
 
+#define M_SEG_COUNT 64  // must be pow2. max mapped devices = M_SEG_COUNT-2
+#define M_SEG_SIZE  ((u64)1024*1024*1024*1024) // 1TB. must be pow2
+static_assert(M_SEG_COUNT == CEIL_POW2(M_SEG_COUNT), "M_SEG_COUNT is not pow2");
+static_assert(M_SEG_SIZE == CEIL_POW2(M_SEG_SIZE), "M_SEG_SIZE is not pow2");
+static_assert(U64_MAX/M_SEG_COUNT >= M_SEG_SIZE, "too many segments / M_SEG_SIZE too large");
+
 typedef struct vmstate vmstate;
 struct vmstate {
-  usize inlen;   // number of instructions at inv
-  usize memsize;
+  usize inlen; // number of instructions at inv
   union { usize datasize, stacktop; };  // aka
   union { usize heapbase, stackbase; }; // aka
+  // memory segments
+  void* mbase[M_SEG_COUNT]; // [0]=RAM, [N]=devN ... [M_SEG_COUNT-1]=invalid
+  usize msize[M_SEG_COUNT];
 };
 
 // vm interperter functions signature
-#define VMPARAMS vmstate* vs, u64* iregs, const rinstr* inv, void* membase, usize pc
-#define VMARGS   vs, iregs, inv, membase, pc
+#define VMPARAMS vmstate* vs, u64* iregs, const rinstr* inv, usize pc
+#define VMARGS   vs, iregs, inv, pc
 
 #if defined(DEBUG) && !defined(RSM_NO_LIBC)
   #include <stdio.h>
@@ -126,11 +134,11 @@ static void _vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
   usize stacksize = vs->stackbase - stacktop;
   abuf_fmt(s, "\n  SP     %8llx", SP);
 
-  usize heapsize = vs->memsize - vs->heapbase;
-  abuf_fmt(s, "\nMemory: (%lu B)", vs->memsize);
+  usize heapsize = vs->msize[0] - vs->heapbase;
+  abuf_fmt(s, "\nMemory: (%lu B)", vs->msize[0]);
   abuf_fmt(s, "\n  data         0...%-8lx %10lu B", vs->datasize, vs->datasize);
   abuf_fmt(s, "\n  stack %8lx...%-8lx %10lu B", stacktop, vs->heapbase, stacksize);
-  abuf_fmt(s, "\n  heap  %8lx...%-8lx %10lu B", vs->heapbase, vs->memsize, heapsize);
+  abuf_fmt(s, "\n  heap  %8lx...%-8lx %10lu B", vs->heapbase, vs->msize[0], heapsize);
 
   abuf_terminate(s);
   log("%s", buf);
@@ -150,47 +158,132 @@ static void _vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
   #define check(cond, ...) ((void)0)
 #endif // RSM_SAFE
 
-#define check_loadstore(addr, size, ealign, eoob) ({ \
-  check(IS_ALIGN2(addr, size), ealign, addr, size); \
-  check(addr + size <= vs->memsize, eoob, addr, size); \
-})
+#define check_loadstore(addr, align, ealign, eoob) { \
+  check(IS_ALIGN2(addr, align), ealign, addr, align); \
+  check(addr <= endaddr(VMARGS, addr), eoob, addr, align); \
+}
 
 #define check_shift(exponent) check((exponent) < 64, VM_E_SHIFT_EXP, exponent)
 
-static void scall(VMPARAMS, u8 ar, rinstr in) {
-  // dlog("scall #%llu arg1 0x%llx", RA, RBrs);
-  // iregs[0] = 0; // result = no error
-  // switch (RA) {
-  //   case 1: putc(RBrs, stdout); break;
-  //   default: iregs[0] = 1; // error; invalid scall
-  // }
+#if RSM_SAFE
+  // endaddr returns the fist invalid address for the segment addr is apart of.
+  // (In other words: it returns the last valid address + 1.)
+  inline static u64 endaddr(VMPARAMS, u64 addr) {
+    usize index = MIN((usize)(addr / M_SEG_SIZE), M_SEG_COUNT-1);
+    return index*M_SEG_SIZE + vs->msize[index];
+  }
+#endif
+
+// mbase_index translates a vm address to a host address's index in vs->mbase
+inline static usize mbase_index(VMPARAMS, u64 addr) {
+  usize index = (usize)(addr / M_SEG_SIZE);
+  check(index < M_SEG_COUNT, VM_E_OOB_STORE, addr);
+  return index;
 }
 
-// u64 LOAD(TYPE, usize addr)
-#define LOAD(TYPE, addr) ({ \
-  usize a__ = (usize)(addr); \
-  check_loadstore(a__, sizeof(TYPE), VM_E_UNALIGNED_LOAD, VM_E_OOB_LOAD); \
-  log_loadstore("LOAD  %s mem[0x%lx] => 0x%llx", #TYPE, a__, (u64)*(TYPE*)(membase + a__)); \
-  (u64)*(TYPE*)(membase + a__); \
+// hostaddr translates a vm address to a host address
+inline static void* hostaddr(VMPARAMS, u64 addr) {
+  usize index = mbase_index(VMARGS, addr);
+  addr -= index * M_SEG_SIZE;
+  return vs->mbase[index] + addr;
+}
+
+inline static void* hostaddr_check_load(VMPARAMS, u64 align, u64 addr) {
+  check_loadstore(addr, align, VM_E_UNALIGNED_LOAD, VM_E_OOB_LOAD);
+  return hostaddr(VMARGS, addr);
+}
+
+// inline u64 LOAD(TYPE, u64 addr)
+#define LOAD(TYPE, addr) ({ u64 a__=(addr); \
+  u64 v__ = *(TYPE*)hostaddr_check_load(VMARGS, sizeof(TYPE), a__); \
+  log_loadstore("LOAD  %s mem[0x%llx] => 0x%llx", #TYPE, a__, v__); \
+  v__; \
 })
 
-// void STORE(TYPE, usize addr, u64 value)
-#define STORE(TYPE, addr, value) { \
-  usize a__ = (usize)(addr); TYPE v__ = (TYPE)(value); \
+// inline void STORE(TYPE, u64 addr, u64 value)
+#define STORE(TYPE, addr, value) { u64 a__=(addr), v__=(value); \
+  log_loadstore("STORE %s mem[0x%llx] <= 0x%llx", #TYPE, a__, v__); \
   check_loadstore(a__, sizeof(TYPE), VM_E_UNALIGNED_STORE, VM_E_OOB_STORE); \
-  log_loadstore("STORE %s mem[0x%lx] <= 0x%llx", #TYPE, a__, (u64)v__); \
-  *(TYPE*)(membase + a__) = v__; \
+  usize index = mbase_index(VMARGS, a__); \
+  *(TYPE*)(vs->mbase[index] + a__ - index*M_SEG_SIZE) = v__; \
 }
 
-static void push(VMPARAMS, usize size, u64 val) {
-  usize addr = SP;
+// inline void STORE_RAM(TYPE, u64 addr, u64 value)
+#define STORE_RAM(TYPE, addr, value) { u64 a__=(addr), v__=(value);  \
+  log_loadstore("STORE %s mem[0x%llx] <= 0x%llx", #TYPE, a__, v__); \
+  assert(a__ < M_SEG_SIZE); \
+  check_loadstore(a__, sizeof(TYPE), VM_E_UNALIGNED_STORE, VM_E_OOB_STORE); \
+  *(u64*)(vs->mbase[0] + (uintptr)a__) = v__; \
+}
+
+isize write(int fd, const void* buf, usize nbyte); // libc
+static u64 _write(VMPARAMS, u64 fd, u64 addr, u64 size) {
+  // RA = write addr=RB size=R(C) fd=Du
+  void* src = hostaddr_check_load(VMARGS, 1, addr);
+  return (u64)write((int)fd, src, (usize)size);
+}
+
+//————————————————————————————————————————————————————————————————————————————————————————
+// BEGIN memory-mapped devices experiment
+typedef struct rvm_dev_t rvm_dev_t;
+struct rvm_dev_t {
+  u32 id;
+  rerror(*open)(rvm_dev_t*, void** mp, usize* msizep, u32 flags);
+  rerror(*close)(rvm_dev_t*, void* m, usize msize);
+  rerror(*refresh)(rvm_dev_t*, void* m, usize msize, u32 flags);
+};
+static void* testdev_mem[32/sizeof(void*)];
+static rerror tesdev_open(rvm_dev_t* dev, void** mp, usize* msizep, u32 flags) {
+  *mp = testdev_mem;
+  *msizep = sizeof(testdev_mem);
+  return 0;
+}
+static rerror tesdev_close(rvm_dev_t* dev, void* m, usize msize) {
+  return 0;
+}
+static rerror testdev_refresh(rvm_dev_t* dev, void* m, usize msize, u32 flags) {
+  char buf[(sizeof(testdev_mem)*3) + 1];
+  abuf s = abuf_make(buf, sizeof(buf));
+  abuf_repr(&s, testdev_mem, sizeof(testdev_mem));
+  abuf_terminate(&s);
+  dlog("[testdev_refresh] device memory contents:\n\"%s\"", buf);
+  return 0;
+}
+static rvm_dev_t testdev = {
+  .id      = 1,
+  .open    = &tesdev_open,
+  .close   = &tesdev_close,
+  .refresh = &testdev_refresh,
+};
+static u64 dev_open(VMPARAMS, u64 devid) {
+  dlog("dev_open #%llu", devid);
+  if (devid < 1 || devid > M_SEG_COUNT-1)
+    return 0;
+  testdev.id = (u32)devid;
+  rerror err = testdev.open(&testdev, &vs->mbase[devid], &vs->msize[devid], 0);
+  if (err) {
+    log("devopen [%u] failed: %s", testdev.id, rerror_str(err));
+    return 0;
+  }
+  u64 addr = devid * M_SEG_SIZE;
+  dlog("[dev_open] addr 0x%llx, membase %p", addr, vs->mbase[devid]);
+  return addr;
+}
+// END memory-mapped devices experiment
+//————————————————————————————————————————————————————————————————————————————————————————
+
+static void scall(VMPARAMS, u8 ar, rinstr in) {
+}
+
+inline static void push(VMPARAMS, u64 size, u64 val) {
+  u64 addr = SP;
   check(addr >= size && addr - size >= vs->stacktop, VM_E_STACK_OVERFLOW, addr);
   addr -= size;
   SP = addr;
-  STORE(u64, addr, val);
+  STORE_RAM(u64, addr, val);
 }
 
-static u64 pop(VMPARAMS, usize size) {
+inline static u64 pop(VMPARAMS, usize size) {
   usize addr = SP;
   check(USIZE_MAX-addr >= size && addr+size <= vs->stackbase, VM_E_STACK_OVERFLOW, addr);
   SP = addr + size;
@@ -200,12 +293,10 @@ static u64 pop(VMPARAMS, usize size) {
 static u64 copyv(VMPARAMS, u64 n) {
   // A = instr[PC+1] + instr[PC+2]; PC+=2
   check(pc+n < vs->inlen, VM_E_OOB_PC, (u64)pc);
-  if (n == 1) return (u64)inv[pc+1];
+  if (n == 1) return (u64)inv[pc];
   assert(n == 2);
-  return (((u64)inv[pc+1]) << 32) | (u64)inv[pc+2];
+  return (((u64)inv[pc]) << 32) | (u64)inv[pc+1];
 }
-
-isize write(int fd, const void* buf, usize nbyte); // libc
 
 static void vmexec(VMPARAMS) {
   // This is the interpreter loop.
@@ -286,18 +377,18 @@ static void vmexec(VMPARAMS) {
     #define do_COPY(B)  RA = B
     #define do_COPYV(B) RA = copyv(VMARGS, B); pc += B;
 
-    #define do_LOAD(C)   RA = LOAD(u64, (usize)((i64)RB+(i64)C))
-    #define do_LOAD4U(C) RA = LOAD(u32, (usize)((i64)RB+(i64)C)) // zero-extend i32 to i64
-    #define do_LOAD4S(C) RA = LOAD(u32, (usize)((i64)RB+(i64)C)) // sign-extend i32 to i64
-    #define do_LOAD2U(C) RA = LOAD(u16, (usize)((i64)RB+(i64)C)) // zero-extend i16 to i64
-    #define do_LOAD2S(C) RA = LOAD(u16, (usize)((i64)RB+(i64)C)) // sign-extend i16 to i64
-    #define do_LOAD1U(C) RA = LOAD(u8,  (usize)((i64)RB+(i64)C)) // zero-extend i8 to i64
-    #define do_LOAD1S(C) RA = LOAD(u8,  (usize)((i64)RB+(i64)C)) // sign-extend i8 to i64
+    #define do_LOAD(C)   RA = LOAD(u64, (u64)((i64)RB+(i64)C))
+    #define do_LOAD4U(C) RA = LOAD(u32, (u64)((i64)RB+(i64)C)) // zero-extend i32 to i64
+    #define do_LOAD4S(C) RA = LOAD(u32, (u64)((i64)RB+(i64)C)) // sign-extend i32 to i64
+    #define do_LOAD2U(C) RA = LOAD(u16, (u64)((i64)RB+(i64)C)) // zero-extend i16 to i64
+    #define do_LOAD2S(C) RA = LOAD(u16, (u64)((i64)RB+(i64)C)) // sign-extend i16 to i64
+    #define do_LOAD1U(C) RA = LOAD(u8,  (u64)((i64)RB+(i64)C)) // zero-extend i8 to i64
+    #define do_LOAD1S(C) RA = LOAD(u8,  (u64)((i64)RB+(i64)C)) // sign-extend i8 to i64
 
-    #define do_STORE(C)  STORE(u64, (usize)((i64)RB+(i64)C), RA)
-    #define do_STORE4(C) STORE(u32, (usize)((i64)RB+(i64)C), RA) // wrap i64 to i32
-    #define do_STORE2(C) STORE(u16, (usize)((i64)RB+(i64)C), RA) // wrap i64 to i16
-    #define do_STORE1(C) STORE(u8,  (usize)((i64)RB+(i64)C), RA) // wrap i64 to i8
+    #define do_STORE(C)  STORE(u64, (u64)((i64)RB+(i64)C), RA)
+    #define do_STORE4(C) STORE(u32, (u64)((i64)RB+(i64)C), RA) // wrap i64 to i32
+    #define do_STORE2(C) STORE(u16, (u64)((i64)RB+(i64)C), RA) // wrap i64 to i16
+    #define do_STORE1(C) STORE(u8 , (u64)((i64)RB+(i64)C), RA) // wrap i64 to i8
 
     #define do_PUSH(A)  push(VMARGS, 8, A)
     #define do_POP(A)   A = pop(VMARGS, 8)
@@ -334,7 +425,8 @@ static void vmexec(VMPARAMS) {
     #define do_SCALL(A) scall(VMARGS, A, in)
     #define do_CALL(A)  push(VMARGS, 8, (u64)PC); pc = (usize)A
 
-    #define do_WRITE(D) RA = (u64)write(D, membase + RB, RC) // (addr=RB size=RC fd=D)
+    #define do_WRITE(D)   RA = _write(VMARGS, D, RB, RC) // addr=RB size=RC fd=D
+    #define do_DEVOPEN(B) RA = dev_open(VMARGS, B)
 
     #define do_RET() { \
       pc = (usize)pop(VMARGS, 8); /* load return address from stack */ \
@@ -369,16 +461,18 @@ static void vmexec(VMPARAMS) {
 }
 
 #if DEBUG
-static void log_memory(rrom* rom, vmstate* vs, void* membase) {
+static void log_memory(rrom* rom, vmstate* vs) {
+  void* membase = vs->mbase[0];
+  usize memsize = (usize)vs->msize[0];
   usize stacksize = vs->stackbase - vs->stacktop;
-  usize heapsize = vs->memsize - vs->stackbase;
+  usize heapsize = memsize - vs->stackbase;
   dlog(
     "Memory layout: (%.3f MB total)\n"
     "     ┌─────────────────────┬────────────────────┬───────────────────────┐\n"
     "segm │ data %12lu B │ %8lu B ← stack │ heap → %12lu B │\n"
     "     ├─────────────────────┼────────────────────┼───────────────────────┘\n"
     "addr 0             %8lx│%-8lx           %-8lx",
-    (double)vs->memsize/1024.0/1024.0,
+    (double)memsize/1024.0/1024.0,
     rom->datasize, stacksize, heapsize,
     rom->datasize, vs->stacktop, vs->stackbase
   );
@@ -397,7 +491,7 @@ static void log_memory(rrom* rom, vmstate* vs, void* membase) {
 }
 #endif // DEBUG
 
-rerror rsm_vmexec(rrom* rom, u64* iregs, void* membase, usize memsize) {
+rerror rsm_vmexec(rrom* rom, u64* iregs, void* rambase, usize ramsize) {
   // load ROM if needed
   if (rom->img == NULL || rom->imgsize == 0)
     return rerr_invalid;
@@ -413,58 +507,72 @@ rerror rsm_vmexec(rrom* rom, u64* iregs, void* membase, usize memsize) {
   //    ┌─────────────┬─────────────┬───────────···
   //    │ data        │     ← stack │ heap →
   //    ├─────────────┼─────────────┼───────────···
-  // membase      datasize      heapbase
+  // rambase      datasize      heapbase
   //              stacktop      stackbase
   //
-  // make sure membase is aligned to most stringent alignment of data
-  uintptr ma = ALIGN2((uintptr)membase, MAX((uintptr)rom->dataalign, STK_ALIGN));
-  if UNLIKELY(ma != (uintptr)membase) {
-    uintptr diff = ma - (uintptr)membase;
-    memsize = diff > memsize ? 0 : memsize - diff;
-    membase = (void*)ma;
-    dlog("adjusting membase+%lu memsize-%lu (address alignment)", (usize)diff, (usize)diff);
+  // make sure rambase is aligned to most stringent alignment of data
+  uintptr ma = ALIGN2((uintptr)rambase, MAX((uintptr)rom->dataalign, STK_ALIGN));
+  if UNLIKELY(ma != (uintptr)rambase) {
+    uintptr diff = ma - (uintptr)rambase;
+    ramsize = diff > ramsize ? 0 : ramsize - diff;
+    rambase = (void*)ma;
+    dlog("adjusting rambase+%lu ramsize-%lu (address alignment)", (usize)diff, (usize)diff);
   }
 
   // check if we have enough memory for ROM data
-  if (memsize < STK_MIN || rom->datasize > memsize - STK_MIN)
+  if UNLIKELY(ramsize < STK_MIN || rom->datasize > ramsize - STK_MIN)
     return rerr_nomem;
+
+  // limit RAM memory size to M_SEG_SIZE
+  if (ramsize > M_SEG_SIZE) {
+    dlog("memory size capped at %llu B", M_SEG_SIZE);
+    ramsize = M_SEG_SIZE;
+  }
 
   // calculate stackbase and check if we have enough memory
   usize stackbase; {
-    usize stacksize = MAX(STK_MIN, MIN(STK_MAX, (memsize - rom->datasize)/2));
+    usize stacksize = MAX(STK_MIN, MIN(STK_MAX, (ramsize - rom->datasize)/2));
     usize stacktop = ALIGN2(rom->datasize, STK_ALIGN);
     stackbase = stacktop + ALIGN2_FLOOR(stacksize, STK_ALIGN);
     // note: At this point stacksize is no longer logically correct.
     //       The correct value is now: stacksize = stackbase - stacktop
-    if (stackbase > memsize)
+    if UNLIKELY(stackbase > ramsize)
       return rerr_nomem; // not enough memory for STK_MIN
   }
 
   // initialize vm state
   vmstate vs = {
     .inlen     = rom->codelen,
-    .memsize   = memsize,
-    .datasize  = rom->datasize,
-    .stackbase = stackbase,
+    .datasize  = rom->datasize, // aka stacktop
+    .stackbase = stackbase,     // aka heapbase
+    .mbase = {rambase},
+    .msize = {ramsize},
   };
 
   // initialize registers
   SP = (u64)stackbase;       // stack pointer
   iregs[8] = (u64)stackbase; // R8 = heapstart
-  iregs[9] = (u64)memsize;   // R9 = heapend
+  iregs[9] = (u64)ramsize;   // R9 = heapend
 
   // push main return address on stack
-  push(&vs, iregs, rom->code, membase, 0, 8, MAIN_RET_PC);
+  push(&vs, iregs, rom->code, 0, 8, MAIN_RET_PC);
 
   // initialize global data by copying from ROM
   if (rom->datasize > 0)
-    memcpy(membase, rom->data, rom->datasize);
+    memcpy(rambase, rom->data, rom->datasize);
 
   #if DEBUG
-    log_memory(rom, &vs, membase);
+    log_memory(rom, &vs);
     logstate_header();
   #endif
 
-  vmexec(&vs, iregs, rom->code, membase, 0);
+  vmexec(&vs, iregs, rom->code, 0);
+
+  if (vs.mbase[testdev.id]) {
+    rerror err = testdev.refresh(&testdev, vs.mbase[testdev.id], vs.msize[testdev.id], 0);
+    rerror err2 = testdev.close(&testdev, vs.mbase[testdev.id], vs.msize[testdev.id]);
+    return err ? err : err2;
+  }
+
   return 0;
 }

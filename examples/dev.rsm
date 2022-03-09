@@ -1,0 +1,16 @@
+// This is a test bed for memory-mapped devices.
+// Currently this is all hard-coded in vm.c, and there's only one device (#1)
+
+const DEVID_TEST = 1 // id of test device
+
+fun main(i32) {
+  // open & memory-map device — R1 holds its memory address
+  R1 = devopen DEVID_TEST
+  brz R1 end // end if devopen failed (if R1 == 0)
+
+  // store "hej\n" to device's memory (R1) at offset 0
+  R0 = 0x0a_6a_65_68 // h, 0x65 e, 0x6a j, 0xa \n
+  store4 R0 R1 0
+end:
+  ret
+}

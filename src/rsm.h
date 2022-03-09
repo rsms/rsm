@@ -155,21 +155,22 @@ _( GTS   , ABCs , reg , "gts"  /* RA = RB >  Cs */)\
 _( GTEU  , ABCu , reg , "gteu" /* RA = RB >= Cu */)\
 _( GTES  , ABCs , reg , "gtes" /* RA = RB >= Cs */)\
 \
-_( BR    , ABs  , nil , "br"    /* if RA!=0 PC += Bs */)\
-_( BRZ   , ABs  , nil , "brz"   /* if RA==0 PC += Bs */)\
-_( BRLT  , ABCs , nil , "brlt"  /* if RA<RB PC += Cs */)\
-\
+_( BR    , ABs  , nil , "br"    /* if RA!=0 PC += Bs         */)\
+_( BRZ   , ABs  , nil , "brz"   /* if RA==0 PC += Bs         */)\
+_( BRLT  , ABCs , nil , "brlt"  /* if RA<RB PC += Cs         */)\
 _( CALL  , Au   , nil , "call"  /* R0...R7 = push(PC); PC=Au */)\
-_( SCALL , Au   , nil , "scall" /* R0...R7 = system_call(Au) */)\
 _( JUMP  , Au   , nil , "jump"  /* PC = Au                   */)\
 _( RET   , _    , nil , "ret"   /* PC = pop()                */)\
 \
+_( SCALL , Au   , nil , "scall" /* R0...R7 = system_call(Au) */)\
 _( WRITE , ABCDu , reg , "write" /* RA = write addr=RB size=R(C) fd=Du */)\
+_( DEVOPEN , ABu , reg , "devopen" /* RA = devaddr = device(Bu) */)\
 \
 // end RSM_FOREACH_OP
 
 // opcode test macros. Update when adding affected opcodes
-#define RSM_OP_IS_BR(op)   (rop_BR <= (op) && (op) <= rop_BRLT)
+#define RSM_OP_IS_BR(op)  (rop_BR <= (op) && (op) <= rop_BRLT)
+#define RSM_OP_ACCEPTS_PC_ARG(op)  (rop_BR <= (op) && (op) <= rop_JUMP)
 
 // size and position of instruction arguments
 #define RSM_SIZE_OP  8
@@ -341,7 +342,7 @@ RSMAPI bool rsm_init();
 
 // rsm_vmexec executes a program, starting with instruction inv[0]
 // Loads the ROM if needed.
-RSMAPI rerror rsm_vmexec(rrom* rom, u64* iregs, void* membase, usize memsize);
+RSMAPI rerror rsm_vmexec(rrom* rom, u64* iregs, void* rambase, usize ramsize);
 
 // rsm_loadrom parses rom->img of rom->imgsize bytes,
 // filling the rest of the fields of the rrom struct.
@@ -417,15 +418,12 @@ _( RT_EQ     ) /* = */ \
 _( RT_IREG   ) /* Rn   */ \
 _( RT_FREG   ) /* Fn   */ \
 _( RT_LABEL  ) /* foo: */ \
-_( RT_GNAME  ) /* @foo */ \
 _( RT_NAME   ) /* foo  */ \
 _( RT_OP     ) /* brz */ \
 /* literal numbers (order matters; see snumber) */ \
 _( RT_INTLIT2  ) _( RT_SINTLIT2  ) /* 0b1111011       */ \
 _( RT_INTLIT   ) _( RT_SINTLIT   ) /* 123, -123       */ \
 _( RT_INTLIT16 ) _( RT_SINTLIT16 ) /* 0x7b            */ \
-/* synthetic tokens, used for AST only */ \
-_( RT_GDEF   ) \
 // end RSM_FOREACH_TOKEN
 // RSM_FOREACH_BINOP_TOKEN maps an infix binary operation to opcodes,
 // allowing "x + y" as an alternative to "add x y"
@@ -451,6 +449,7 @@ _( RT_I16  , "i16"  ) \
 _( RT_I32  , "i32"  ) \
 _( RT_I64  , "i64"  ) \
 _( RT_FUN  , "fun"  ) \
+_( RT_CONST, "const") \
 _( RT_DATA , "data" ) \
 // end RSM_FOREACH_KEYWORD_TOKEN
 enum rtok {

@@ -567,9 +567,9 @@ bool vmem_free(void* ptr, usize nbytes) {
 
 
 void _rarray_remove(rarray* a, u32 elemsize, u32 start, u32 len) {
-  safecheck(start+len <= a->len);
   if (len == 0)
     return;
+  safecheckf(start+len <= a->len, "end=%u > len=%u", start+len, a->len);
   if (start+len < a->len) {
     void* dst = a->v + elemsize*start;
     void* src = dst + elemsize*len;
@@ -783,6 +783,13 @@ const char* tokname(rtok t) {
   return "?";
 }
 
+rnode* nullable nlastchild(rnode* n) {
+  rnode* child = n->children.head;
+  if (child) while (child->next)
+    child = child->next;
+  return child;
+}
+
 static u32 u32log10(u32 u) {
   return u >= 1000000000 ? 10 :
          u >= 100000000 ? 9 :
@@ -828,9 +835,42 @@ rposrange nposrange(rnode* n) {
       pr.end.line = pr.focus.line;
       pr.end.col = pr.focus.col + ((u32)ILOG2(n->ival) >> 2) + 3;
       break;
+    case RT_CONST:
+      pr.end.line = pr.focus.line;
+      pr.end.col = pr.focus.col + 5 + 1 + n->name.len; // assume single space sep
+      if (n->children.head) {
+        rsrcpos endpos = nposrange(n->children.head).end;
+        if (endpos.line) // note: inferred type has no srcpos
+          pr.end = endpos;
+      }
+      break;
+    case RT_DATA:
+      if (n->children.head) {
+        rnode* type = n->children.head;
+        pr.end = nposrange(type).end;
+      } else {
+        pr.end.line = pr.focus.line;
+        pr.end.col = pr.focus.col + 4;
+      }
+      break;
+    case RT_I1:
+    case RT_I8:
+    case RT_I16:
+    case RT_I32:
+    case RT_I64:
+      pr.end.line = pr.focus.line;
+      pr.end.col = pr.focus.col;
+      switch (n->t) {
+        case RT_I1:  pr.end.col += strlen("i1"); break;
+        case RT_I8:  pr.end.col += strlen("i8"); break;
+        case RT_I16: pr.end.col += strlen("i16"); break;
+        case RT_I32: pr.end.col += strlen("i32"); break;
+        case RT_I64: pr.end.col += strlen("i64"); break;
+      }
+      break;
     default: if (tokhasname(n->t)) {
-      pr.end.line = n->pos.line;
-      pr.end.col = n->pos.col + n->name.len;
+      pr.end.line = pr.focus.line;
+      pr.end.col = pr.focus.col + n->name.len;
     }
   }
   return pr;
@@ -842,10 +882,6 @@ static void diag_add_srclines(rasm* a, rposrange pr, abuf* s) {
     return;
 
   rsrcpos pos = pr.focus; // TODO: use start & end
-  dlog("start %u:%u, focus %u:%u, end %u:%u",
-    pr.start.line, pr.start.col,
-    pr.focus.line, pr.focus.col,
-    pr.end.line, pr.end.col);
 
   u32 nlinesbefore = 1;
   u32 nlinesafter = 1;

@@ -767,15 +767,20 @@ const char* tokname(rtok t);
 
 // tokis* returns true if t is classified as such in the language
 #define tokistype(t)    ( RT_I1 <= (t) && (t) <= RT_I64 )
-#define tokislit(t)     ( RT_INTLIT2 <= (t) && (t) <= RT_SINTLIT16 )
-#define tokisoperand(t) ( (t) == RT_IREG || (t) == RT_FREG || tokislit(t) || \
-                          (t) == RT_GNAME || (t) == RT_NAME )
-#define tokhasname(t) ( (t) == RT_NAME || (t) == RT_GNAME || (t) == RT_COMMENT || \
-                        (t) == RT_LABEL || (t) == RT_FUN )
+#define tokisintlit(t)  ( RT_INTLIT2 <= (t) && (t) <= RT_SINTLIT16 )
+#define tokislit(t)     tokisintlit(t)
+#define tokissint(t)    (((t) - RT_SINTLIT16) % 2 == 0) // assumption: tokisintlit(t)
+#define tokisoperand(t) ( (t) == RT_IREG || (t) == RT_FREG || tokislit(t) || (t) == RT_NAME )
+#define tokisexpr(t)    tokisoperand(t)
+#define tokhasname(t) ( (t) == RT_NAME || (t) == RT_COMMENT || \
+                        (t) == RT_LABEL || (t) == RT_FUN || \
+                        (t) == RT_CONST || (t) == RT_DATA )
 
 inline static bool nodename_eq(const rnode* n, const char* str, usize len) {
   return n->name.len == len && memcmp(n->name.p, str, len) == 0;
 }
+
+rnode* nullable nlastchild(rnode* n);
 
 rposrange nposrange(rnode*);
 

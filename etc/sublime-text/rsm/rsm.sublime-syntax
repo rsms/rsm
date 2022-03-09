@@ -71,18 +71,11 @@ contexts:
         - include: late-keywords
     - include: expressions-late
 
-  case-default:
-    - match: '\b(default|case)\b'
-      scope: keyword.control.rsm
-    - match: (,|:)
-      scope: punctuation.separator.rsm
-
   expressions:
     - include: expressions-early
     - include: expressions-late
 
   expressions-early:
-    - include: case-default
     - include: keywords
 
   expressions-late:
@@ -94,7 +87,7 @@ contexts:
     - include: late-keywords
     - include: operators
     - include: function-calls
-    - include: builtins
+    - include: instruction_ops
     - match: \[
       scope: punctuation.definition.brackets.begin.rsm
       push:
@@ -112,9 +105,65 @@ contexts:
           pop: true
         - include: expressions
 
-  builtins:
-    - match: \b(append|cap|close|complex|copy|delete|imag|len|make|new|panic|print|println|real|recover)\b
-      scope: support.function.builtin.rsm
+  keywords:
+    - match: |-
+        (?x)
+        \b(
+          fun
+          | i(?:1|8|16|32|64)
+          )\b
+      scope: keyword.control.rsm
+    - match: \b(true|false|R\d\d?|F\d\d?|SP)\b
+      scope: constant.language.rsm
+    - match: |-
+        (?x)
+        \b(
+          (0(x|X)[\h_]+) |
+          (0(b|B)[01_]+) |
+          ( ([0-9][0-9_]*\.?(?:[0-9]|[0-9][0-9_]*)?) |
+            (\.[0-9][0-9_]*)) ( (e|E) (\+|-)? [0-9][0-9_]* )?
+        )\b
+      scope: constant.numeric.rsm
+
+  instruction_ops:
+    - match: |-
+        (?x)
+        \b( copyv?
+          | load(?:[124][su])?
+          | store[124]?
+          | push
+          | pop
+
+          | add
+          | sub
+          | mul
+          | div
+          | mod
+          | and
+          | or
+          | xor
+          | shl
+          | shrs
+          | shru
+          | binv
+
+          | eq
+          | neq
+          | lte?[us]
+          | gte?[us]
+
+          | br
+          | brz
+          | brlt
+          | call
+          | scall
+          | jump
+          | ret
+
+          | write
+          | devopen
+          )\b
+      scope: keyword.instruction.rsm
 
   imports:
     - match: '^\s*(import)\s+(?=")'
@@ -227,7 +276,7 @@ contexts:
     - match: (?={{identifier}}\s*\()
       push:
         - meta_content_scope: meta.function-call.rsm
-        - include: builtins
+        - include: instruction_ops
         - match: '{{identifier}}'
           scope: variable.function.rsm
         - match: '\('
@@ -241,8 +290,9 @@ contexts:
             - include: expressions
 
   initializers:
-    # 'data x int = 0'
-    - match: '^\s*(data)\s+({{identifier}})'
+    # 'data x i32 = 0'
+    # 'const y i32 = 0'
+    - match: '^\s*(data|const)\s+({{identifier}})'
       captures:
         1: storage.type.rsm
         2: variable.other.rsm
@@ -259,21 +309,6 @@ contexts:
             - match: '$'
               pop: true
             - include: expressions
-
-  keywords:
-    - match: \b(add|and|br|brlt|brz|call|copy|div|eq|fun|gtes|gteu|gts|gtu|i1|i16|i32|i64|i8|jump|load|load1s|load1u|load2s|load2u|load4s|load4u|ltes|lteu|lts|ltu|mod|mul|neq|or|pop|push|ret|scall|shl|shrs|shru|store|store1|store2|store4|sub|write|xor)\b
-      scope: keyword.control.rsm
-    - match: \b(true|false|R\d\d?|F\d\d?|SP)\b
-      scope: constant.language.rsm
-    - match: |-
-        (?x)
-        \b(
-          (0(x|X)\h+) |
-          (0(b|B)[01]+) |
-          ( ([0-9]+\.?[0-9]*) |
-            (\.[0-9]+)) ( (e|E) (\+|-)? [0-9]+ )?
-        )\b
-      scope: constant.numeric.rsm
 
 
   late-keywords:

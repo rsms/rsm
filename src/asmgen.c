@@ -12,74 +12,105 @@ typedef struct gblock gblock;
 typedef struct gbhead gbhead; // head of gblock and gfun
 typedef struct gref   gref;
 typedef u8            grefflag;
+typedef struct gnamed gnamed;
+typedef u8            gnamedtype;
 typedef struct gdata  gdata;
-typedef struct gdatav gdatav;
 
-struct gdata {
-  const char*    name;
-  u32            namelen;
-  u32            nrefs;
-  u32            align; // byte alignment (1, 2, 4, 8, 16 ...)
-  usize          size;  // length of data in bytes
-  void* nullable initp; // pointer to initial value, if any
-  u64            addr;  // address (valid only after layout)
+// typedef struct gdatav gdatav;
 
-  gdata* nullable next; // for gstate.datalist
+typedef struct gslab     gslab;
+typedef struct gdataslab gdataslab;
+typedef struct gfunslab  gfunslab;
+
+enum gnamedtype {
+  GNAMED_T_FUN,   // gfun
+  GNAMED_T_BLOCK, // gblock
+  GNAMED_T_DATA,  // gdata
+  GNAMED_T_CONST, // gdata
+} RSM_END_ENUM(gnamedtype)
+
+// head of named structs, which may be referenced in gstate.names
+struct gnamed {
+  #define NAMED_HEAD       \
+    gnamedtype  namedtype; \
+    const char* name;      \
+    u32         namelen;   \
+    u32         nrefs;
+  NAMED_HEAD
 };
 
-struct gdatav {
-  gdatav* nullable next;
-  usize len; // data[len] == next free entry
+// head of instruction-block structs
+struct gbhead {
+  #define BLOCK_HEAD \
+    NAMED_HEAD        \
+    usize i; /* first instruction = iv[starti] */
+  BLOCK_HEAD
+};
+
+struct gdata {
+  NAMED_HEAD
+  u32             align; // byte alignment (1, 2, 4, 8, 16 ...)
+  usize           size;  // length of data in bytes
+  void* nullable  initp; // pointer to initial value, if any
+  u64             addr;  // address (valid only after layout)
+  gdata* nullable next;  // for gstate.datalist
+  rnode*          origin;
+};
+
+struct gfun {
+  BLOCK_HEAD
+  rarray blocks; // gblock[]
+  u32    fi;     // function table index (value that fits in Au)
+  rarray ulv;    // gref[]; pending undefined references (temporary)
+};
+
+#define SLAB_HEAD(TYPE) \
+  TYPE* nullable next; \
+  usize len; // data + len*elemsize == next free entry
+struct gdataslab {
+  SLAB_HEAD(gdataslab)
   gdata data[32];
+};
+struct gfunslab {
+  SLAB_HEAD(gfunslab)
+  gfun data[8];
 };
 
 struct gstate {
-  rasm*  a;          // compilation session/context
-  rarray iv;         // rinstr[]; instructions
-  rarray ufv;        // gref[]; pending undefined function references
-  rarray udv;        // gref[]; pending undefined data references
-  rarray funs;       // gfun[]; functions
-  smap   names;      // name => index in either funs or data fields
+  rasm*  a;       // compilation session/context
+  rarray iv;      // rinstr[]; instructions
+  rarray funs;    // gfun[]; functions
+  rarray udnames; // gref[]; pending undefined named references
+  smap   names;   // name => gnamed*
 
   // gdata blocks may change order and may grow with separate memory allocations.
   // Referencing and patching data is made simpler (better?) by using gdata pointers
   // instead of secondary generated IDs. The downside is that we can't use a simple
   // rarray for this since as it grows, the addresses of gdata elements might change.
   // So, we use a list of gdata arrays that we never grow; used as a slab allocator.
-  gdatav          datavhead; // first slab + list of additional data slabs
-  gdatav*         datavcurr; // current slab
-  rarray          dataorder; // gdata*[]; valid after layout, points to gdatav entries
-  gdata* nullable datalist;  // list of all in-use gdata (TODO: is this really needed?)
-  usize           datasize;  // size of data segment
-  u32             dataalign; // alignment of data segment (in bytes)
+  gdataslab  datavhead; // first slab + list of additional data slabs
+  gdataslab* datavcurr; // current slab
+  rarray     dataorder; // gdata*[]; valid after layout, points to gdatav entries
+  usize      datasize;  // size of data segment
+  u32        dataalign; // alignment of data segment (in bytes)
+
+  // gfun storage
+  gfunslab  fnvhead;
+  gfunslab* fnvcurr;
 
   gfun* nullable fn; // current function
 };
 
-#define GBLOCK_HEAD                                       \
-  const char* name;                                       \
-  u32         namelen;                                    \
-  u32         nrefs; /* reference count */                \
-  usize       i;     /* first instruction = iv[starti] */
-struct gbhead { GBLOCK_HEAD };
-
-struct gfun {
-  GBLOCK_HEAD
-  rarray blocks; // gblock[]
-  u32    fi;     // function table index (value that fits in Au)
-  rarray ulv;    // gref[]; pending undefined references (temporary)
-};
-
 struct gblock {
-  GBLOCK_HEAD
+  BLOCK_HEAD
   rsrcpos pos;
 };
 
 struct gref {
   u32      i;     // referrer's iv offset
   rnode*   n;     // referrer
-  char     iarg;  // instruction argument to patch; 'A'|'B'|'C'|'D'
   grefflag flags;
+  gnamed* nullable target;
 };
 
 enum grefflag {
@@ -88,12 +119,8 @@ enum grefflag {
 } RSM_END_ENUM(grefflag)
 
 
-#define ERRN(n, fmt, args...) errf(g->a, nposrange(n), fmt, ##args)
 
-#define GARRAY_PUSH_OR_RET(T, arrayp, ERRRET...) ({                                  \
-  T* vp__ = rarray_push(T, (arrayp), g->a->mem);                                     \
-  if (check_alloc(g, vp__)) return ERRRET;                                           \
-  vp__; })
+#define ERRN(n, fmt, args...) errf(g->a, nposrange(n), fmt, ##args)
 
 static bool check_alloc(gstate* g, void* nullable p) {
   if LIKELY(p != NULL)
@@ -102,20 +129,27 @@ static bool check_alloc(gstate* g, void* nullable p) {
   return true;
 }
 
-static gfun* nullable find_target_gfun(gstate* g, rnode* referrer) {
-  assert(referrer->name.len > 0);
-  assert(referrer->name.p[0] != '@'); // we use this to encode what vp means
-  uintptr* vp = smap_lookup(&g->names, referrer->name.p, referrer->name.len);
-  if (!vp)
-    return NULL;
-  // using function instruction index means we can address
-  // 2^23 = 8,388,608 instructions (2^23*4 = 33,554,432 bytes) with Au imm
-  // and much more by putting a larger instruction index in R(A).
-  gfun* fn = rarray_at_safe(gfun, &g->funs, *vp);
-  if (fn->i > RSM_MAX_Au)
-    panic("pc distance too large"); // TODO generate R(A)=dist instrs
-  return fn;
-}
+#define GARRAY_PUSH_OR_RET(T, arrayp, ERRRET...) ({ \
+  T* vp__ = rarray_push(T, (arrayp), g->a->mem);    \
+  if (check_alloc(g, vp__)) return ERRRET;          \
+  vp__; })
+
+#define GSLAB_ALLOC(g, HEADFIELD, CURRFIELD, ERRRET...) ({                        \
+  if UNLIKELY(g->CURRFIELD->len == countof(g->HEADFIELD.data)) {                  \
+    __typeof__(g->CURRFIELD) tmp__ = rmem_alloc(g->a->mem, sizeof(g->HEADFIELD)); \
+    if (check_alloc(g, tmp__))                                                    \
+      return ERRRET;                                                              \
+    tmp__->len = 0;                                                               \
+    tmp__->next = g->CURRFIELD;                                                   \
+    g->CURRFIELD = tmp__;                                                         \
+  }                                                                               \
+  &g->CURRFIELD->data[g->CURRFIELD->len++];                                       \
+})
+
+#define NAME_LOOKUP(g, name, namelen) ({          \
+  uintptr* vp__ = smap_lookup(&g->names, (name), (namelen)); \
+  vp__ ? *(gnamed**)vp__ : NULL;                             \
+})
 
 static gblock* nullable find_target_gblock(gfun* fn, rnode* referrer) {
   for (u32 i = 0; i < fn->blocks.len; i++) {
@@ -126,16 +160,46 @@ static gblock* nullable find_target_gblock(gfun* fn, rnode* referrer) {
   return NULL;
 }
 
-static i32 addgref( // record a pending reference
-  gstate* g, rnode* referrer, usize referreri, rarray* refs,
-  char iarg, grefflag flags)
+static const char* gnamedtype_name(gnamedtype t) {
+  switch ((enum gnamedtype)t) {
+    case GNAMED_T_FUN:   return "function";
+    case GNAMED_T_BLOCK: return "label";
+    case GNAMED_T_DATA:  return "data";
+    case GNAMED_T_CONST: return "constant";
+  }
+  return "?";
+}
+
+static bool check_named_ref(
+  gstate* g, rnode* referrer, u32 referreri, grefflag flags, gnamed* target)
 {
-  gref* ref = GARRAY_PUSH_OR_RET(gref, refs, 0);
-  ref->i = referreri;
-  ref->n = assertnotnull(referrer);
-  ref->iarg = iarg;
-  ref->flags = flags;
-  return 0;
+  rop op = RSM_GET_OP(*rarray_at(rinstr, &g->iv, referreri));
+  const char* expected;
+  switch (op) {
+    case rop_CALL:
+      if (target->namedtype != GNAMED_T_FUN) {
+        expected = "function";
+        break;
+      }
+      // using function instruction index means we can address
+      // 2^23 = 8,388,608 instructions (2^23*4 = 33,554,432 bytes) with Au imm
+      // and much more by putting a larger instruction index in R(A).
+      if (((gfun*)target)->i > RSM_MAX_Au)
+        panic("pc distance too large"); // TODO generate R(A)=dist instrs using COPY/COPYV
+      return true;
+
+    case rop_JUMP:
+      if (target->namedtype != GNAMED_T_FUN && target->namedtype != GNAMED_T_BLOCK) {
+        expected = "function or label";
+        break;
+      }
+      return true;
+
+    default:
+      return true;
+  }
+  ERRN(referrer, "expected %s, got %s", expected, gnamedtype_name(target->namedtype));
+  return false;
 }
 
 static i32 ref_pcval(u32 referreri, gbhead* b, grefflag flags) {
@@ -225,12 +289,26 @@ static void patch_lastregarg(gstate* g, rnode* patcher, rinstr* in, u32 regno) {
   #undef p_ABCDs
 }
 
+// returns false if memory allocation failed
+static bool make_bigv(gstate* g, rop op, rinstr* inp, u32 dstreg, u64 value) {
+  static_assert(sizeof(rinstr) == sizeof(u32), "");
+  *inp = RSM_MAKE_ABv(op, dstreg, 1 + (value > U32_MAX));
+  rinstr* imm1 = GARRAY_PUSH_OR_RET(rinstr, &g->iv, false);
+  if (value <= U32_MAX) {
+    *imm1 = (u32)value;
+  } else {
+    rinstr* imm2 = GARRAY_PUSH_OR_RET(rinstr, &g->iv, false);
+    *imm1 = (value >> 32) & U32_MAX;
+    *imm2 = value & U32_MAX;
+  }
+  return true;
+}
+
 // select_scratchreg is used to check for interference with dstreg in arguments.
 // If dstreg is used for any of the arguments, RSM_NREGS is returned instead of dstreg.
 inline static u32 select_scratchreg(rinstr in, u32 dstreg, u32 nregargs) {
-  if ( (nregargs > 1 && RSM_GET_B(in) == dstreg) ||
-       (nregargs > 2 && RSM_GET_C(in) == dstreg) ||
-       (nregargs > 3 && RSM_GET_D(in) == dstreg) )
+  if ( (nregargs > 2 && RSM_GET_B(in) == dstreg) ||
+       (nregargs > 3 && RSM_GET_C(in) == dstreg) )
   {
     return RSM_NREGS; // interference
   }
@@ -238,7 +316,8 @@ inline static u32 select_scratchreg(rinstr in, u32 dstreg, u32 nregargs) {
 }
 
 // set immediate value of instruction g->iv[inindex]
-static void patch_imm(gstate* g, rnode* patcher, u32 inindex, u64 value) {
+// returns true if result/patched arg is an immediate value rather than a register.
+static bool patch_imm(gstate* g, rnode* patcher, u32 inindex, u64 value) {
   assert(inindex < g->iv.len);
   rinstr* in = rarray_at(rinstr, &g->iv, inindex);
   u32 scratchreg = RSM_NREGS; // if >-1, names a reg largeval can safely use
@@ -253,7 +332,7 @@ static void patch_imm(gstate* g, rnode* patcher, u32 inindex, u64 value) {
         scratchreg = select_scratchreg(*in, SCRATCHREG, NARGS); \
         goto largeval; \
       } \
-      *in = RSM_SET_##ENC(*in, (u32)value); return;
+      *in = RSM_SET_##ENC(*in, (u32)value); return true;
 
   #define S(OP, ENC, NARGS, SCRATCHREG) \
     case rop_##OP: \
@@ -261,7 +340,7 @@ static void patch_imm(gstate* g, rnode* patcher, u32 inindex, u64 value) {
         scratchreg = select_scratchreg(*in, SCRATCHREG, NARGS); \
         goto largeval; \
       } \
-      *in = RSM_SET_##ENC(*in, (u32)value); return;
+      *in = RSM_SET_##ENC(*in, (u32)value); return true;
 
   #define p__(OP, RES)
   #define p_A(OP, RES)
@@ -285,7 +364,7 @@ static void patch_imm(gstate* g, rnode* patcher, u32 inindex, u64 value) {
     #undef _
     default:
       assertf(0,"attempting to patch non-imm instruction at iv[%u]", inindex);
-      return;
+      return false;
   }
 
   #undef U
@@ -297,7 +376,7 @@ largeval:
   if (scratchreg == RSM_NREGS) {
     // no scratch register (instruction does not produce a register result)
     errf(g->a, nposrange(patcher), "value too large for instruction immediate");
-    return;
+    return false;
   }
 
   // table of rop => ropenc which we use to look up the encoding for COPY
@@ -311,74 +390,91 @@ largeval:
   assertf(ropenc_limittab[openctab[rop_COPY]][0]==0, "COPY imm is assumed to be unsigned");
   u64 copymax = (u64)ropenc_limittab[openctab[rop_COPY]][1];
   u32 subinindex = g->iv.len;
-  rinstr* inp = GARRAY_PUSH_OR_RET(rinstr, &g->iv);
+  rinstr* inp = GARRAY_PUSH_OR_RET(rinstr, &g->iv, false);
   if (value <= copymax) {
     // yes we can -- single copy instruction
     *inp = RSM_MAKE_ABu(rop_COPY, scratchreg, (u32)value);
   } else {
     // no, we need to use a variable-length copyv instruction
-    static_assert(sizeof(rinstr) == sizeof(u32), "");
-    if (value <= U32_MAX) {
-      *inp = RSM_MAKE_ABv(rop_COPYV, scratchreg, 1);
-      rinstr* imm1 = GARRAY_PUSH_OR_RET(rinstr, &g->iv);
-      *imm1 = (u32)value;
-    } else {
-      *inp = RSM_MAKE_ABv(rop_COPYV, scratchreg, 2);
-      rinstr* imm1 = GARRAY_PUSH_OR_RET(rinstr, &g->iv);
-      rinstr* imm2 = GARRAY_PUSH_OR_RET(rinstr, &g->iv);
-      *imm1 = (value >> 32) & U32_MAX;
-      *imm2 = value & U32_MAX;
-    }
+    make_bigv(g, rop_COPYV, inp, scratchreg, value); // don't care about return value
   }
+
+  bool isimm;
 
   // if patchee is an op with
   // - no other arguments than the address, and
-  // - result register in scratchreg (guaranteed w/ our current logic),
+  // - result register in scratchreg (guaranteed w/ our current logic), and
+  // - op has COPY semantics,
   // then replace that instruction instead of patching it.
-  ropenc enc = openctab[RSM_GET_OP(g->iv.v[inindex])];
-  if (enc == ropenc_AB || enc == ropenc_ABu || enc == ropenc_ABs) {
+  if (RSM_GET_OP(g->iv.v[inindex]) == rop_COPY) {
     // replace
     rarray_remove(rinstr, &g->iv, inindex, 1);
     subinindex--; // fixup the "source" index of our synthesized instruction(s)
+    isimm = true;
   } else {
     // patch
     patch_lastregarg(g, patcher, in, scratchreg);
+    isimm = false; // result is register, not imm
   }
 
   // move inp...immN above patchee
   rarray_move(rinstr, &g->iv, inindex, subinindex, g->iv.len);
+
+  return isimm;
 }
 
-// resolves pending PC arguments (jumps, calls and branch targets)
+// resolves pending PC arguments (jumps, calls and branch targets) pointing to b
 static void gpostresolve_pc(gstate* g, rarray* refs, gbhead* b) {
   for (u32 i = refs->len; i-- ; ) {
     gref* ref = rarray_at(gref, refs, i);
     assert(assertnotnull(ref->n)->t == RT_NAME);
     if (!nodename_eq(ref->n, b->name, b->namelen))
       continue;
-    b->nrefs++; // increment refcount
-    i32 val = ref_pcval(ref->i, b, ref->flags);
-    patch_imm(g, ref->n, ref->i, (u64)val);
+
+    if LIKELY(check_named_ref(g, ref->n, ref->i, ref->flags, (gnamed*)b)) {
+      b->nrefs++; // increment refcount
+      i32 val = ref_pcval(ref->i, b, ref->flags);
+      patch_imm(g, ref->n, ref->i, (u64)val);
+
+      // also remove from udnames
+      if (refs != &g->udnames) for (u32 i = g->udnames.len; i-- ; ) {
+        gref* ref2 = rarray_at(gref, &g->udnames, i);
+        if (ref2->n == ref->n) {
+          rarray_remove(gref, &g->udnames, i, 1);
+          break;
+        }
+      }
+    }
+
     rarray_remove(gref, refs, i, 1);
   }
 }
 
-static void gpostresolve_data(gstate* g) {
-  for (u32 i = 0; i < g->udv.len; i++ ) {
-    gref* ref = rarray_at(gref, &g->udv, i);
+// called after entire AST has been processed; resolve data references
+static void resolve_udnames(gstate* g) {
+  for (u32 i = 0; i < g->udnames.len; i++ ) {
+    gref* ref = rarray_at(gref, &g->udnames, i);
 
-    assert(assertnotnull(ref->n)->t == RT_GNAME);
+    assert(assertnotnull(ref->n)->t == RT_NAME);
     const char* name = ref->n->name.p;
     u32 namelen = ref->n->name.len;
     assert(namelen > 0);
-    assert(name[0] == '@'); // we use this to encode what vp means
 
-    uintptr* vp = smap_lookup(&g->names, name, namelen);
-    if UNLIKELY(!vp) {
-      ERRN(ref->n, "undefined data reference %.*s", (int)namelen, name);
+    gnamed* target = ref->target;
+    if (!target) {
+      target = NAME_LOOKUP(g, name, namelen);
+      if UNLIKELY(!target) {
+        ERRN(ref->n, "undefined name \"%.*s\"", (int)namelen, name);
+        continue;
+      }
+    }
+    if (target->namedtype == GNAMED_T_CONST) panic("TODO");
+    if (target->namedtype != GNAMED_T_DATA) {
+      ERRN(ref->n, "%.*s is not data", (int)namelen, name);
       continue;
     }
-    gdata* d = (gdata*)*vp;
+
+    gdata* d = (gdata*)target;
     d->nrefs++;
 
     #ifdef DEBUG_LOG_DATA
@@ -388,39 +484,80 @@ static void gpostresolve_data(gstate* g) {
 
     patch_imm(g, ref->n, ref->i, d->addr);
   }
-  g->udv.len = 0;
+  g->udnames.len = 0;
 }
 
-static i32 reffun(gstate* g, rnode* referrer, u32 referreri, char iarg) {
-  gfun* fn = find_target_gfun(g, referrer);
-  grefflag flags = REF_ABS;
-  if (fn) return ref_pcval(referreri, (gbhead*)fn, flags);
-  return addgref(g, referrer, referreri, &g->ufv, iarg, flags);
-}
+// returns true if result arg is an immediate value rather than a register.
+static bool refnamed(gstate* g, rnode* refn, u32 refi, rop op, u32 argc, i32* argp) {
+  grefflag flags = 0;
 
-static i32 reflabel(gstate* g, rnode* referrer, u32 referreri, char iarg) {
-  gblock* b = find_target_gblock(g->fn, referrer);
-  if (b) return ref_pcval(referreri, (gbhead*)b, 0);
-  return addgref(g, referrer, referreri, &g->fn->ulv, iarg, 0);
-}
+  #define ADDGREF(refs) ({                           \
+    gref* ref = GARRAY_PUSH_OR_RET(gref, (refs), 0); \
+    ref->i = refi;                                   \
+    ref->n = assertnotnull(refn);                    \
+    ref->flags = flags;                              \
+    ref;                                             \
+  })
 
-static i32 reflabelorfun(gstate* g, rnode* referrer, u32 referreri, char iarg) {
-  gblock* b = find_target_gblock(g->fn, referrer);
-  gfun* fn = find_target_gfun(g, referrer);
-  if (b && fn) {
-    ERRN(referrer, "\"%.*s\" is confusingly both a label and a function",
-      (int)referrer->name.len, referrer->name.p);
-    return 0;
+  assert(refn->name.len > 0);
+  *argp = 0; // in case of error
+
+  // look for local label
+  gblock* b = find_target_gblock(g->fn, refn);
+  if (b) {
+    if UNLIKELY(!check_named_ref(g, refn, refi, flags, (gnamed*)b))
+      return false;
+    *argp = ref_pcval(refi, (gbhead*)b, flags);
+    return true;
   }
-  grefflag flags = REF_ABS|REF_ANY;
-  if (b)  return ref_pcval(referreri, (gbhead*)b, flags);
-  if (fn) return ref_pcval(referreri, (gbhead*)fn, flags);
-  addgref(g, referrer, referreri, &g->fn->ulv, iarg, flags);
-  return addgref(g, referrer, referreri, &g->ufv, iarg, flags);
-}
 
-static i32 refdata(gstate* g, rnode* gname, u32 referreri, char iarg) {
-  return addgref(g, gname, referreri, &g->udv, iarg, 0);
+  if (op == rop_JUMP || op == rop_CALL)
+    flags |= REF_ABS;
+
+  // look for global function, data or constant
+  gnamed* target = NAME_LOOKUP(g, refn->name.p, refn->name.len);
+  if (!target) {
+    if (RSM_OP_ACCEPTS_PC_ARG(op)) { // also register as possible label/fun ref
+      flags |= REF_ANY;
+      ADDGREF(&assertnotnull(g->fn)->ulv);
+    }
+    ADDGREF(&g->udnames);
+    return true;
+  }
+
+  if UNLIKELY(!check_named_ref(g, refn, refi, flags, target))
+    return false;
+
+  switch ((enum gnamedtype)target->namedtype) {
+    case GNAMED_T_FUN:
+    case GNAMED_T_BLOCK:
+      *argp = ref_pcval(refi, (gbhead*)target, flags);
+      return true;
+
+    case GNAMED_T_CONST: {
+      target->nrefs++;
+      void* initp = assertnotnull(((gdata*)target)->initp);
+      bool isimm = patch_imm(g, refn, refi, *(u64*)initp);
+      // load argument since the caller will overwrite it
+      rinstr in = *rarray_at(rinstr, &g->iv, refi);
+      switch (argc) {
+        case 1: *argp = isimm ? RSM_GET_Au(in) : RSM_GET_A(in); return isimm;
+        case 2: *argp = isimm ? RSM_GET_Bu(in) : RSM_GET_B(in); return isimm;
+        case 3: *argp = isimm ? RSM_GET_Cu(in) : RSM_GET_C(in); return isimm;
+        case 4: *argp = isimm ? RSM_GET_Du(in) : RSM_GET_D(in); return isimm;
+        default: assert(0); return false;
+      }
+    }
+
+    case GNAMED_T_DATA:
+      // mutable gdata is resolved later, after data layout is done
+      ADDGREF(&g->udnames)->target = target;
+      return true;
+  }
+
+  UNREACHABLE;
+  return true;
+  #undef ADDGREF
 }
 
 static u8 nregno(gstate* g, rnode* n) {
@@ -445,7 +582,9 @@ static void errintsize(
 
 // getiargs checks & reads integer arguments for an operation described by AST rnode n.
 // returns true if the last arg is an immediate value.
-static bool getiargs(gstate* g, rnode* n, i32* argv, u32 wantargc, i64 minval, i64 maxval) {
+static bool getiargs(
+  gstate* g, rnode* n, i32* argv, u32 wantargc, i64 minval, u64 maxval, rinstr** inp)
+{
   assert(n->t == RT_OP);
   u32 argc = 0;
   rop op = (rop)n->ival;
@@ -472,25 +611,25 @@ static bool getiargs(gstate* g, rnode* n, i32* argv, u32 wantargc, i64 minval, i
     return false;
 
   case RT_NAME: {
-    u32 referreri = g->iv.len - 1;
-    if (op == rop_CALL) {
-      argv[argc] = reffun(g, arg, referreri, 'A');
-    } else if (op == rop_JUMP) {
-      argv[argc] = reflabelorfun(g, arg, referreri, 'A');
-    } else {
-      argv[argc] = reflabel(g, arg, referreri, 'B');
-    }
-    return true;
+    bool isimm = refnamed(g, arg, g->iv.len - 1, op, argc+1, &argv[argc]);
+    // update instruction in case a patch caused instructions to be generated
+    *inp = rarray_at(rinstr, &g->iv, g->iv.len - 1);
+    return isimm;
   }
 
-  case RT_GNAME:
-    argv[argc] = refdata(g, arg, g->iv.len - 1, 'B');
+  case RT_SINTLIT2: case RT_SINTLIT: case RT_SINTLIT16:
+    if UNLIKELY((i64)val > (i64)maxval || (i64)val < minval) {
+      errintsize(g->a, nposrange(arg), op, minval, maxval, val, /*issigned*/true);
+      return false;
+    }
+    if UNLIKELY(RSM_OP_IS_BR(op) && val == 0)
+      warnf(g->a, nposrange(arg), "zero jump offset for %s has no effect", rop_name(op));
+    argv[argc] = (i32)val;
     return true;
 
-  case RT_INTLIT2 ... RT_SINTLIT16:
-    if UNLIKELY((i64)val > maxval || (i64)val < minval) {
-      bool issigned = (arg->t - RT_SINTLIT16) % 2 == 0;
-      errintsize(g->a, nposrange(arg), op, minval, maxval, val, issigned);
+  case RT_INTLIT2: case RT_INTLIT: case RT_INTLIT16:
+    if UNLIKELY(val > maxval) {
+      errintsize(g->a, nposrange(arg), op, minval, maxval, val, /*issigned*/false);
       return false;
     }
     if UNLIKELY(RSM_OP_IS_BR(op) && val == 0)
@@ -518,8 +657,9 @@ static void genop(gstate* g, rnode* n) {
   assert(n->t == RT_OP);
   assert(n->ival < RSM_OP_COUNT);
 
-  rinstr* in = GARRAY_PUSH_OR_RET(rinstr, &g->iv);
   rop op = (rop)n->ival;
+  rinstr* in = GARRAY_PUSH_OR_RET(rinstr, &g->iv);
+  *in = RSM_MAKE__(op);
   i32 arg[4]; // ABCD args to RSM_MAKE_* macros
 
   // route opcode to instruction encoder
@@ -530,20 +670,25 @@ static void genop(gstate* g, rnode* n) {
   }
 
   // instruction encoders
-  #define NOIMM(argc, ENC, args...)                            \
-    if (getiargs(g, n, arg, argc, 0, RSM_MAX_REG)) goto noimm; \
+  #define NOIMM(argc, ENC, args...)                                 \
+    if (getiargs(g, n, arg, argc, 0, RSM_MAX_REG, &in)) goto noimm; \
     *in = RSM_MAKE_##ENC(op, args); return;
 
   #define RoIMM(argc, ENC, ENCi, minval, maxval, args...) \
-    if (getiargs(g, n, arg, argc, minval, maxval)) {      \
+    if (getiargs(g, n, arg, argc, minval, maxval, &in)) { \
       *in = RSM_MAKE_##ENCi(op, args);                    \
     } else {                                              \
       *in = RSM_MAKE_##ENC(op, args);                     \
     }                                                     \
     return;
 
-  #define RvIMM(argc, ENC, ENCi, args...) \
-    assertf(0, "TODO");
+  #define RvIMM(argc, ENCv, minval, maxval, args...) {                \
+    if (!getiargs(g, n, arg, argc, minval, maxval, &in)) goto no_r;   \
+    u64 value = assertnotnull(nlastchild(n))->ival;                   \
+    assert(argc == 2); /* fix if we add V ops with different arity */ \
+    make_bigv(g, op, in, arg[0], value);                              \
+    return;                                                           \
+  }
 
   DIAGNOSTIC_IGNORE_PUSH("-Wunused-label")
   make__:
@@ -555,7 +700,7 @@ static void genop(gstate* g, rnode* n) {
   make_Au:    RoIMM(1, A, Au      , 0,          RSM_MAX_Au, arg[0])
   make_As:    RoIMM(1, A, As      , RSM_MIN_As, RSM_MAX_As, arg[0])
   make_AB:    NOIMM(2, AB         ,                         arg[0], arg[1])
-  make_ABv:   RvIMM(1, A, ABu     ,                         arg[0])
+  make_ABv:   RvIMM(2, ABv        , 0,          U64_MAX,    arg[0], arg[1])
   make_ABu:   RoIMM(2, AB, ABu    , 0,          RSM_MAX_Bu, arg[0], arg[1])
   make_ABs:   RoIMM(2, AB, ABs    , RSM_MIN_Bs, RSM_MAX_Bs, arg[0], arg[1])
   make_ABC:   NOIMM(3, ABC        ,                         arg[0], arg[1], arg[2])
@@ -569,7 +714,11 @@ static void genop(gstate* g, rnode* n) {
   #undef NOIMM
 
 noimm: // the operation does not accept an immediate-value as the last argument
-  ERRN(n, "last argument for %s must be a register", rop_name(op));
+  ERRN(n, "last argument to %s must be a register", rop_name(op));
+  return;
+no_r:
+  ERRN(n, "last argument to %s must be an immediate value", rop_name(op));
+  return;
 }
 
 
@@ -577,7 +726,6 @@ static void genassign(gstate* g, rnode* n) {
   assert(n->t == RT_EQ);
   // convert to op
   n->t = RT_OP;
-  n->ival = rop_COPY;
   rnode* lhs = assertnotnull(n->children.head);
   rnode* rhs = assertnotnull(lhs->next);
   assertnull(rhs->next); // n must only have two operands
@@ -591,6 +739,23 @@ static void genassign(gstate* g, rnode* n) {
     // a = b  ⟶  move a b
     assert(rhs->t != RT_OP);
     n->ival = rop_COPY;
+    // use COPYV for large values
+    switch (rhs->t) {
+      case RT_INTLIT2:
+      case RT_INTLIT:
+      case RT_INTLIT16:
+        if (rhs->ival > RSM_MAX_Bu)
+          n->ival = rop_COPYV;
+        break;
+      case RT_SINTLIT2:
+      case RT_SINTLIT:
+      case RT_SINTLIT16:
+        if ((i64)rhs->ival > RSM_MAX_Bs || (i64)rhs->ival < RSM_MIN_Bs)
+          n->ival = rop_COPYV;
+        break;
+      default:
+        break;
+    }
   }
 
   return genop(g, n);
@@ -630,42 +795,30 @@ static void genblock(gstate* g, rnode* block) {
   }
 }
 
-static void names_assign(gstate* g, rnode* name, uintptr v) {
-  uintptr* vp = smap_assign(&g->names, name->name.p, name->name.len);
-  if (check_alloc(g, vp))
-    return;
-  *vp = (uintptr)v;
+static void names_assign(gstate* g, gnamed* entry) {
+  uintptr* vp = smap_assign(&g->names, entry->name, entry->namelen);
+  if (!check_alloc(g, vp))
+    *vp = (uintptr)entry;
 }
 
 
 static void gendata(gstate* g, rnode* datn) {
-  assert(datn->t == RT_GDEF);
+  assert(datn->t == RT_DATA || datn->t == RT_CONST);
 
-  // allocate gdata
-  gdatav* dv = g->datavcurr;
-  if UNLIKELY(dv->len == countof(dv->data)) {
-    // out of space; allocate a new gdatav slab
-    dv = rmem_alloc(g->a->mem, sizeof(gdatav));
-    if (check_alloc(g, dv))
-      return;
-    dv->next = g->datavcurr;
-    dv->len = 0;
-    g->datavcurr = dv;
-  }
-  gdata* d = &dv->data[dv->len++];
-  d->next = g->datalist;
-  g->datalist = d;
+  // example: "data hello i32 = 123"
+  // (DATA foo        (CONST bar
+  //   (I32)            (I32)
+  //   (INT10 123))     (INT10 123))
+  // (DATA foo
+  //   (I32))
+  rnode* type = assertnotnull(datn->children.head);
 
-  // example: "hello = i32 123"
-  // (GDEF (NAME hello)
-  //       (I32 (INT10 123)))
-  rnode* name = assertnotnull(datn->children.head);
-  rnode* type = assertnotnull(name->next);
-  d->name = name->name.p;
-  d->namelen = name->name.len;
+  gdata* d = GSLAB_ALLOC(g, datavhead, datavcurr);
+  d->namedtype = datn->t == RT_CONST ? GNAMED_T_CONST : GNAMED_T_DATA;
+  d->name = datn->name.p;
+  d->namelen = datn->name.len;
   d->nrefs = 0;
-
-  names_assign(g, name, (uintptr)d);
+  d->origin = datn;
 
   switch (type->t) {
     case RT_I1:  d->align = 1; d->size = 1; break;
@@ -677,29 +830,30 @@ static void gendata(gstate* g, rnode* datn) {
       ERRN(type, "invalid type %s of data", tokname(type->t));
   }
 
-  rnode* init = type->children.head;
+  rnode* init = type->next;
   d->initp = NULL;
-  if (init) switch (init->t) {
-    case RT_SINTLIT2:
-    case RT_INTLIT2:
-    case RT_SINTLIT:
-    case RT_INTLIT:
-    case RT_SINTLIT16:
-    case RT_INTLIT16:
+  if (init) {
+    if (tokisintlit(init->t)) {
       init->ival = htole64(init->ival); // make sure byte order is LE
       d->initp = &init->ival;
-      break;
-    default:
+    } else {
       ERRN(init, "invalid value %s for data", tokname(init->t));
+    }
+  } else if UNLIKELY(d->namedtype == GNAMED_T_CONST) {
+    ERRN(datn, "missing initial value for constant %.*s", (int)d->namelen, d->name);
+    return;
   }
+
   // TODO: check that init value fits in type
+
+  names_assign(g, (gnamed*)d);
 }
 
 static void genfun(gstate* g, rnode* fun) {
   assert(fun->t == RT_FUN);
 
-  // register function
-  gfun* fn = GARRAY_PUSH_OR_RET(gfun, &g->funs);
+  gfun* fn = GSLAB_ALLOC(g, fnvhead, fnvcurr);
+  fn->namedtype = GNAMED_T_FUN;
   fn->name = fun->name.p;
   fn->namelen = fun->name.len;
   fn->i = g->iv.len;
@@ -708,10 +862,10 @@ static void genfun(gstate* g, rnode* fun) {
   fn->fi = g->funs.len - 1; // TODO only exported functions' table index
   fn->ulv = (rarray){0};
 
-  names_assign(g, fun, g->funs.len - 1);
+  names_assign(g, (gnamed*)fn);
 
   // resolve pending references
-  gpostresolve_pc(g, &g->ufv, (gbhead*)fn);
+  gpostresolve_pc(g, &g->udnames, (gbhead*)fn);
 
   // get body by traversing the function rnode's linked list
   rnode* params = fun->children.head;
@@ -743,7 +897,7 @@ static void genfun(gstate* g, rnode* fun) {
   // report unresolved labels
   for (u32 i = 0; i < fn->ulv.len; i++) {
     gref* ref = rarray_at(gref, &fn->ulv, i);
-    if (ref->flags&REF_ANY) // there's also an entry in g->ufv
+    if (ref->flags&REF_ANY) // there's also an entry in g->udnames
       continue;
     rnode* n = ref->n;
     ERRN(n, "undefined label \"%.*s\"", (int)n->name.len, n->name.p);
@@ -802,22 +956,29 @@ static void layout_gdata(gstate* g) {
     return;
   }
 
-  // Sort data chunks by alignment.
-  // Put them in an array (dataorder) so we can sort them.
+  // put gdata to be included in an array for sorting
   usize datacount = 0;
-  for (gdatav* dv = &g->datavhead; dv && dv->len; dv = dv->next)
-    datacount += dv->len;
+  for (gdataslab* slab = &g->datavhead; slab && slab->len; slab = slab->next)
+    datacount += slab->len;
   if UNLIKELY(!rarray_reserve(gdata*, &g->dataorder, g->a->mem, datacount))
     return errf(g->a, (rposrange){0}, "out of memory");
-  g->dataorder.len = datacount;
-  for (gdatav* dv = &g->datavhead; dv; dv = dv->next) {
-    if (dv->len == 0)
+  usize datalen = 0;
+  for (gdataslab* slab = &g->datavhead; slab; slab = slab->next) {
+    if (slab->len == 0)
       break;
-    for (usize i = 0; i < dv->len; i++) {
-      assert(datacount > 0);
-      *rarray_at(gdata*, &g->dataorder, --datacount) = &dv->data[i];
+    for (usize i = 0; i < slab->len; i++) {
+      assert(datalen < datacount);
+      gdata* d = &slab->data[i];
+      if UNLIKELY(d->namedtype == GNAMED_T_CONST)
+        continue; // don't include constants
+      *rarray_at(gdata*, &g->dataorder, datalen++) = &slab->data[i];
     }
   }
+  g->dataorder.len = datalen;
+  if (datalen == 0)
+    return;
+
+  // sort data chunks by alignment
   rsm_qsort(g->dataorder.v, g->dataorder.len, sizeof(void*),
     (rsm_qsort_cmp)&gdata_sort, NULL);
 
@@ -856,6 +1017,27 @@ static rerror rom_on_filldata(void* base, void* gp) {
   return 0;
 }
 
+static void report_unresolved(gstate* g) {
+  // report unresolved references
+  for (u32 i = 0; i < g->udnames.len; i++) {
+    gref* ref = rarray_at(gref, &g->udnames, i);
+    rnode* n = ref->n;
+    ERRN(n, "undefined name \"%.*s\"", (int)n->name.len, n->name.p);
+  }
+
+  for (gdataslab* slab = &g->datavhead; slab; slab = slab->next) {
+    if (slab->len == 0)
+      break;
+    for (usize i = 0; i < slab->len; i++) {
+      gdata* d = &slab->data[i];
+      if UNLIKELY(d->nrefs == 0) {
+        warnf(g->a, nposrange(d->origin), "unused %s %.*s",
+          gnamedtype_name(d->namedtype), (int)d->namelen, d->name);
+      }
+    }
+  }
+}
+
 static gstate* nullable init_gstate(rasm* a, rmem rommem) {
   gstate* g = rasm_gstate(a);
   if (!g) {
@@ -870,19 +1052,21 @@ static gstate* nullable init_gstate(rasm* a, rmem rommem) {
     rarray_grow(&g->iv, a->mem, sizeof(rinstr), 512/sizeof(rinstr));
   } else {
     // recycle gstate
-    g->ufv.len = 0;
-    g->udv.len = 0;
+    g->udnames.len = 0;
     g->funs.len = 0;
     g->iv.len = 0;
     g->dataorder.len = 0;
     g->datasize = 0;
     g->dataalign = 0;
-    for (gdatav* v = &g->datavhead; v; v = v->next)
-      v->len = 0;
+    for (gdataslab* s = &g->datavhead; s; s = s->next)
+      s->len = 0;
+    for (gfunslab* s = &g->fnvhead; s; s = s->next)
+      s->len = 0;
     assertf(g->names.mem.state == a->mem.state, "allocator changed");
     smap_clear(&g->names);
   }
   g->datavcurr = &g->datavhead;
+  g->fnvcurr = &g->fnvhead;
   return g;
 }
 
@@ -895,7 +1079,7 @@ rerror rasm_gen(rasm* a, rnode* module, rmem rommem, rrom* rom) {
 
   // generate data and functions
   for (rnode* cn = module->children.head; cn; cn = cn->next) {
-    if (cn->t == RT_GDEF) {
+    if (cn->t == RT_DATA || cn->t == RT_CONST) {
       gendata(g, cn);
     } else {
       genfun(g, cn);
@@ -907,21 +1091,16 @@ rerror rasm_gen(rasm* a, rnode* module, rmem rommem, rrom* rom) {
 
   // compute data layout and resolve data references
   layout_gdata(g);
-  gpostresolve_data(g);
+  resolve_udnames(g);
 
-  // report unresolved function references
-  for (u32 i = 0; i < g->ufv.len; i++) {
-    gref* ref = rarray_at(gref, &g->ufv, i);
-    rnode* n = ref->n;
-    ERRN(n, "undefined function%s \"%.*s\"",
-      (ref->flags&REF_ANY) ? " or label" : "", (int)n->name.len, n->name.p);
-  }
+  // report unresolved references
+  report_unresolved(g);
 
+  // stop if there were errors
   if (a->errcount)
     return rerr_invalid;
 
   // build ROM image
-  // return gen_romimg(g, rommem, rom);
   rrombuild rb = {
     .code = (const rinstr*)g->iv.v,
     .codelen = g->iv.len,
@@ -941,16 +1120,20 @@ static void gstate_dispose(gstate* g) {
     gfun* fn = rarray_at(gfun, &g->funs, i);
     rarray_free(gblock, &fn->blocks, mem);
   }
-  rarray_free(gref, &g->ufv, mem);
-  rarray_free(gref, &g->udv, mem);
+  rarray_free(gref, &g->udnames, mem);
   rarray_free(gfun, &g->funs, mem);
   rarray_free(gfun, &g->dataorder, mem);
   smap_dispose(&g->names);
 
-  for (gdatav* dv = g->datavhead.next; dv; ) {
-    gdatav* tmp = dv->next;
-    rmem_free(mem, dv, sizeof(gdatav));
-    dv = tmp;
+  for (gdataslab* s = g->datavhead.next; s; ) {
+    gdataslab* tmp = s->next;
+    rmem_free(mem, s, sizeof(gdataslab));
+    s = tmp;
+  }
+  for (gfunslab* s = g->fnvhead.next; s; ) {
+    gfunslab* tmp = s->next;
+    rmem_free(mem, s, sizeof(gfunslab));
+    s = tmp;
   }
 
   #ifdef DEBUG

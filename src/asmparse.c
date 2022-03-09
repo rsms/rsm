@@ -3,9 +3,10 @@
 #ifndef RSM_NO_ASM
 #include "rsmimpl.h"
 
-//#define LOG_TOKENS /* define to log() token scanning */
-//#define LOG_AST /* define to log() parsed top-level ast nodes */
-//#define LOG_PRATT(args...) dlog(args) /* define to log pratt dispatch */
+#define LOG_TOKENS // define to log() token scanning
+#define LOG_AST    // define to log() parsed top-level ast nodes
+//#define LOG_PRATT(args...) dlog(args) // define to log pratt dispatch
+//#define PRODUCE_COMMENT_NODES // define to include comments in the AST
 
 #ifndef LOG_PRATT
   #define LOG_PRATT(args...) ((void)0)
@@ -129,11 +130,32 @@ static void perr(pstate* p, rnode* nullable n, const char* fmt, ...) {
   va_end(ap);
 }
 
+static void snewline(pstate* p) {
+  p->lineno++;
+  p->linestart = p->inp + 1;
+}
+
 static void scomment(pstate* p) { // line comment "// ... <LF>"
   p->tokstart += 2; // exclude "//"
-  while (*p->inp && *p->inp != '\n')
-    p->inp++;
   p->tok = RT_COMMENT;
+  while (p->inp < p->inend && *p->inp != '\n')
+    p->inp++;
+}
+
+static void scommentblock(pstate* p) { // /* ... */
+  p->tokstart += 2; // exclude "/*"
+  p->tok = RT_COMMENT;
+  while (p->inp < p->inend) {
+    if (*p->inp == '/') {
+      if (*(p->inp - 1) == '*') {
+        p->inp++; // consume '*'
+        return;
+      }
+    } else if (*p->inp == '\n') {
+      snewline(p);
+    }
+    p->inp++;
+  }
 }
 
 static bool utf8chomp(pstate* p) {
@@ -258,10 +280,8 @@ static void sreg(pstate* p) {
 static void sadvance(pstate* p) { // scan the next token
   const char* linestart = p->linestart;
   while (p->inp < p->inend && isspace(*p->inp)) {
-    if (*p->inp == '\n') {
-      p->lineno++;
-      p->linestart = p->inp + 1;
-    }
+    if (*p->inp == '\n')
+      snewline(p);
     p->inp++;
   }
 
@@ -321,14 +341,29 @@ static void sadvance(pstate* p) { // scan the next token
     } FALLTHROUGH;
     case '1' ... '9': p->inp--; p->tok = RT_INTLIT; return snumber(p, 10);
 
-    case '/':
-      if (*p->inp == '/') {
+    case '/': switch (*p->inp) {
+      case '/':
         p->inp++;
         p->insertsemi = insertsemi;
-        // return scomment(p); // alt 1: produce comments
-        scomment(p); MUSTTAIL return sadvance(p); // alt 2: ignore comments
-      }
-      p->tok = RT_SLASH; return;
+        #ifdef PRODUCE_COMMENT_NODES
+          return scomment(p);
+        #else
+          scomment(p);
+          MUSTTAIL return sadvance(p);
+        #endif
+      case '*':
+        p->inp++;
+        p->insertsemi = insertsemi;
+        #ifdef PRODUCE_COMMENT_NODES
+          return scommentblock(p);
+        #else
+          scommentblock(p);
+          MUSTTAIL return sadvance(p);
+        #endif
+      default:
+        p->tok = RT_SLASH; return;
+    }
+
     case 'R': p->tok = RT_IREG; return sreg(p);
     case 'F': p->tok = RT_FREG; return sreg(p);
     default: // anything else is the start of a name
@@ -412,9 +447,11 @@ static bool got(pstate* p, rtok t) {
 }
 
 // eat comsumes the next token if it's t, reporting a syntax error if p->tok != t
+// advances the scanner to the next semicolon on error.
 static void eat(pstate* p, rtok t) {
   if UNLIKELY(p->tok != t) {
     perrunexpected(p, NULL, tokname(t), tokname(p->tok));
+    sfastforward_semi(p);
     return;
   }
   sadvance(p);
@@ -813,6 +850,8 @@ static rnode* pstmt(PPARAMS) {
   const parselet* ps = &parsetab[p->tok];
 
   if UNLIKELY(!ps->prefix) {
+    if (p->tok == RT_END)
+      return mknil(p);
     LOG_PRATT("PREFIX %s not found", tokname(p->tok));
     perrunexpected(p, NULL, "statement", tokname(p->tok));
     rnode* n = mknil(p);

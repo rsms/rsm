@@ -298,6 +298,18 @@ static u64 copyv(VMPARAMS, u64 n) {
   return (((u64)inv[pc]) << 32) | (u64)inv[pc+1];
 }
 
+static void mcopy(VMPARAMS, u64 dstaddr, u64 srcaddr, u64 size) {
+  void* dst = hostaddr_check_load(VMARGS, 1, dstaddr);
+  void* src = hostaddr_check_load(VMARGS, 1, srcaddr);
+  memcpy(dst, src, (usize)size);
+}
+
+static i64 mcmp(VMPARAMS, u64 xaddr, u64 yaddr, u64 size) {
+  void* x = hostaddr_check_load(VMARGS, 1, xaddr);
+  void* y = hostaddr_check_load(VMARGS, 1, yaddr);
+  return (i64)memcmp(x, y, (usize)size);
+}
+
 static void vmexec(VMPARAMS) {
   // This is the interpreter loop.
   // It executes instructions until the entry function returns or an error occurs.
@@ -426,6 +438,8 @@ static void vmexec(VMPARAMS) {
 
     #define do_WRITE(D)   RA = _write(VMARGS, D, RB, RC) // addr=RB size=RC fd=D
     #define do_DEVOPEN(B) RA = dev_open(VMARGS, B)
+    #define do_MCOPY(C)   mcopy(VMARGS, RA, RB, C)
+    #define do_MCMP(D)    RA = (u64)mcmp(VMARGS, RB, RC, D)
 
     #define do_RET() { \
       pc = (usize)pop(VMARGS, 8); /* load return address from stack */ \

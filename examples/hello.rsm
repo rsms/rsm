@@ -1,5 +1,4 @@
-// This demonstrates using string data to write a message
-// to the console
+// This demonstrates using string data to write a message to the console
 
 const STDOUT = 1
 data hej = "

@@ -168,9 +168,9 @@ static void calc_DATA(rrombuild* rb, usize* bsize, usize* align) {
     *bsize = 1 + rb->datasize; // 1+ for "align u8"
 }
 static u8* build_DATA(rrombuild* rb, rrom* rom, u8* p, rerror* errp) {
-  assert(rb->dataalign > 0);
-  assert(rb->dataalign == 1 || CEIL_POW2(rb->dataalign) == rb->dataalign);
-  *p++ = ILOG2(rb->dataalign);
+  assert(rb->dataalign != 0);
+  assert(CEIL_POW2(rb->dataalign) == rb->dataalign);
+  *p++ = rb->dataalign == 1 ? 1 : ILOG2(rb->dataalign);
   rom->data = p;
   rom->datasize = rb->datasize;
   rom->dataalign = rb->dataalign;
@@ -214,6 +214,8 @@ rerror rom_build(rrombuild* rb, rmem mem, rrom* rom) {
     }
     if (bsize == 0)
       continue;
+    assert(align != 0);
+    assert(CEIL_POW2(align) == align);
     u8 tmp[LEB_NBYTE_64];
     usize n = leb_u64_write(tmp, (u64)bsize + (u64)align-1);
     usize headerz = 1 + n; // kind u8 + size varint

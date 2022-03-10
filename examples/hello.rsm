@@ -1,0 +1,17 @@
+// This demonstrates using string data to write a message
+// to the console
+
+const STDOUT = 1
+data hej = "
+  |hello
+  | world
+  |    how
+  |  are\nyou?
+  |"
+
+fun main(i32) {
+  R0 = hej // address
+  R1 = 32  // length
+  R0 = write R0 R1 STDOUT
+  ret
+}

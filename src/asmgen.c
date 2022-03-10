@@ -49,12 +49,12 @@ struct gbhead {
 
 struct gdata {
   NAMED_HEAD
-  u32             align; // byte alignment (1, 2, 4, 8, 16 ...)
-  usize           size;  // length of data in bytes
-  void* nullable  initp; // pointer to initial value, if any
-  u64             addr;  // address (valid only after layout)
-  gdata* nullable next;  // for gstate.datalist
-  rnode*          origin;
+  u32                  align; // byte alignment (1, 2, 4, 8, 16 ...)
+  u64                  size;  // length of data in bytes
+  const void* nullable initp; // pointer to initial value, if any
+  u64                  addr;  // address (valid only after layout)
+  gdata* nullable      next;  // for gstate.datalist
+  rnode*               origin;
 };
 
 struct gfun {
@@ -134,16 +134,21 @@ static bool check_alloc(gstate* g, void* nullable p) {
   if (check_alloc(g, vp__)) return ERRRET;          \
   vp__; })
 
-#define GSLAB_ALLOC(g, HEADFIELD, CURRFIELD, ERRRET...) ({                        \
-  if UNLIKELY(g->CURRFIELD->len == countof(g->HEADFIELD.data)) {                  \
-    __typeof__(g->CURRFIELD) tmp__ = rmem_alloc(g->a->mem, sizeof(g->HEADFIELD)); \
-    if (check_alloc(g, tmp__))                                                    \
-      return ERRRET;                                                              \
-    tmp__->len = 0;                                                               \
-    tmp__->next = g->CURRFIELD;                                                   \
-    g->CURRFIELD = tmp__;                                                         \
-  }                                                                               \
-  &g->CURRFIELD->data[g->CURRFIELD->len++];                                       \
+#define GSLAB_ALLOC(g, HEADFIELD, CURRFIELD, ERRRET...) ({                          \
+  if UNLIKELY(g->CURRFIELD->len == countof(g->HEADFIELD.data)) {                    \
+    if (g->CURRFIELD->next) {                                                       \
+      g->CURRFIELD = g->CURRFIELD->next;                                            \
+      assert(g->CURRFIELD->len == 0);                                               \
+    } else {                                                                        \
+      __typeof__(g->CURRFIELD) tmp__ = rmem_alloc(g->a->mem, sizeof(g->HEADFIELD)); \
+      if (check_alloc(g, tmp__))                                                    \
+        return ERRRET;                                                              \
+      tmp__->len = 0;                                                               \
+      tmp__->next = g->CURRFIELD;                                                   \
+      g->CURRFIELD = tmp__;                                                         \
+    }                                                                               \
+  }                                                                                 \
+  &g->CURRFIELD->data[g->CURRFIELD->len++];                                         \
 })
 
 #define NAME_LOOKUP(g, name, namelen) ({          \
@@ -456,8 +461,8 @@ static void resolve_udnames(gstate* g) {
     gref* ref = rarray_at(gref, &g->udnames, i);
 
     assert(assertnotnull(ref->n)->t == RT_NAME);
-    const char* name = ref->n->name.p;
-    u32 namelen = ref->n->name.len;
+    const char* name = ref->n->sval.p;
+    u32 namelen = ref->n->sval.len;
     assert(namelen > 0);
 
     gnamed* target = ref->target;
@@ -499,7 +504,7 @@ static bool refnamed(gstate* g, rnode* refn, u32 refi, rop op, u32 argc, i32* ar
     ref;                                             \
   })
 
-  assert(refn->name.len > 0);
+  assert(refn->sval.len > 0);
   *argp = 0; // in case of error
 
   // look for local label
@@ -515,7 +520,7 @@ static bool refnamed(gstate* g, rnode* refn, u32 refi, rop op, u32 argc, i32* ar
     flags |= REF_ABS;
 
   // look for global function, data or constant
-  gnamed* target = NAME_LOOKUP(g, refn->name.p, refn->name.len);
+  gnamed* target = NAME_LOOKUP(g, refn->sval.p, refn->sval.len);
   if (!target) {
     if (RSM_OP_ACCEPTS_PC_ARG(op)) { // also register as possible label/fun ref
       flags |= REF_ANY;
@@ -536,8 +541,8 @@ static bool refnamed(gstate* g, rnode* refn, u32 refi, rop op, u32 argc, i32* ar
 
     case GNAMED_T_CONST: {
       target->nrefs++;
-      void* initp = assertnotnull(((gdata*)target)->initp);
-      bool isimm = patch_imm(g, refn, refi, *(u64*)initp);
+      const void* initp = assertnotnull(((gdata*)target)->initp);
+      bool isimm = patch_imm(g, refn, refi, *(const u64*)initp);
       // load argument since the caller will overwrite it
       rinstr in = *rarray_at(rinstr, &g->iv, refi);
       switch (argc) {
@@ -768,8 +773,8 @@ static void genblock(gstate* g, rnode* block) {
   // register block
   gblock* b = GARRAY_PUSH_OR_RET(gblock, &g->fn->blocks);
   b->i = g->iv.len;
-  b->name = block->name.p;
-  b->namelen = block->name.len;
+  b->name = block->sval.p;
+  b->namelen = block->sval.len;
   b->nrefs = 0;
   b->pos = block->pos;
 
@@ -801,6 +806,29 @@ static void names_assign(gstate* g, gnamed* entry) {
     *vp = (uintptr)entry;
 }
 
+static bool gdata_typesize(gstate* g, rnode* type, u32* alignp, u64* sizep) {
+  switch (type->t) {
+    case RT_I1:  *alignp = 1; *sizep = 1; return true;
+    case RT_I8:  *alignp = 1; *sizep = 1; return true;
+    case RT_I16: *alignp = 2; *sizep = 2; return true;
+    case RT_I32: *alignp = 4; *sizep = 4; return true;
+    case RT_I64: *alignp = 8; *sizep = 8; return true;
+    case RT_ARRAY: {
+      rnode* elemtype = assertnotnull(type->children.head);
+      u64 elemsize;
+      if UNLIKELY(!gdata_typesize(g, elemtype, alignp, &elemsize))
+        return false;
+      if (check_mul_overflow(elemsize, type->ival, sizep)) {
+        ERRN(type, "array too large; %llu×%llu", elemsize, type->ival);
+        return false;
+      }
+      return true;
+    }
+    default:
+      ERRN(type, "invalid type %s of data", tokname(type->t));
+      return false;
+  }
+}
 
 static void gendata(gstate* g, rnode* datn) {
   assert(datn->t == RT_DATA || datn->t == RT_CONST);
@@ -811,24 +839,17 @@ static void gendata(gstate* g, rnode* datn) {
   //   (INT10 123))     (INT10 123))
   // (DATA foo
   //   (I32))
-  rnode* type = assertnotnull(datn->children.head);
 
   gdata* d = GSLAB_ALLOC(g, datavhead, datavcurr);
   d->namedtype = datn->t == RT_CONST ? GNAMED_T_CONST : GNAMED_T_DATA;
-  d->name = datn->name.p;
-  d->namelen = datn->name.len;
+  d->name = datn->sval.p;
+  d->namelen = datn->sval.len;
   d->nrefs = 0;
   d->origin = datn;
 
-  switch (type->t) {
-    case RT_I1:  d->align = 1; d->size = 1; break;
-    case RT_I8:  d->align = 1; d->size = 1; break;
-    case RT_I16: d->align = 2; d->size = 2; break;
-    case RT_I32: d->align = 4; d->size = 4; break;
-    case RT_I64: d->align = 8; d->size = 8; break;
-    default:
-      ERRN(type, "invalid type %s of data", tokname(type->t));
-  }
+  rnode* type = assertnotnull(datn->children.head);
+  if UNLIKELY(!gdata_typesize(g, type, &d->align, &d->size))
+    return;
 
   rnode* init = type->next;
   d->initp = NULL;
@@ -836,6 +857,9 @@ static void gendata(gstate* g, rnode* datn) {
     if (tokisintlit(init->t)) {
       init->ival = htole64(init->ival); // make sure byte order is LE
       d->initp = &init->ival;
+    } else if (init->t == RT_STRLIT) {
+      assert(type->t == RT_ARRAY);
+      d->initp = init->sval.p;
     } else {
       ERRN(init, "invalid value %s for data", tokname(init->t));
     }
@@ -854,8 +878,8 @@ static void genfun(gstate* g, rnode* fun) {
 
   gfun* fn = GSLAB_ALLOC(g, fnvhead, fnvcurr);
   fn->namedtype = GNAMED_T_FUN;
-  fn->name = fun->name.p;
-  fn->namelen = fun->name.len;
+  fn->name = fun->sval.p;
+  fn->namelen = fun->sval.len;
   fn->i = g->iv.len;
   fn->nrefs = 0;
   fn->blocks = (rarray){0};
@@ -900,7 +924,7 @@ static void genfun(gstate* g, rnode* fun) {
     if (ref->flags&REF_ANY) // there's also an entry in g->udnames
       continue;
     rnode* n = ref->n;
-    ERRN(n, "undefined label \"%.*s\"", (int)n->name.len, n->name.p);
+    ERRN(n, "undefined label \"%.*s\"", (int)n->sval.len, n->sval.p);
   }
 
   // report unused labels
@@ -922,23 +946,23 @@ static void dlog_gdata(gdata* nullable d) {
   char buf[1024];
   abuf s = abuf_make(buf, sizeof(buf));
   if (d->initp) {
-    abuf_reprhex(&s, d->initp, d->size);
-    if (d->size < (usize)d->align) {
+    abuf_reprhex(&s, d->initp, (usize)d->size);
+    if (d->size < (u64)d->align) {
       // pad
       abuf_c(&s, ' ');
       memset(buf + sizeof(buf)/2, 0, sizeof(buf) - sizeof(buf)/2);
-      abuf_reprhex(&s, buf + sizeof(buf)/2, d->align - d->size);
+      abuf_reprhex(&s, buf + sizeof(buf)/2, (usize)d->align - (usize)d->size);
     }
   } else {
     memset(buf + sizeof(buf)/2, 0, sizeof(buf) - sizeof(buf)/2);
-    abuf_reprhex(&s, buf + sizeof(buf)/2, d->size);
+    abuf_reprhex(&s, buf + sizeof(buf)/2, (usize)d->size);
   }
   int namemax = 10, datamax = 30;
   int namelen = d->namelen, datalen = (int)s.len;
   const char* nametail = "", *datatail = "";
   if (namelen > namemax) { namemax--; namelen = namemax; nametail = "…"; }
   if (datalen > datamax) { datamax--; datalen = datamax; datatail = "…"; }
-  log("0x%016llx %-*.*s%s %10zu     %2u  %.*s%s",
+  log("0x%016llx %-*.*s%s %10llu     %2u  %.*s%s",
     d->addr,
     namemax, namelen, d->name, nametail,
     d->size, d->align,
@@ -1022,7 +1046,7 @@ static void report_unresolved(gstate* g) {
   for (u32 i = 0; i < g->udnames.len; i++) {
     gref* ref = rarray_at(gref, &g->udnames, i);
     rnode* n = ref->n;
-    ERRN(n, "undefined name \"%.*s\"", (int)n->name.len, n->name.p);
+    ERRN(n, "undefined name \"%.*s\"", (int)n->sval.len, n->sval.p);
   }
 
   for (gdataslab* slab = &g->datavhead; slab; slab = slab->next) {
@@ -1045,8 +1069,8 @@ static gstate* nullable init_gstate(rasm* a, rmem rommem) {
     if (!g)
       return NULL;
     memset(g, 0, sizeof(gstate));
-    g->a = a;
     rasm_gstate_set(a, g);
+    g->a = a;
     smap_make(&g->names, a->mem, 16, MAPLF_2);
     // preallocate instruction buffer
     rarray_grow(&g->iv, a->mem, sizeof(rinstr), 512/sizeof(rinstr));
@@ -1112,7 +1136,7 @@ rerror rasm_gen(rasm* a, rnode* module, rmem rommem, rrom* rom) {
   return rom_build(&rb, rommem, rom);
 }
 
-static void gstate_dispose(gstate* g) {
+void gstate_dispose(gstate* g) {
   rmem mem = g->a->mem;
   if (g->fn)
     rarray_free(gref, &g->fn->ulv, mem);
@@ -1140,15 +1164,6 @@ static void gstate_dispose(gstate* g) {
   memset(g, 0, sizeof(gstate));
   #endif
   rmem_free(mem, g, sizeof(gstate));
-}
-
-void rasm_dispose(rasm* a) {
-  gstate* g = rasm_gstate(a);
-  if (g)
-    gstate_dispose(g);
-  #ifdef DEBUG
-  memset(a, 0, sizeof(rasm));
-  #endif
 }
 
 

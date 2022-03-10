@@ -162,8 +162,8 @@ _( CALL  , Au   , nil , "call"  /* R0...R7 = push(PC); PC=Au */)\
 _( JUMP  , Au   , nil , "jump"  /* PC = Au                   */)\
 _( RET   , _    , nil , "ret"   /* PC = pop()                */)\
 \
-_( SCALL , Au   , nil , "scall" /* R0...R7 = system_call(Au) */)\
-_( WRITE , ABCDu , reg , "write" /* RA = write addr=RB size=R(C) fd=Du */)\
+_( SCALL , Au    , nil , "scall" /* R0...R7 = system_call(Au) */)\
+_( WRITE , ABCDu , reg , "write" /* RA = write addr=RB size=RC fd=Du */)\
 _( DEVOPEN , ABu , reg , "devopen" /* RA = devaddr = device(Bu) */)\
 \
 // end RSM_FOREACH_OP
@@ -424,6 +424,8 @@ _( RT_OP     ) /* brz */ \
 _( RT_INTLIT2  ) _( RT_SINTLIT2  ) /* 0b1111011       */ \
 _( RT_INTLIT   ) _( RT_SINTLIT   ) /* 123, -123       */ \
 _( RT_INTLIT16 ) _( RT_SINTLIT16 ) /* 0x7b            */ \
+_( RT_STRLIT ) /* "foo" */ \
+_( RT_ARRAY  ) /* T[] */ \
 // end RSM_FOREACH_TOKEN
 // RSM_FOREACH_BINOP_TOKEN maps an infix binary operation to opcodes,
 // allowing "x + y" as an alternative to "add x y"
@@ -500,15 +502,15 @@ struct rnode {
   } children;
   union { // depends on value of t
     u64 ival;
-    struct { const char* p; u32 len; } name; // points into source data
+    struct { const char* p; u32 len; } sval; // valid while origin rasm struct is valid
   };
 };
 
 // rasm_parse parses assembly source text into an AST.
 // Uses a->mem for allocating AST nodes. a can be reused.
-// Returns AST representing the source (a->src* fields) module.
+// Returns AST representing the source (a->src* fields) module (NULL on memory alloc fail.)
 // Caller should check a->errcount on return.
-RSMAPI rnode* rasm_parse(rasm* a);
+RSMAPI rnode* nullable rasm_parse(rasm* a);
 
 // rasm_gen builds VM code from AST.
 // Uses a->mem for temporary storage, allocates data for rom with rommem. a can be reused.

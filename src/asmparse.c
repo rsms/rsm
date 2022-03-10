@@ -3,8 +3,8 @@
 #ifndef RSM_NO_ASM
 #include "rsmimpl.h"
 
-#define LOG_TOKENS // define to log() token scanning
-#define LOG_AST    // define to log() parsed top-level ast nodes
+//#define LOG_TOKENS // define to log() token scanning
+//#define LOG_AST    // define to log() parsed top-level ast nodes
 //#define LOG_PRATT(args...) dlog(args) // define to log pratt dispatch
 //#define PRODUCE_COMMENT_NODES // define to include comments in the AST
 
@@ -18,13 +18,18 @@ struct pstate {
   rasm*       a;          // compilation session/context
   const char* inp;        // source bytes cursor (source ends with 0x00)
   const char* inend;      // source bytes end
-  const char* tokstart;   // start of current token in source
-  const char* linestart;  // source position line start pointer (for column)
-  u32         lineno;     // source position line
+  const char* tokstart;   // soruce start offset of current token
+  rsrcpos     startpos;   // source start position of current token
+  const char* linestart;  // current source position line start pointer (for column)
+  u32         lineno;     // current source position line
   rtok        tok;        // current token
   bool        insertsemi; // insert RT_SEMI before next newline
   bool        isneg;      // true when parsing a negative number
-  u64         ival;       // integer value for RT_INTLIT* tokens
+  bufslabs    bufslabs;
+  union { // depends on value of tok
+    u64 ival; // integer value for RT_INTLIT* tokens
+    struct { const char* p; u32 len; } sval; // value for RT_STRLIT
+  };
 };
 
 typedef u8 precedence;
@@ -82,11 +87,11 @@ static rnode* appendchild(rnode* parent, rnode* child) {
   return parent;
 }
 
-static rnode* setchildren2(rnode* parent, rnode* child1, rnode* child2) {
+static rnode* setchildren2(rnode* parent, rnode* child1, rnode* nullable child2) {
   parent->children.head = child1;
   parent->children.tail = child2;
   child1->next = child2;
-  assert(child2->next == NULL);
+  assert(child2 == NULL || child2->next == NULL);
   return parent;
 }
 
@@ -101,12 +106,8 @@ static u32 toklen32(pstate* p) { // length in bytes of current token
   return (u32)(uintptr)(p->inp - p->tokstart);
 }
 
-static u32 pcolumn(pstate* p) { // source column of current token
-  return (u32)((uintptr)p->tokstart - (uintptr)p->linestart) + 1;
-}
-
 static rposrange sposrange(pstate* p) {
-  return (rposrange){.focus={ p->lineno, pcolumn(p) }};
+  return (rposrange){.focus=p->startpos};
 }
 
 ATTR_FORMAT(printf, 2, 3)
@@ -216,6 +217,168 @@ static void sname_or_kw(pstate* p) { // "foo"
     p->ival = (u64)(*vp >> sizeof(rtok)*8);
 }
 
+static u32 sstring_multiline(pstate* p, const char* start, const char* end) {
+  if ((usize)(end - start) >= (usize)U32_MAX)
+    return U32_MAX;
+
+  if UNLIKELY(*start != '\n') {
+    serr(p, "multiline string must start with \"|\" on a new line");
+    return 0;
+  }
+
+  u32 extralen = 0;
+  const char* src = start;
+  const char* ind = start;
+  u32 indlen = 0;
+  u32 lineno = p->startpos.line;
+  u32 col = p->startpos.col;
+
+  while (src != end) {
+    if (*src++ != '\n') {
+      col++;
+      continue;
+    }
+
+    col = 1;
+    lineno++;
+    const char* l = src;
+
+    // find '|', leaving while loop with src positioned just after '|'
+    while (src != end) {
+      char c = *src++;
+      if (c == '|') break;
+      if UNLIKELY(c != ' ' && c != '\t') {
+        rposrange pr = {.focus={ lineno, col }};
+        errf(p->a, pr, "missing \"|\" after linebreak in multiline string");
+        return 0;
+      }
+    }
+
+    u32 len = (u32)((src - 1) - l);
+    extralen += len;
+
+    if (indlen == 0) {
+      indlen = len;
+      ind = l;
+    } else if UNLIKELY(indlen != len || memcmp(l, ind, len) != 0) {
+      rposrange pr = {.focus={ lineno, col }};
+      warnf(p->a, pr, "inconsitent indentation of multiline string");
+    }
+  }
+  return extralen;
+}
+
+static void sstring_buffered(pstate* p, u32 extralen, bool ismultiline) {
+  const char* src = p->tokstart + 1;
+  u32 len = CAST_U32((p->inp - 1) - src);
+  p->sval.p = "";
+  p->sval.len = 0;
+
+  // calculate effective string length
+  if (ismultiline) {
+    if UNLIKELY(extralen >= len) {
+      // sstring assumes \n is followed by |, but it isn't the case.
+      // i.e. a string of only linebreaks.
+      return serr(p, "missing \"|\" after linebreak in multiline string");
+    }
+    // verify indentation and calculate nbytes used for indentation
+    u32 indentextralen = sstring_multiline(p, src, src + len);
+    if UNLIKELY(indentextralen == 0) // an error occured
+      return;
+    if (check_add_overflow(extralen, indentextralen, &extralen))
+      return serr(p, "string literal too large");
+    src++; len--;  // sans leading '\n'
+  }
+  assert(extralen <= len);
+  len -= extralen;
+
+  // allocate buffer
+  if UNLIKELY(len == U32_MAX - extralen)
+    return serr(p, "string literal too large");
+  char* dst = bufslab_alloc(&p->bufslabs, p->a->mem, len);
+  if UNLIKELY(!dst) {
+    serr(p, "unable to allocate memory for string literal");
+    return;
+  }
+
+  p->sval.p = dst;
+  p->sval.len = len;
+  const char* chunkstart = src;
+
+  #define FLUSH_BUF(end) { \
+    usize nbyte = (usize)((end) - chunkstart); \
+    memcpy(dst, chunkstart, nbyte); \
+    dst += nbyte; \
+  }
+
+  if (ismultiline) {
+    while (*src++ != '|') {}
+    chunkstart = src;
+  }
+
+  while (src < p->inend) {
+    switch (*src) {
+      case '\\':
+        FLUSH_BUF(src);
+        src++;
+        switch (*src) {
+          case 'n': *dst++ = 0xA; break;
+          default:  *dst++ = *src; break; // verbatim
+        }
+        chunkstart = ++src;
+        break;
+      case '\n':
+        src++;
+        FLUSH_BUF(src);
+        // note: sstring_multiline has verified syntax already
+        while (*src++ != '|') {}
+        chunkstart = src;
+        break;
+      case '"':
+        goto done;
+      default:
+        src++;
+    }
+  }
+done:
+  FLUSH_BUF(src);
+  // if (ismultiline) {
+  //   // sans leading '\n'
+  //   p->sval.p++;
+  //   p->sval.len--;
+  // }
+}
+
+static void sstring(pstate* p) {
+  p->insertsemi = true;
+  u32 extralen = 0;
+  bool ismultiline = false;
+  while (p->inp < p->inend) {
+    char c = *p->inp++;
+    switch (c) {
+      case '\\':
+        p->inp++;
+        extralen++;
+        break;
+      case '\n':
+        snewline(p);
+        ismultiline = true;
+        extralen++;
+        break;
+      case '"': {
+        if (extralen || ismultiline)
+          return sstring_buffered(p, extralen, ismultiline);
+        p->sval.p = p->tokstart + 1;
+        p->sval.len = CAST_U32(p->inp - p->tokstart) - 2;
+        return;
+      }
+    }
+  }
+  p->sval.p = "";
+  p->sval.len = 0;
+  serr(p, "unterminated string literal");
+}
+
 static rerror snumber1(pstate* p, int base) {
   u64 cutoff = 0xFFFFFFFFFFFFFFFF;
   u64 acc = 0;
@@ -288,6 +451,8 @@ static void sadvance(pstate* p) { // scan the next token
   p->tokstart = p->inp;
   if (linestart != p->linestart && p->insertsemi) {
     p->insertsemi = false;
+    p->startpos.line = p->lineno - (linestart != p->linestart);
+    p->startpos.col = (u32)(uintptr)(p->tokstart - linestart);
     p->tok = RT_SEMI; return;
   }
 
@@ -303,8 +468,15 @@ static void sadvance(pstate* p) { // scan the next token
 
   assert(p->isneg == false); // make sure we don't have a bug in snumber
   char c = *p->inp++; // read current byte and advance cursor
+
+  // swap insertsemi
   bool insertsemi = p->insertsemi;
   p->insertsemi = false;
+
+  // update startpos
+  assert(p->tokstart >= p->linestart);
+  p->startpos.line = p->lineno;
+  p->startpos.col = (u32)(uintptr)(p->tokstart - p->linestart) + 1;
 
   switch (c) {
     case '(': p->tok = RT_LPAREN; return;
@@ -364,6 +536,7 @@ static void sadvance(pstate* p) { // scan the next token
         p->tok = RT_SLASH; return;
     }
 
+    case '"': p->tok = RT_STRLIT; return sstring(p);
     case 'R': p->tok = RT_IREG; return sreg(p);
     case 'F': p->tok = RT_FREG; return sreg(p);
     default: // anything else is the start of a name
@@ -382,20 +555,37 @@ static void sadvance(pstate* p) { // scan the next token
 #ifdef LOG_TOKENS
   #define sadvance(p) ({ sadvance(p); logpstate(p); (p)->tok; })
   static void logpstate(pstate* p) {
-    u32 line = p->lineno, col = pcolumn(p);
+    u32 line = p->startpos.line, col = p->startpos.col;
     rtok t = p->tok;
     const char* tname = tokname(t);
     const char* tvalp = p->tokstart;
     int tvalc = (int)toklen(p);
-    if (t == RT_INTLIT2 || t == RT_INTLIT || t == RT_INTLIT16 || t == RT_IREG || t == RT_FREG) {
-      return log("%3u:%-3u %-12s \"%.*s\"\t%llu\t0x%llx",
-        line, col, tname, tvalc, tvalp, p->ival, p->ival);
+    char buf[1024];
+    switch (t) {
+      case RT_INTLIT2:
+      case RT_INTLIT:
+      case RT_INTLIT16:
+      case RT_IREG:
+      case RT_FREG:
+        return log("%3u:%-3u %-12s \"%.*s\"\t%llu\t0x%llx",
+          line, col, tname, tvalc, tvalp, p->ival, p->ival);
+
+      case RT_SINTLIT2:
+      case RT_SINTLIT:
+      case RT_SINTLIT16:
+        return log("%3u:%-3u %-12s \"%.*s\"\t%lld\t0x%llx",
+          line, col, tname, tvalc, tvalp, (i64)p->ival, p->ival);
+
+      case RT_STRLIT: {
+        abuf s = abuf_make(buf, sizeof(buf));
+        abuf_repr(&s, p->sval.p, p->sval.len);
+        abuf_terminate(&s);
+        return log("%3u:%-3u %-12s \"%s\"", line, col, tname, buf);
+      }
+
+      default:
+        log("%3u:%-3u %-12s \"%.*s\"", line, col, tname, tvalc, tvalp);
     }
-    if (t == RT_SINTLIT2 || t == RT_SINTLIT || t == RT_SINTLIT16) { // uses ival
-      return log("%3u:%-3u %-12s \"%.*s\"\t%lld\t0x%llx",
-        line, col, tname, tvalc, tvalp, (i64)p->ival, p->ival);
-    }
-    log("%3u:%-3u %-12s \"%.*s\"", line, col, tname, tvalc, tvalp);
   }
 #endif
 
@@ -489,13 +679,21 @@ void rasm_free_rnode(rasm* a, rnode* n) {
   rmem_free(a->mem, n, sizeof(rnode));
 }
 
+static rnode last_resort_node = {0};
+
 // mk* functions makes new nodes
 static rnode* mknodet(pstate* p, rtok t) {
   rnode* n = rmem_alloc(p->a->mem, sizeof(rnode));
-  memset(n, 0, sizeof(rnode));
+  if UNLIKELY(n == NULL) {
+    errf(p->a, (rposrange){0}, "out of memory");
+    return &last_resort_node;
+  }
   n->t = t;
-  n->pos.line = p->lineno;
-  n->pos.col = pcolumn(p);
+  n->pos = p->startpos;
+  n->next = NULL;
+  n->children.head = NULL;
+  n->children.tail = NULL;
+  n->ival = 0;
   return n;
 }
 
@@ -503,13 +701,21 @@ static rnode* mknode(pstate* p) { return mknodet(p, p->tok); }
 static rnode* mklist(pstate* p) { return mknodet(p, RT_LPAREN); }
 static rnode* mknil(pstate* p)  { return mknodet(p, RT_END); }
 
-static rnode* mktype_for_constexpr(pstate* p, rnode* expr) {
+static rnode* mkarraytype(pstate* p, u64 size, rnode* elemtype) {
+  rnode* n = mknodet(p, RT_ARRAY);
+  n->ival = size;
+  appendchild(n, elemtype);
+  return n;
+}
+
+static rnode* infer_type(pstate* p, rnode* expr, bool useregsize) {
   rtok t = 0;
   switch (expr->t) {
     case RT_INTLIT2:
     case RT_INTLIT:
     case RT_INTLIT16:
-      t = ( expr->ival <= U8_MAX  ? RT_I8 :
+      t = ( useregsize ? RT_I64 :
+            expr->ival <= U8_MAX  ? RT_I8 :
             expr->ival <= U16_MAX ? RT_I16 :
             expr->ival <= U32_MAX ? RT_I32 :
             RT_I64 );
@@ -518,12 +724,19 @@ static rnode* mktype_for_constexpr(pstate* p, rnode* expr) {
     case RT_SINTLIT:
     case RT_SINTLIT16: {
       i64 v = (i64)expr->ival;
-      t = ( (v >= I8_MIN  && v <= I8_MAX)  ? RT_I8 :
+      t = ( useregsize ? RT_I64 :
+            (v >= I8_MIN  && v <= I8_MAX)  ? RT_I8 :
             (v >= I16_MIN && v <= I16_MAX) ? RT_I16 :
             (v >= I32_MIN && v <= I32_MAX) ? RT_I32 :
             RT_I64 );
       break;
     }
+    case RT_STRLIT:
+      return mkarraytype(p, (u64)expr->sval.len, mknodet(p, RT_I8));
+    case RT_END:
+      if (p->a->errcount)
+        break;
+      FALLTHROUGH;
     default:
       perr(p, expr, "cannot infer type of %s", nname(expr));
   }
@@ -532,12 +745,18 @@ static rnode* mktype_for_constexpr(pstate* p, rnode* expr) {
 
 static rnode* pexpr(PPARAMS) {
   rnode* n = pstmt(PARGS);
-  if UNLIKELY(!tokisexpr(n->t))
-    perrunexpected(p, n, "expression", nname(n));
+  if UNLIKELY(!tokisexpr(n->t)) {
+    if (n->t != RT_END || p->a->errcount == 0)
+      perrunexpected(p, n, "expression", nname(n));
+  }
   return n;
 }
 
 static rnode* ptype(PPARAMS) {
+  if UNLIKELY(!tokistype(p->tok)) {
+    perrunexpected(p, NULL, "type", tokname(p->tok));
+    return mknil(p);
+  }
   prec = PREC_MEMBER;
   rnode* n = pstmt(PARGS);
   expecttype(p, n);
@@ -551,39 +770,61 @@ static rnode* prefix_int(PPARAMS) {
   return n;
 }
 
+static rnode* prefix_strlit(PPARAMS) {
+  rnode* n = mknode(p);
+  n->sval.p = p->sval.p;
+  n->sval.len = p->sval.len;
+  sadvance(p);
+  return n;
+}
+
 // storagedef = constdef | datadef
 // constdef   = "const" name type? "=" expr ";"
-// datadef    = "data" name type ("=" expr)? ";"
+// datadef    = "data" name (type ("=" expr)? | "=" expr) ";"
 static rnode* prefix_storage(PPARAMS) {
   rnode* n = mknode(p);
   sadvance(p);
   if UNLIKELY(p->tok != RT_NAME) {
     perrunexpected(p, NULL, "name", tokname(p->tok));
-    n->name.len = 0;
+    n->sval.len = 0;
     return n;
   }
-  n->name.p = p->tokstart;
-  n->name.len = toklen32(p);
+  n->sval.p = p->tokstart;
+  n->sval.len = toklen32(p);
   sadvance(p);
-  if (n->t == RT_CONST) { // constdef
-    rnode* typ = NULL;
-    if (p->tok != RT_EQ)
-      typ = ptype(PARGS);
+
+  rnode* typ = NULL;
+  rnode* init = NULL;
+  if (p->tok != RT_EQ)
+    typ = ptype(PARGS);
+
+  if (n->t == RT_CONST) { // const must have initial value
     eat(p, RT_EQ);
-    rnode* init = pexpr(PARGS);
-    if (typ == NULL) { // infer type
-      typ = mktype_for_constexpr(p, init);
-      typ->pos = (rsrcpos){0};
-    }
-    setchildren2(n, typ, init);
-  } else { // datadef
-    rnode* typ = ptype(PARGS);
-    appendchild(n, typ);
-    if (got(p, RT_EQ)) {
-      rnode* init = pexpr(PARGS);
-      appendchild(n, init);
+    init = pexpr(PARGS);
+  } else { // data must have at least type or initial value
+    assert(n->t == RT_DATA);
+    if (typ) {
+      if (got(p, RT_EQ))
+        init = pexpr(PARGS);
+    } else {
+      eat(p, RT_EQ);
+      init = pexpr(PARGS);
     }
   }
+
+  if (typ == NULL) { // infer type
+    // use register size for integer data, e.g. "data x = 3" => "data x i64 = 3"
+    bool useregsize = n->t == RT_DATA;
+    typ = infer_type(p, assertnotnull(init), useregsize);
+    typ->pos = init->pos;
+    if UNLIKELY(useregsize && init->t != RT_STRLIT) {
+      // TODO: consider making this an error
+      warnf(p->a, (rposrange){.focus=n->pos},
+        "integer data without explicit type defaults to %s", nname(typ));
+    }
+  }
+
+  setchildren2(n, typ, init);
   return n;
 }
 
@@ -617,8 +858,8 @@ static rnode* passign_reg(PPARAMS, rnode* eq) {
 static rnode* pname(PPARAMS) {
   assertf(p->tok == RT_NAME || p->tok == RT_LABEL, "%s", tokname(p->tok));
   rnode* n = mknode(p);
-  n->name.p = p->tokstart;
-  n->name.len = toklen32(p);
+  n->sval.p = p->tokstart;
+  n->sval.len = toklen32(p);
   sadvance(p);
   return n;
 }
@@ -729,8 +970,8 @@ static rnode* pblockbody(PPARAMS, rnode* block) {
 // labelblock = name ":" (operation | assignment)*
 static rnode* prefix_label(PPARAMS) {
   rnode* n = prefix_name(PARGS); // label
-  n->name.len--; // trim off trailing ":"
-  assert(n->name.p[n->name.len] == ':');
+  n->sval.len--; // trim off trailing ":"
+  assert(n->sval.p[n->sval.len] == ':');
   return pblockbody(PARGS, n);
 }
 
@@ -766,8 +1007,8 @@ static rnode* prefix_fun(PPARAMS) {
 
   // name
   expecttok(p, RT_NAME);
-  n->name.p = p->tokstart;
-  n->name.len = toklen32(p);
+  n->sval.p = p->tokstart;
+  n->sval.len = toklen32(p);
   sadvance(p);
 
   // parameters
@@ -801,8 +1042,8 @@ static rnode* prefix_fun(PPARAMS) {
   // implicit first block?
   if (p->tok != RT_LABEL) {
     block0->t = RT_LABEL;
-    block0->name.p = kBlock0Name;
-    block0->name.len = 2;
+    block0->sval.p = kBlock0Name;
+    block0->sval.len = 2;
     pblockbody(PARGS, block0);
     appendchild(body, block0);
   }
@@ -841,6 +1082,7 @@ static const parselet parsetab[rtok_COUNT] = {
   [RT_SINTLIT]   = {prefix_int, NULL, 0},
   [RT_INTLIT16]  = {prefix_int, NULL, 0},
   [RT_SINTLIT16] = {prefix_int, NULL, 0},
+  [RT_STRLIT]    = {prefix_strlit, NULL, 0},
 
   [RT_FUN] = {prefix_fun, NULL, 0},
 };
@@ -853,7 +1095,7 @@ static rnode* pstmt(PPARAMS) {
     if (p->tok == RT_END)
       return mknil(p);
     LOG_PRATT("PREFIX %s not found", tokname(p->tok));
-    perrunexpected(p, NULL, "statement", tokname(p->tok));
+    perr(p, NULL, "unexpected %s", tokname(p->tok));
     rnode* n = mknil(p);
     sfastforward_semi(p);
     return n;
@@ -887,33 +1129,61 @@ static rnode* pstmt(PPARAMS) {
 static usize fmtnode(char* buf, usize bufcap, rnode* n);
 #endif
 
-rnode* rasm_parse(rasm* a) {
+#ifndef alignof
+  #define alignof _Alignof
+#endif
+
+#define PSTATE_BUFSLAB0_OFFS ALIGN2(sizeof(pstate), alignof(bufslab))
+#define PSTATE_ALLOC_SIZE    (PSTATE_BUFSLAB0_OFFS + sizeof(bufslab) + BUFSLAB_MIN_CAP)
+
+void pstate_dispose(pstate* p) {
+  // note: p->bufslabs.head is part of the pstate allocation
+  bufslab_freerest(p->bufslabs.head, p->a->mem);
+  #ifdef DEBUG
+  memset(p, 0, PSTATE_BUFSLAB0_OFFS + sizeof(bufslab));
+  #endif
+  rmem_free(p->a->mem, p, PSTATE_ALLOC_SIZE);
+}
+
+rnode* nullable rasm_parse(rasm* a) {
   rasm_stop_set(a, false);
   a->errcount = 0;
-  pstate p = {
-    .a         = a,
-    .inp       = a->srcdata,
-    .inend     = a->srcdata + a->srclen,
-    .linestart = a->srcdata,
-    .lineno    = 1,
-  };
+
+  pstate* p = rasm_pstate(a);
+  if (!p) {
+    p = rmem_alloc(a->mem, PSTATE_ALLOC_SIZE);
+    if (!p)
+      return NULL;
+    memset(p, 0, sizeof(pstate));
+    rasm_pstate_set(a, p);
+    p->a = a;
+    p->bufslabs.head = (void*)p + PSTATE_BUFSLAB0_OFFS;
+    p->bufslabs.head->next = NULL;
+    p->bufslabs.head->len = 0;
+    p->bufslabs.head->cap = BUFSLAB_MIN_CAP;
+  }
+  p->inp       = a->srcdata;
+  p->inend     = a->srcdata + a->srclen;
+  p->linestart = a->srcdata;
+  p->lineno    = 1;
+  bufslabs_reset(&p->bufslabs);
 
   #ifdef LOG_AST
     char buf[4096*8];
   #endif
 
   dlog("parsing \"%s\"", a->srcname);
-  sadvance(&p); // prime parser with initial token
-  rnode* module = mklist(&p);
+  sadvance(p); // prime parser with initial token
+  rnode* module = mklist(p);
 
-  while (p.tok != RT_END && !rasm_stop(a)) {
-    rnode* n = pstmt(&p, PREC_LOWEST);
-    if LIKELY(p.tok != RT_END) // every statement ends with a semicolon
-      eat(&p, RT_SEMI);
+  while (p->tok != RT_END && !rasm_stop(a)) {
+    rnode* n = pstmt(p, PREC_LOWEST);
+    if LIKELY(p->tok != RT_END) // every statement ends with a semicolon
+      eat(p, RT_SEMI);
     appendchild(module, n);
 
     if UNLIKELY(n->t != RT_FUN && n->t != RT_CONST && n->t != RT_DATA) {
-      perr(&p, n, "unexpected top-level statement");
+      perr(p, n, "unexpected top-level statement");
       #ifdef LOG_AST
         fmtnode(buf, sizeof(buf), n);
         log("%s", buf);
@@ -982,20 +1252,50 @@ rnode* rasm_parse(rasm* a) {
       case RT_LABEL:
       case RT_FUN:
       case RT_CONST:
-        abuf_append(s, n->name.p, n->name.len); break;
+        abuf_append(s, n->sval.p, n->sval.len); break;
 
       case RT_OP:
         abuf_str(s, rop_name((rop)n->ival)); break;
 
       case RT_SINTLIT2:  abuf_c(s, '-'); FALLTHROUGH;
       case RT_INTLIT2:   abuf_str(s, "0b"); abuf_u64(s, n->ival, 2); break;
-      case RT_SINTLIT: abuf_c(s, '-'); FALLTHROUGH;
-      case RT_INTLIT:  abuf_u64(s, n->ival, 10); break;
+      case RT_SINTLIT:   abuf_c(s, '-'); FALLTHROUGH;
+      case RT_INTLIT:    abuf_u64(s, n->ival, 10); break;
       case RT_SINTLIT16: abuf_c(s, '-'); FALLTHROUGH;
       case RT_INTLIT16:  abuf_str(s, "0x"); abuf_u64(s, n->ival, 16); break;
 
-      // only list
+      case RT_STRLIT: {
+        abuf_c(s, '"');
+        abuf_repr(s, n->sval.p, n->sval.len);
+        abuf_c(s, '"');
+        break;
+      }
+      case RT_ARRAY:
+        abuf_u64(s, n->ival, 10); break;
+        break;
+
+      // no extra fields
+      case RT_END: case rtok_COUNT:
+      case RT_LPAREN: case RT_RPAREN:
+      case RT_LBRACE: case RT_RBRACE:
+      case RT_SEMI:
+      case RT_COMMA:
       case RT_EQ:
+
+      case RT_PLUS:
+      case RT_MINUS:
+      case RT_STAR:
+      case RT_SLASH:
+      case RT_PERC:
+      case RT_AMP:
+      case RT_PIPE:
+      case RT_HAT:
+      case RT_LT2:
+      case RT_GT2:
+      case RT_GT3:
+      case RT_LT:
+      case RT_GT:
+
       case RT_I1:
       case RT_I8:
       case RT_I16:
@@ -1004,10 +1304,10 @@ rnode* rasm_parse(rasm* a) {
         s->p = sp; s->len--; // undo abuf_c(s, ' ')
         break;
 
-      default:
-        abuf_str(s, "[TODO fmtnode1]");
-        break;
+       break;
     }
+    if (s->p == sp+1)
+      dlog("TODO fmtnode1 %s", tokname(n->t));
     for (rnode* cn = n->children.head; cn; cn = cn->next) {
       abuf_c(s, ' ');
       fmtnode1(s, cn, indent, fl);

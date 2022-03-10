@@ -837,7 +837,7 @@ rposrange nposrange(rnode* n) {
       break;
     case RT_CONST:
       pr.end.line = pr.focus.line;
-      pr.end.col = pr.focus.col + 5 + 1 + n->name.len; // assume single space sep
+      pr.end.col = pr.focus.col + 5 + 1 + n->sval.len; // assume single space sep
       if (n->children.head) {
         rsrcpos endpos = nposrange(n->children.head).end;
         if (endpos.line) // note: inferred type has no srcpos
@@ -868,9 +868,9 @@ rposrange nposrange(rnode* n) {
         case RT_I64: pr.end.col += strlen("i64"); break;
       }
       break;
-    default: if (tokhasname(n->t)) {
+    default: if (tokhasname(n->t) || n->t == RT_STRLIT) {
       pr.end.line = pr.focus.line;
-      pr.end.col = pr.focus.col + n->name.len;
+      pr.end.col = pr.focus.col + n->sval.len;
     }
   }
   return pr;
@@ -998,12 +998,111 @@ void warnf(rasm* a, rposrange pr, const char* fmt, ...) {
   va_end(ap);
 }
 
+void gstate_dispose(gstate* g);
+void pstate_dispose(pstate* p);
+
+void rasm_dispose(rasm* a) {
+  gstate* g = rasm_gstate(a);
+  if (g) gstate_dispose(g);
+
+  pstate* p = rasm_pstate(a);
+  if (p) pstate_dispose(p);
+
+  #ifdef DEBUG
+  memset(a, 0, sizeof(rasm));
+  #endif
+}
+
 rerror rsm_loadfile(const char* filename, void** p, usize* size) {
   return mmapfile(filename, p, size);
 }
 
 void rsm_unloadfile(void* p, usize size) {
   unmapfile(p, size);
+}
+
+// ————————————————————————————————————————
+// bufslab
+
+static void bufslab_remove(bufslab* s) {
+  assert(s->prev != s);
+  assert(s->next != s);
+  assert(s->prev != s->next);
+  if (s->prev) s->prev->next = s->next;
+  if (s->next) s->next->prev = s->prev;
+  #if DEBUG
+  s->prev = NULL;
+  s->next = NULL;
+  #endif
+}
+
+static bufslab* bufslab_insertafter(bufslab* s, bufslab* prev) {
+  assert(prev != s);
+  assert(s->next != prev);
+  s->prev = prev;
+  s->next = prev->next;
+  prev->next = s;
+  return s;
+}
+
+static bufslab* bufslab_insertbefore(bufslab* s, bufslab* next) {
+  assert(next != s);
+  assert(s->prev != next);
+  s->next = next;
+  s->prev = next->prev;
+  next->prev = s;
+  return s;
+}
+
+static void* nullable bufslab_alloc_more(bufslabs* slabs, rmem mem, u32 len) {
+  // try to find a free slab of adequate size:
+  bufslab* free = slabs->tail->next;
+  for (; free; free = free->next) {
+    if (free->cap < len)
+      continue;
+    bufslab_remove(free);
+    if (len >= (BUFSLAB_MIN_CAP/4)*3) {
+      // immediately retire the slab when the allocation is 3/4ths of a slab's capacity
+      slabs->head = bufslab_insertbefore(free, slabs->head);
+      free->len = len;
+      return free->data;
+    }
+    goto finalize;
+  }
+  // no free space found -- allocate new slab
+  u32 cap = MAX(BUFSLAB_MIN_CAP, ALIGN2(len, 16));
+  free = rmem_alloc(mem, sizeof(bufslab) + cap);
+  if UNLIKELY(free == NULL)
+    return NULL;
+  free->cap = cap;
+finalize:
+  // retire slabs->tail and make the free slab the new "partial" slabs->tail
+  slabs->tail = bufslab_insertafter(free, slabs->tail);
+  free->len = len;
+  return free->data;
+}
+
+void* nullable bufslab_alloc(bufslabs* slabs, rmem mem, usize nbyte) {
+  if UNLIKELY(slabs->tail->cap - slabs->tail->len < nbyte)
+    return bufslab_alloc_more(slabs, mem, nbyte);
+  void* ptr = slabs->tail->data + slabs->tail->len;
+  slabs->tail->len += nbyte;
+  return ptr;
+}
+
+void bufslabs_reset(bufslabs* slabs) {
+  for (bufslab* s = slabs->head; s; s = s->next)
+    s->len = 0;
+  slabs->tail = slabs->head;
+}
+
+void bufslab_freerest(bufslab* s, rmem mem) {
+  s = s->next;
+  while (s) {
+    bufslab* tmp = s->next;
+    rmem_free(mem, s, sizeof(bufslab) + s->cap);
+    s = tmp;
+  }
 }
 
 #endif // RSM_NO_ASM

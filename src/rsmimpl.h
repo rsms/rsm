@@ -298,6 +298,12 @@ typedef __builtin_va_list va_list;
   #define va_copy  __builtin_va_copy
 #endif
 
+// u32 CAST_U32(anyint z) => [0-U32_MAX]
+#define CAST_U32(z) ({ \
+  __typeof__(z) z__ = (z); \
+  sizeof(u32) < sizeof(z__) ? (u32)MIN((__typeof__(z__))U32_MAX,z__) : (u32)z__; \
+})
+
 // ======================================================================================
 // panic & assert
 
@@ -752,6 +758,9 @@ usize fmtduration(char buf[25], u64 duration_ns);
 #ifndef RSM_NO_ASM
 #define kBlock0Name "b0" // name of first block
 
+typedef struct gstate gstate;
+typedef struct pstate pstate;
+
 typedef struct rposrange rposrange;
 struct rposrange { rsrcpos start, focus, end; };
 
@@ -763,6 +772,10 @@ struct rposrange { rsrcpos start, focus, end; };
 #define rasm_gstate(a)        ( (gstate*)(a)->_internal[1] )
 #define rasm_gstate_set(a,v)  ( *(gstate**)&(a)->_internal[1] = (v) )
 
+// rasm._internal[2]-- reusable internal codegen state
+#define rasm_pstate(a)        ( (pstate*)(a)->_internal[2] )
+#define rasm_pstate_set(a,v)  ( *(pstate**)&(a)->_internal[2] = (v) )
+
 const char* tokname(rtok t);
 
 // tokis* returns true if t is classified as such in the language
@@ -771,13 +784,13 @@ const char* tokname(rtok t);
 #define tokislit(t)     tokisintlit(t)
 #define tokissint(t)    (((t) - RT_SINTLIT16) % 2 == 0) // assumption: tokisintlit(t)
 #define tokisoperand(t) ( (t) == RT_IREG || (t) == RT_FREG || tokislit(t) || (t) == RT_NAME )
-#define tokisexpr(t)    tokisoperand(t)
+#define tokisexpr(t)    (tokisoperand(t) || (t) == RT_STRLIT)
 #define tokhasname(t) ( (t) == RT_NAME || (t) == RT_COMMENT || \
                         (t) == RT_LABEL || (t) == RT_FUN || \
                         (t) == RT_CONST || (t) == RT_DATA )
 
 inline static bool nodename_eq(const rnode* n, const char* str, usize len) {
-  return n->name.len == len && memcmp(n->name.p, str, len) == 0;
+  return n->sval.len == len && memcmp(n->sval.p, str, len) == 0;
 }
 
 rnode* nullable nlastchild(rnode* n);
@@ -799,6 +812,40 @@ struct rrombuild {
 };
 
 rerror rom_build(rrombuild* rb, rmem mem, rrom* rom);
+
+// ————————————————
+// bufslab
+
+#define BUFSLAB_MIN_CAP 512
+#define BUFSLAB_ALIGN   16
+static_assert(BUFSLAB_MIN_CAP >= BUFSLAB_ALIGN, "");
+static_assert(IS_ALIGN2(BUFSLAB_MIN_CAP, BUFSLAB_ALIGN), "");
+
+typedef struct bufslabs bufslabs;
+typedef struct bufslab  bufslab;
+
+// The chain of slabs looks like this: ("free" slabs only when recycled)
+//
+//    full ←—→ full ←—→ partial ←—→ free ←—→ free ←—→ free
+//     |                   |
+//    head                tail
+//
+struct bufslabs {
+  bufslab* head;
+  bufslab* tail;
+};
+struct bufslab {
+  bufslab* nullable prev;
+  bufslab* nullable next;
+  usize len;
+  usize cap;
+  u8    data[];
+};
+
+void* nullable bufslab_alloc(bufslabs* slabs, rmem mem, usize nbyte);
+void bufslabs_reset(bufslabs* slabs); // set all slab->len=0 and set slabs->head=tail
+void bufslab_freerest(bufslab* s, rmem mem); // free all slabs after s
+
 
 #endif // RSM_NO_ASM
 // --------------------------------------------------------------------------------------

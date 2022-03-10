@@ -201,6 +201,11 @@ static bool compile(
   };
 
   rnode* mod = rasm_parse(&a);
+  if UNLIKELY(mod == NULL) {
+    errmsg("failed to allocate memory for parser");
+    return false;
+  }
+
   if (a.errcount) // note: errors have been reported by diaghandler
     return false;
 

@@ -155,9 +155,8 @@ _( GTS   , ABCs , reg , "gts"  /* RA = RB >  Cs */)\
 _( GTEU  , ABCu , reg , "gteu" /* RA = RB >= Cu */)\
 _( GTES  , ABCs , reg , "gtes" /* RA = RB >= Cs */)\
 \
-_( BR    , ABs  , nil , "br"    /* if RA!=0 PC += Bs         */)\
-_( BRZ   , ABs  , nil , "brz"   /* if RA==0 PC += Bs         */)\
-_( BRLT  , ABCs , nil , "brlt"  /* if RA<RB PC += Cs         */)\
+_( IF    , ABs  , nil , "if"    /* if RA!=0 PC += Bs         */)\
+_( IFZ   , ABs  , nil , "ifz"   /* if RA==0 PC += Bs         */)\
 _( CALL  , Au   , nil , "call"  /* R0...R7 = push(PC); PC=Au */)\
 _( JUMP  , Au   , nil , "jump"  /* PC = Au                   */)\
 _( RET   , _    , nil , "ret"   /* PC = pop()                */)\
@@ -165,12 +164,14 @@ _( RET   , _    , nil , "ret"   /* PC = pop()                */)\
 _( SCALL , Au    , nil , "scall" /* R0...R7 = system_call(Au) */)\
 _( WRITE , ABCDu , reg , "write" /* RA = write addr=RB size=RC fd=Du */)\
 _( DEVOPEN , ABu , reg , "devopen" /* RA = devaddr = device(Bu) */)\
+_( MCOPY , ABCu  , mem , "mcopy" /* mem[RA:Cu] = mem[RB:Cu] */)\
+_( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 \
 // end RSM_FOREACH_OP
 
 // opcode test macros. Update when adding affected opcodes
-#define RSM_OP_IS_BR(op)  (rop_BR <= (op) && (op) <= rop_BRLT)
-#define RSM_OP_ACCEPTS_PC_ARG(op)  (rop_BR <= (op) && (op) <= rop_JUMP)
+#define RSM_OP_IS_BR(op)  (rop_IF <= (op) && (op) <= rop_IFZ)
+#define RSM_OP_ACCEPTS_PC_ARG(op)  (rop_IF <= (op) && (op) <= rop_JUMP)
 
 // size and position of instruction arguments
 #define RSM_SIZE_OP  8

@@ -417,9 +417,8 @@ static void vmexec(VMPARAMS) {
     #define do_GTS(C)  RA = (i64)RB >  (i64)C
     #define do_GTES(C) RA = (i64)RB >= (i64)C
 
-    #define do_BR(B)    if (RA)      pc = (isize)((i64)pc + (i64)B)
-    #define do_BRZ(B)   if (RA == 0) pc = (isize)((i64)pc + (i64)B)
-    #define do_BRLT(C)  if (RA < RB) pc = (isize)((i64)pc + (i64)C)
+    #define do_IF(B)   if (RA)      pc = (isize)((i64)pc + (i64)B)
+    #define do_IFZ(B)  if (RA == 0) pc = (isize)((i64)pc + (i64)B)
 
     #define do_JUMP(A)  pc = (usize)A
     #define do_SCALL(A) scall(VMARGS, A, in)

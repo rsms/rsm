@@ -62,11 +62,14 @@ static void* nullable ba_alloc(void* state, void* nullable p, usize oldsize, usi
   // new -- ba_alloc(s,NULL,0,>0)
   assert(oldsize == 0);
   assert(newsize > 0);
+
+  uintptr addr = (uintptr)(a->buf + a->len);
+  uintptr aligned_addr = ALIGN2(addr, (uintptr)sizeof(void*));
+  newsize += (usize)(aligned_addr - addr);
   if UNLIKELY(ba_avail(a) < newsize)
     return NULL; // out of memory
-  void* p2 = a->buf + a->len;
   a->len += newsize;
-  return p2;
+  return (void*)addr;
 }
 
 static rmem ba_make(void* ap, void* buf, usize size, bool ismmap) {

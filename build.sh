@@ -6,15 +6,17 @@ _err() { echo -e "$0:" "$@" >&2 ; exit 1; }
 OUTDIR=out
 BUILD_MODE=safe  # debug | safe | fast
 WATCH=
+WATCH_ADDL_FILES=()
 _WATCHED=
 RUN=
 NINJA_ARGS=()
 TESTING_ENABLED=
 
 while [[ $# -gt 0 ]]; do case "$1" in
+  -v)      NINJA_ARGS+=(-v); shift ;;
   -w)      WATCH=1; shift ;;
   -_w_)    _WATCHED=1; shift ;;
-  -v)      NINJA_ARGS+=(-v); shift ;;
+  -wf=*)   WATCH=1; WATCH_ADDL_FILES+=( "${1:4}" ); shift ;;
   -run=*)  RUN=${1:5}; shift ;;
   -debug)  BUILD_MODE=debug; TESTING_ENABLED=1; shift ;;
   -safe)   BUILD_MODE=safe; TESTING_ENABLED=; shift ;;
@@ -26,6 +28,7 @@ options:
   -fast      Build optimized product without any assertions
   -debug     Build debug product
   -w         Rebuild as sources change
+  -wf=<file> Watch <file> for changes (can be provided multiple times)
   -run=<cmd> Run <cmd> after successful build
   -help      Show help on stdout and exit
 _END
@@ -80,9 +83,9 @@ if [ -n "$WATCH" ]; then
       ) &
     fi
     fswatch --one-event --extended --latency=0.1 \
-            --exclude='.*' --include='\.(c|cc|cpp|m|mm|h|hh|sh|py)$' \
+            --exclude='\.(a|o)$' \
             --recursive \
-            src $(basename "$0")
+            src "$(basename "$0")" "${WATCH_ADDL_FILES[@]}"
   done
   exit 0
 fi

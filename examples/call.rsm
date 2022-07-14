@@ -5,10 +5,12 @@ fun main() {
   call foo
   R0 = R3  // restore R0 (just for testing)
 }
+
 fun bar(x i32, y i32) i32 {
   R0 = R0 * R1
 }
+
 fun foo(x i32, y i32) i32 {
   R0 = R0 * R1
-  jump bar  // tail call
+  jump bar  // tail call (never returns)
 }

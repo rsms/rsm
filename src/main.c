@@ -240,7 +240,8 @@ int main(int argc, char*const* argv) {
   const char* infile = NULL;
   if (argi < argc) { // <srcfile> [R0 [R1 ...]]
     infile = strcmp(argv[argi],"-")==0 ? NULL : argv[argi];
-    if (argi < argc-1) errmsg("ignoring %d extra command-line arguments", argc-1 - argi);
+    if (argi < argc-1)
+      errmsg("ignoring %d extra command-line arguments", argc-1 - argi);
   }
 
   // memory allocator for compiler and for buffering stdin

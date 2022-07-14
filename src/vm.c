@@ -232,6 +232,7 @@ struct rvm_dev_t {
   rerror(*close)(rvm_dev_t*, void* m, usize msize);
   rerror(*refresh)(rvm_dev_t*, void* m, usize msize, u32 flags);
 };
+
 static void* testdev_mem[32/sizeof(void*)];
 static rerror tesdev_open(rvm_dev_t* dev, void** mp, usize* msizep, u32 flags) {
   *mp = testdev_mem;
@@ -255,6 +256,7 @@ static rvm_dev_t testdev = {
   .close   = &tesdev_close,
   .refresh = &testdev_refresh,
 };
+
 static u64 dev_open(VMPARAMS, u64 devid) {
   dlog("dev_open #%llu", devid);
   if (devid < 1 || devid > M_SEG_COUNT-1)
@@ -273,6 +275,7 @@ static u64 dev_open(VMPARAMS, u64 devid) {
 //————————————————————————————————————————————————————————————————————————————————————————
 
 static void scall(VMPARAMS, u8 ar, rinstr in) {
+  dlog("scall not implemented");
 }
 
 inline static void push(VMPARAMS, u64 size, u64 val) {
@@ -433,8 +436,8 @@ static void vmexec(VMPARAMS) {
     #define do_IFZ(B)  if (RA == 0) pc = (isize)((i64)pc + (i64)B)
 
     #define do_JUMP(A)  pc = (usize)A
-    #define do_SCALL(A) scall(VMARGS, A, in)
     #define do_CALL(A)  push(VMARGS, 8, (u64)PC); pc = (usize)A
+    #define do_SCALL(A) scall(VMARGS, A, in)
 
     #define do_WRITE(D)   RA = _write(VMARGS, D, RB, RC) // addr=RB size=RC fd=D
     #define do_DEVOPEN(B) RA = dev_open(VMARGS, B)

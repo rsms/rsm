@@ -1,51 +1,47 @@
 // This program asks for your name on stdin and then greets you
-
 const STDIN = 0
 const STDOUT = 1
 const STKSIZE = 64 // stack space (must be a multiple of 8)
 
-data ask_msg = "What is your name?\n"
+data ask_msg     = "What is your name?\n"
+data readerr_msg = "Failed to read stdin\n"
 data no_name_msg = "I see, you don't want to tell me.\n"
-data reply_msg1 = "Hello "
-data reply_msg2 = "! Nice to meet ya\n"
-
+data reply_msg1  = "Hello "
+data reply_msg2  = "! Nice to meet ya\n"
 
 fun main(i32) {
-  // since we'll use the stack, save SP in R30 and
-  // reserve some stack space (must retain 8B stack alignment)
-  SP = sub SP STKSIZE // push N bytes on stack
+  // reserve STKSIZE bytes of stack space
+  SP = sub SP STKSIZE
 
-  // ask about the user's name
-  // R0 = ask_msg // address
-  // R1 = 19  // size
+  // ask the user for their name
   call print ask_msg 19
   if R0 end
 
-  // read up to STKSIZE bytes from STDIN into stack memory at SP
+  // read up to STKSIZE bytes from STDIN, to stack memory at SP
   R0 = STKSIZE // number of bytes to read
   R8 = read SP R0 STDIN
-  R0 = R8 < 0 // check if read failed
-  if R0 end
-  R0 = R8 <= 1 // check if read was empty (count "\n" as empty)
+  R0 = lts R8 0 // check if read failed ()
+  if R0 readerr
+  R8 = R8 - 1   // exclude any line break
+  R0 = lts R8 1 // check if read was empty
   if R0 noname
 
   // reply with the user's name
   call print reply_msg1 6
-  R1 = sub R8 1 // arg2 = length of name -1 for terminating line break
-  call print SP // arg1 = address of read() name
+  call print SP R8 // SP = address of name read
   call print reply_msg2 18
-
   jump end
 
 noname:
   call print no_name_msg 34
-
+  jump end
+readerr:
+  call print readerr_msg 21
 end:
   SP = add SP STKSIZE // restore stack pointer
 }
 
-
 fun print(addr i64, size i64) ok i1 {
   R0 = write R0 R1 STDOUT
-  R0 = R0 < R1  // R0=1 if write failed (or was short), 0 on success
+  R0 = lts R0 R1  // return 1 on failed or short write
 }

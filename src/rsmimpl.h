@@ -534,16 +534,18 @@ void* nullable vmem_alloc(usize nbytes);
 bool vmem_free(void* ptr, usize nbytes);
 
 #ifdef __wasm__
+  #define REG_FMTCOLORC(regno)  '1'
   #define REG_FMTNAME_PAT       "R%u"
   #define REG_FMTNAME(regno)    (regno)
   #define REG_FMTVAL_PAT(fmt)   fmt
   #define REG_FMTVAL(regno,val) (val)
 #else
   // ANSI colors: (\e[3Nm or \e[9Nm) 1 red, 2 green, 3 yellow, 4 blue, 5 magenta, 6 cyan
+  #define REG_FMTCOLORC(regno)  ('1'+((regno)%6))
   #define REG_FMTNAME_PAT       "\e[9%cmR%u\e[39m"
-  #define REG_FMTNAME(regno)    '1'+((regno)%6), (regno)
+  #define REG_FMTNAME(regno)    REG_FMTCOLORC(regno), (regno)
   #define REG_FMTVAL_PAT(fmt)   "\e[9%cm" fmt "\e[39m"
-  #define REG_FMTVAL(regno,val) '1'+((regno)%6), (val)
+  #define REG_FMTVAL(regno,val) REG_FMTCOLORC(regno), (val)
 #endif
 
 // rarray is a dynamic typed array

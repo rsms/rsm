@@ -2,8 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
 
-#define _fr_c(v)  abuf_fmt(s, "\t" REG_FMTNAME_PAT, REG_FMTNAME(v))
-#define _fr_nc(v) abuf_fmt(s, "\t" "R%u", v)
+#define _fr_c(v) ({ \
+  u32 r__ = (v); \
+  r__ == RSM_MAX_REG ? abuf_fmt(s, "\t" "\e[9%cm" "SP" "\e[39m", REG_FMTCOLORC(r__)) : \
+  abuf_fmt(s, "\t" REG_FMTNAME_PAT, REG_FMTNAME(r__)); \
+})
+#define _fr_nc(v) abuf_fmt(s, "\tR%u", v)
 #define _fu(v)    abuf_fmt(s, "\t0x%x", v)
 #define _fs(v)    abuf_fmt(s, "\t%d", (i32)v)
 

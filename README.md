@@ -100,18 +100,51 @@ Most instructions accept reg or immediate (`i` bit is set) as last argument
 ```
 
 Registers:
-- 30 general-purpose integer registers (R0 ... R29)
-- Context register (CTX aka R30)
-- Stack pointer (SP aka R31)
-- 31 floating-point registers (F0 ... F30)
-- Floating-point status (FPSR aka F31)
-- _TODO: Callee/caller saves what? Maybe just use AAPCS64?_
+- 30 general-purpose integer registers R0…R29
+- 30 general-purpose floating-point registers F0…F29
+- Context register CTX (R30)
+- Stack pointer SP (R31)
+- Floating-point status FPSR (F31)
 - _TODO: is a fp control reg needed for stuff like 0div traps? No... no._
 
-Calling convention:
-- first 8 int inputs/outputs in R0 ... R7, rest on stack
-- first 8 fp  inputs/outputs in F0 ... F7, rest on stack
-- anything larger than register size goes on stack
+
+### Calling convention
+
+- first 8 integer argument/return values in R0…R7, rest on stack
+- first 8 F.P. argument/return values in F0…F7, rest on stack
+- anything larger than the register size goes on stack
+- caller saves R0…R18, F0…F18 (owned by callee)
+- callee saves R19…R29, F19…F29 (owned by caller)
+- convention inspired by [AAPCS64](https://github.com/ARM-software/abi-aa)
+
+#### Callee-owned registers
+
+Callee-owned (caller-saved, temporary) registers.
+Caller needs to save these before a call (if caller uses them.)
+Callee can freely use these registers.
+
+    R0…R7   1st…8th integer argument/return value
+    F0…F7   1st…8th floating-point argument/return value
+    R8…R18  General purpose
+    F8…F18  General purpose
+
+#### Caller-owned registers
+
+Caller-owned (callee-saved, long-lived) registers.
+Caller does not need to save these registers.
+Callee using these must save and later restore their values before returning.
+
+    R19…R29   General purpose
+    F19…F29   General purpose
+    SP (R31)  Stack pointer
+
+
+### Special registers
+
+    CTX  (R30)  Context (like AAPCS platform reg and Go's G)
+    SP   (R31)  Stack pointer
+    -    (F30)  Reserved (unused)
+    FPSR (F31)  Floating-point status
 
 
 ## Assembly language

@@ -162,7 +162,8 @@ _( JUMP  , Au   , nil , "jump"  /* PC = Au                   */)\
 _( RET   , _    , nil , "ret"   /* PC = pop()                */)\
 \
 _( SCALL , Au    , nil , "scall" /* R0...R7 = system_call(Au) */)\
-_( WRITE , ABCDu , reg , "write" /* RA = write addr=RB size=RC fd=Du */)\
+_( WRITE , ABCDu , reg , "write" /* RA = write dstaddr=RB size=RC fd=Du */)\
+_( READ  , ABCDu , reg , "read"  /* RA = read  srcaddr=RB size=RC fd=Du */)\
 _( DEVOPEN , ABu , reg , "devopen" /* RA = devaddr = device(Bu) */)\
 _( MCOPY , ABCu  , mem , "mcopy" /* mem[RA:Cu] = mem[RB:Cu] */)\
 _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
@@ -205,7 +206,8 @@ _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 #define RSM_MIN_Ds   (-RSM_MAX_Ds - 1) /*                          -128     -0x80 */
 
 #define RSM_NREGS    32
-#define RSM_MAX_REG  (RSM_NREGS - 1)
+#define RSM_MAX_REG  (RSM_NREGS - 1) /* == SP */
+#define RSM_NARGREGS 8 /* number of regs to use for arguments (R0...R{RSM_NARGREGS}-1) */
 
 // u32 RSM_GET_ARGN(rinstr, uint pos, uint size)
 // rinstr RSM_SET_ARGN(rinstr, uint pos, uint size, uint val)
@@ -414,7 +416,7 @@ _( RT_LPAREN ) _( RT_RPAREN ) \
 _( RT_LBRACE ) _( RT_RBRACE ) \
 _( RT_SEMI   ) /* ; */ \
 _( RT_COMMA  ) /* , */ \
-_( RT_EQ     ) /* = */ \
+_( RT_ASSIGN ) /* = */ \
 /* names              */ \
 _( RT_IREG   ) /* Rn   */ \
 _( RT_FREG   ) /* Fn   */ \
@@ -442,8 +444,12 @@ _( RT_HAT   , XOR  , XOR  ) /* ^ */ \
 _( RT_LT2   , SHL  , SHL  ) /* << */ \
 _( RT_GT2   , SHRU , SHRS ) /* >> */ \
 _( RT_GT3   , SHRU , SHRU ) /* >>> */ \
+_( RT_EQ    , EQ   , EQ  )  /* == */ \
+_( RT_NEQ   , NEQ  , NEQ  ) /* != */ \
 _( RT_LT    , LTU  , LTS  ) /* < */ \
 _( RT_GT    , GTU  , GTS  ) /* > */ \
+_( RT_LTE   , LTEU , LTES ) /* <= */ \
+_( RT_GTE   , GTEU , GTES ) /* >= */ \
 // end RSM_FOREACH_BINOP_TOKEN
 #define RSM_FOREACH_KEYWORD_TOKEN(_) \
 _( RT_I1   , "i1"   ) \

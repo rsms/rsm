@@ -209,6 +209,11 @@ static void sname(pstate* p) {
 
 static void sname_or_kw(pstate* p) { // "foo"
   sname(p);
+  if (toklen(p) == 2 && p->tokstart[0] == 'S' && p->tokstart[1] == 'P') {
+    p->tok = RT_IREG;
+    p->ival = RSM_MAX_REG;
+    return;
+  }
   uintptr* vp = smap_lookup(&kwmap, p->tokstart, toklen(p)); // look up keyword
   if (!vp)
     return;
@@ -436,8 +441,9 @@ static void snumber(pstate* p, int base) {
 static void sreg(pstate* p) {
   assert(p->isneg == false); // or snumber1 will return a garbage token
   rerror err = snumber1(p, 10);
-  if UNLIKELY(err || p->ival > RSM_MAX_REG)
+  if UNLIKELY(err || p->ival > RSM_MAX_REG) {
     return serr(p, "invalid register");
+  }
 }
 
 static void sadvance(pstate* p) { // scan the next token
@@ -478,12 +484,23 @@ static void sadvance(pstate* p) { // scan the next token
   p->startpos.line = p->lineno;
   p->startpos.col = (u32)(uintptr)(p->tokstart - p->linestart) + 1;
 
+
+  // _( EQ    , ABCu , reg , "eq"    RA = RB == Cu )
+  // _( NEQ   , ABCu , reg , "neq"   RA = RB != Cu )
+  // _( LTU   , ABCu , reg , "ltu"   RA = RB <  Cu )
+  // _( LTS   , ABCs , reg , "lts"   RA = RB <  Cs )
+  // _( LTEU  , ABCu , reg , "lteu"  RA = RB <= Cu )
+  // _( LTES  , ABCs , reg , "ltes"  RA = RB <= Cs )
+  // _( GTU   , ABCu , reg , "gtu"   RA = RB >  Cu )
+  // _( GTS   , ABCs , reg , "gts"   RA = RB >  Cs )
+  // _( GTEU  , ABCu , reg , "gteu"  RA = RB >= Cu )
+  // _( GTES  , ABCs , reg , "gtes"  RA = RB >= Cs )
+
   switch (c) {
     case '(': p->tok = RT_LPAREN; return;
     case ')': p->insertsemi = true; p->tok = RT_RPAREN; return;
     case '{': p->tok = RT_LBRACE; return;
     case '}': p->insertsemi = true; p->tok = RT_RBRACE; return;
-    case '=': p->tok = RT_EQ; return;
     case ';': p->tok = RT_SEMI; return;
     case ',': p->tok = RT_COMMA; return;
     case '+': p->tok = RT_PLUS; return;
@@ -492,14 +509,25 @@ static void sadvance(pstate* p) { // scan the next token
     case '&': p->tok = RT_AMP; return;
     case '|': p->tok = RT_PIPE; return;
     case '^': p->tok = RT_HAT; return;
+    case '!':
+      if (*p->inp == '=') { p->inp++; p->tok = RT_NEQ; return; } // !=
+      return serr(p, "unexpected token \"!\"");
+    case '=':
+      if (*p->inp == '=') { p->inp++; p->tok = RT_EQ; return; } // ==
+      p->tok = RT_ASSIGN; return; // =
     case '<':
-      if (*p->inp != '<') { p->tok = RT_LT; return; }
-      p->inp++;             p->tok = RT_LT2; return;
-    case '>':
-      if (*p->inp != '>') { p->tok = RT_GT; return; }
-      p->inp++;
-      if (*p->inp != '>') { p->tok = RT_GT2; return; }
-      p->inp++;             p->tok = RT_GT3; return;
+      if (*p->inp == '=') { p->inp++; p->tok = RT_LTE; return; } // <=
+      if (*p->inp == '<') { p->inp++; p->tok = RT_LT2; return; } // <<
+                                      p->tok = RT_LT; return; // <
+    case '>': switch (*p->inp) {
+      case '>':
+        p->inp++;
+        if (*p->inp != '>') { p->tok = RT_GT2; return; } // >>
+        p->inp++; p->tok = RT_GT3; return; // >>>
+      case '=':
+        p->inp++; p->tok = RT_GTE; return; // >=
+      }
+      p->tok = RT_GT; return; // >
 
     // number or "-"
     case '-': // "-" | "-" numlit
@@ -795,19 +823,19 @@ static rnode* prefix_storage(PPARAMS) {
 
   rnode* typ = NULL;
   rnode* init = NULL;
-  if (p->tok != RT_EQ)
+  if (p->tok != RT_ASSIGN)
     typ = ptype(PARGS);
 
   if (n->t == RT_CONST) { // const must have initial value
-    eat(p, RT_EQ);
+    eat(p, RT_ASSIGN);
     init = pexpr(PARGS);
   } else { // data must have at least type or initial value
     assert(n->t == RT_DATA);
     if (typ) {
-      if (got(p, RT_EQ))
+      if (got(p, RT_ASSIGN))
         init = pexpr(PARGS);
     } else {
-      eat(p, RT_EQ);
+      eat(p, RT_ASSIGN);
       init = pexpr(PARGS);
     }
   }
@@ -910,9 +938,26 @@ static rnode* poperands(PPARAMS, rnode* n) {
   return n;
 }
 
+// static rnode* pcall(PPARAMS, rnode* n) {
+//   dlog("CALL");
+//   // call destination is the only operand
+//   rnode* operand = poperand(PARGS);
+//   appendchild(n, operand);
+
+//   // [sugar] remaining operands prepended as args R0...
+//   while (p->tok != RT_SEMI && p->tok != RT_END) {
+//     rnode* arg = poperand(PARGS);
+//     appendchild(n, operand);
+//   }
+
+//   if (n->children.head) for (rnode* arg = )
+// }
+
 // operation = op operand*
 static rnode* prefix_op(PPARAMS) {
   rnode* n = prefix_int(PARGS);
+  // if (n->ival == rop_CALL)
+  //   return pcall(PARGS, n);
   return poperands(PARGS, n);
 }
 
@@ -945,7 +990,7 @@ static rnode* pblockbody(PPARAMS, rnode* block) {
         return block;
       // // will-parse tokens
       // case RT_OP:
-      // case RT_EQ:
+      // case RT_ASSIGN:
       // case RT_IREG:
       // case RT_FREG:
       //   break;
@@ -1005,8 +1050,9 @@ static rnode* prefix_fun(PPARAMS) {
   rnode* n = mknode(p);
   sadvance(p); // consume token
 
-  // name
-  expecttok(p, RT_NAME);
+  // name (can be an op, e.g. "read")
+  if (p->tok != RT_NAME && p->tok != RT_OP)
+    perrunexpected(p, NULL, "name", tokname(p->tok));
   n->sval.p = p->tokstart;
   n->sval.len = toklen32(p);
   sadvance(p);
@@ -1070,7 +1116,7 @@ static const parselet parsetab[rtok_COUNT] = {
   [RT_I16]   = {prefix_type, NULL, 0},
   [RT_I32]   = {prefix_type, NULL, 0},
   [RT_I64]   = {prefix_type, NULL, 0},
-  [RT_EQ]    = {NULL, infix_eq, PREC_ASSIGN},
+  [RT_ASSIGN]    = {NULL, infix_eq, PREC_ASSIGN},
 
   #define _(tok, ...) [tok] = {NULL, infix_binop, PREC_BINOP},
   RSM_FOREACH_BINOP_TOKEN(_)
@@ -1280,7 +1326,7 @@ rnode* nullable rasm_parse(rasm* a) {
       case RT_LBRACE: case RT_RBRACE:
       case RT_SEMI:
       case RT_COMMA:
-      case RT_EQ:
+      case RT_ASSIGN:
 
       case RT_PLUS:
       case RT_MINUS:
@@ -1362,16 +1408,19 @@ rerror parse_init() {
     return rerr_nomem;
   m->hash0 = 0x89f025ba;
   uintptr* vp;
-  #define _(token, kw) \
-    vp = assertnotnull(smap_assign(m, kw, strlen(kw))); \
-    *vp = token;
-  RSM_FOREACH_KEYWORD_TOKEN(_)
-  #undef _
+
   #define _(op, enc, res, kw, ...) \
     vp = assertnotnull(smap_assign(m, kw, strlen(kw))); \
     *vp = (RT_OP | ((uintptr)rop_##op << (sizeof(rtok)*8)));
   RSM_FOREACH_OP(_)
   #undef _
+
+  #define _(token, kw) \
+    vp = assertnotnull(smap_assign(m, kw, strlen(kw))); \
+    *vp = token;
+  RSM_FOREACH_KEYWORD_TOKEN(_)
+  #undef _
+
   #ifdef DEBUG
     // dlog("kwmap hash0 0x%lx", m->hash0);
     void* p = rmem_alloc(mem,1);

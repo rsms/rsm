@@ -599,7 +599,7 @@ static bool getiargs(
   for (; argc < wantargc-1 && arg; argc++, arg = arg->next)
     argv[argc] = nregno(g, arg);
 
-  if UNLIKELY(!arg || arg->next != NULL) {
+  if UNLIKELY(arg == NULL || arg->next != NULL) {
     if (arg)
       argc += 2;
     goto err_argc;
@@ -658,11 +658,74 @@ err_argc:
 }
 
 
+static void genop(gstate* g, rnode* n);
+static void genassign(gstate* g, rnode* n);
+
+
+static void genop_call(gstate* g, rnode* n) {
+  if UNLIKELY(n->children.head == NULL) {
+    ERRN(n, "missing call destination");
+    return;
+  }
+
+  // desugar call operands, converting e.g.
+  //   call foo R5 3
+  // to
+  //   copy R0 R5
+  //   copy R1 0x3
+  //   call foo
+  rnode* n_tmp;
+  rnode* arg = n->children.head->next;
+  if (!arg)
+    goto gen_call;
+  rnode dst_tmp = {0};
+  rnode assign_tmp = {0};
+  for (u32 dstreg = 0; arg; arg = arg->next, dstreg++) {
+    // synthesize "dst = arg"
+    if UNLIKELY(dstreg == RSM_NARGREGS) {
+      // TODO: implement stack push of 8th+ arguments
+      ERRN(arg, "too many arguments in call");
+      break;
+    }
+    assert(arg->t != RT_OP && arg->t != RT_ASSIGN);
+    dst_tmp.t = RT_IREG;
+    dst_tmp.ival = dstreg;
+    dst_tmp.next = arg;
+    n_tmp = arg->next; arg->next = NULL;
+    assign_tmp.t = RT_ASSIGN;
+    assign_tmp.children.head = &dst_tmp;
+    assign_tmp.children.tail = arg;
+    genassign(g, &assign_tmp);
+    arg->next = n_tmp;
+  }
+
+gen_call:
+  // save & disconnect arguments
+  n_tmp = n->children.head->next;
+  n->children.head->next = NULL;
+
+  // generate CALL instruction
+  rinstr* in = GARRAY_PUSH_OR_RET(rinstr, &g->iv);
+  i32 genarg;
+  if (getiargs(g, n, &genarg, 1, 0, RSM_MAX_Au, &in)) {
+    *in = RSM_MAKE_Au(rop_CALL, genarg);
+  } else {
+    *in = RSM_MAKE_A(rop_CALL, genarg);
+  }
+
+  // restore arguments
+  n->children.head->next = n_tmp;
+}
+
+
 static void genop(gstate* g, rnode* n) {
   assert(n->t == RT_OP);
   assert(n->ival < RSM_OP_COUNT);
 
   rop op = (rop)n->ival;
+  if (op == rop_CALL)
+    return genop_call(g, n);
+
   rinstr* in = GARRAY_PUSH_OR_RET(rinstr, &g->iv);
   *in = RSM_MAKE__(op);
   i32 arg[4]; // ABCD args to RSM_MAKE_* macros
@@ -728,8 +791,9 @@ no_r:
 
 
 static void genassign(gstate* g, rnode* n) {
-  assert(n->t == RT_EQ);
-  // convert to op
+  // convert assignment to op
+  // TODO: don't mutate n; instead use a stack-local copy
+  assertf(n->t == RT_ASSIGN, "n->t=%s", tokname(n->t));
   n->t = RT_OP;
   rnode* lhs = assertnotnull(n->children.head);
   rnode* rhs = assertnotnull(lhs->next);
@@ -792,7 +856,7 @@ static void genblock(gstate* g, rnode* block) {
         if ((rop)cn->ival == rop_JUMP || (rop)cn->ival == rop_RET)
           jumpn = cn;
         genop(g, cn); break;
-      case RT_EQ:
+      case RT_ASSIGN:
         genassign(g, cn); break;
       default:
         ERRN(cn, "invalid block element %s", tokname(cn->t));

@@ -807,7 +807,7 @@ static u32 u32log10(u32 u) {
 rposrange nposrange(rnode* n) {
   rposrange pr = { .start=n->pos, .focus=n->pos };
   switch (n->t) {
-    case RT_EQ:
+    case RT_ASSIGN:
       if (n->children.head) {
         pr.start = n->children.head->pos;
         rnode* lastn = n->children.head;

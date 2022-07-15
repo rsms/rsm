@@ -56,7 +56,7 @@ struct vmstate {
 #define MAIN_RET_PC  USIZE_MAX   // special PC value representing the main return address
 
 // accessor macros
-#define SP  iregs[RSM_MAX_REG]
+#define SP  iregs[RSM_MAX_REG]  // R31
 #define PC  pc
 
 #define RA  iregs[ar] // u64
@@ -89,7 +89,8 @@ struct vmstate {
 typedef u32 vmerror;
 enum vmerror {
   VM_E_UNALIGNED_STORE = 1,
-  VM_E_UNALIGNED_LOAD,
+  VM_E_UNALIGNED_ACCESS,
+  VM_E_UNALIGNED_STACK,
   VM_E_STACK_OVERFLOW,
   VM_E_OOB_LOAD,
   VM_E_OOB_STORE,
@@ -105,7 +106,8 @@ static void _vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
   #define S(ERR, fmt, args...) case ERR: abuf_fmt(s, fmt, ##args); break;
   switch ((enum vmerror)err) {
     S(VM_E_UNALIGNED_STORE, "unaligned memory store %llx (align %llu B)", arg1, arg2)
-    S(VM_E_UNALIGNED_LOAD,  "unaligned memory load %llx (align %llu B)", arg1, arg2)
+    S(VM_E_UNALIGNED_ACCESS,"unaligned memory access %llx (align %llu B)", arg1, arg2)
+    S(VM_E_UNALIGNED_STACK, "unaligned stack pointer SP=%llx (align %d B)", arg1, STK_ALIGN)
     S(VM_E_STACK_OVERFLOW,  "stack overflow %llx (align %llu B)", arg1, arg2)
     S(VM_E_OOB_LOAD,        "memory load out of bounds %llx (align %llu B)", arg1, arg2)
     S(VM_E_OOB_STORE,       "memory store out of bounds %llx (align %llu B)", arg1, arg2)
@@ -188,14 +190,14 @@ inline static void* hostaddr(VMPARAMS, u64 addr) {
   return vs->mbase[index] + addr;
 }
 
-inline static void* hostaddr_check_load(VMPARAMS, u64 align, u64 addr) {
-  check_loadstore(addr, align, VM_E_UNALIGNED_LOAD, VM_E_OOB_LOAD);
+inline static void* hostaddr_check_access(VMPARAMS, u64 align, u64 addr) {
+  check_loadstore(addr, align, VM_E_UNALIGNED_ACCESS, VM_E_OOB_LOAD);
   return hostaddr(VMARGS, addr);
 }
 
 // inline u64 LOAD(TYPE, u64 addr)
 #define LOAD(TYPE, addr) ({ u64 a__=(addr); \
-  u64 v__ = *(TYPE*)hostaddr_check_load(VMARGS, sizeof(TYPE), a__); \
+  u64 v__ = *(TYPE*)hostaddr_check_access(VMARGS, sizeof(TYPE), a__); \
   log_loadstore("LOAD  %s mem[0x%llx] => 0x%llx", #TYPE, a__, v__); \
   v__; \
 })
@@ -216,11 +218,20 @@ inline static void* hostaddr_check_load(VMPARAMS, u64 align, u64 addr) {
   *(u64*)(vs->mbase[0] + (uintptr)a__) = v__; \
 }
 
-isize write(int fd, const void* buf, usize nbyte); // libc
+// libc
+isize write(int fd, const void* buf, usize nbyte);
+isize read(int fd, void* buf, usize nbyte);
+
 static u64 _write(VMPARAMS, u64 fd, u64 addr, u64 size) {
-  // RA = write addr=RB size=R(C) fd=Du
-  void* src = hostaddr_check_load(VMARGS, 1, addr);
+  // RA = write srcaddr=RB size=R(C) fd=Du
+  void* src = hostaddr_check_access(VMARGS, 1, addr);
   return (u64)write((int)fd, src, (usize)size);
+}
+
+static u64 _read(VMPARAMS, u64 fd, u64 addr, u64 size) {
+  // RA = read dstaddr=RB size=R(C) fd=Du
+  void* dst = hostaddr_check_access(VMARGS, 1, addr);
+  return (u64)read((int)fd, dst, (usize)size);
 }
 
 //————————————————————————————————————————————————————————————————————————————————————————
@@ -293,6 +304,12 @@ inline static u64 pop(VMPARAMS, usize size) {
   return LOAD(u64, addr);
 }
 
+static void push_PC(VMPARAMS) {
+  // save PC on stack
+  check(IS_ALIGN2(SP, STK_ALIGN), VM_E_UNALIGNED_STACK, SP, STK_ALIGN);
+  push(VMARGS, 8, (u64)pc);
+}
+
 static u64 copyv(VMPARAMS, u64 n) {
   // A = instr[PC+1] + instr[PC+2]; PC+=2
   check(pc+n < vs->inlen, VM_E_OOB_PC, (u64)pc);
@@ -302,14 +319,14 @@ static u64 copyv(VMPARAMS, u64 n) {
 }
 
 static void mcopy(VMPARAMS, u64 dstaddr, u64 srcaddr, u64 size) {
-  void* dst = hostaddr_check_load(VMARGS, 1, dstaddr);
-  void* src = hostaddr_check_load(VMARGS, 1, srcaddr);
+  void* dst = hostaddr_check_access(VMARGS, 1, dstaddr);
+  void* src = hostaddr_check_access(VMARGS, 1, srcaddr);
   memcpy(dst, src, (usize)size);
 }
 
 static i64 mcmp(VMPARAMS, u64 xaddr, u64 yaddr, u64 size) {
-  void* x = hostaddr_check_load(VMARGS, 1, xaddr);
-  void* y = hostaddr_check_load(VMARGS, 1, yaddr);
+  void* x = hostaddr_check_access(VMARGS, 1, xaddr);
+  void* y = hostaddr_check_access(VMARGS, 1, yaddr);
   return (i64)memcmp(x, y, (usize)size);
 }
 
@@ -436,10 +453,11 @@ static void vmexec(VMPARAMS) {
     #define do_IFZ(B)  if (RA == 0) pc = (isize)((i64)pc + (i64)B)
 
     #define do_JUMP(A)  pc = (usize)A
-    #define do_CALL(A)  push(VMARGS, 8, (u64)PC); pc = (usize)A
+    #define do_CALL(A)  push_PC(VMARGS); pc = (usize)A;
     #define do_SCALL(A) scall(VMARGS, A, in)
 
     #define do_WRITE(D)   RA = _write(VMARGS, D, RB, RC) // addr=RB size=RC fd=D
+    #define do_READ(D)    RA = _read(VMARGS, D, RB, RC) // addr=RB size=RC fd=D
     #define do_DEVOPEN(B) RA = dev_open(VMARGS, B)
     #define do_MCOPY(C)   mcopy(VMARGS, RA, RB, C)
     #define do_MCMP(D)    RA = (u64)mcmp(VMARGS, RB, RC, D)

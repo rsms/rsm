@@ -12,6 +12,7 @@ static const char* prog = ""; // argv[0]
 static const char* outfile = NULL;
 static bool opt_run = false;
 static bool opt_print_asm = false;
+static bool opt_print_regstate = false;
 static usize vm_memsize = 1024*1024;
 
 #define errmsg(fmt, args...) fprintf(stderr, "%s: " fmt "\n", prog, ##args)
@@ -82,6 +83,7 @@ static void usage() {
     "  -h           Show help and exit\n"
     "  -r           Run the program (implied unless -o or -p are set)\n"
     "  -p           Print assembly on stdout\n"
+    "  -d           Print register state on stdout after program ends\n"
     "  -R<N>=<val>  Initialize register R<N> to <val> (e.g. -R0=4, -R3=0xff)\n"
     "  -m <nbytes>  Set VM memory to <nbytes> (default: %zu)\n"
     "  -o <file>    Write compiled ROM to <file>\n"
@@ -107,10 +109,11 @@ static int parse_cli_opts(int argc, char*const* argv, u64* iregs) {
   extern char* optarg; // global state in libc... coolcoolcool
   extern int optind, optopt;
   int nerrs = 0;
-  for (int c; (c = getopt(argc, argv, ":hrpR:o:m:")) != -1;) switch(c) {
+  for (int c; (c = getopt(argc, argv, ":hrpdR:o:m:")) != -1;) switch(c) {
     case 'h': usage(); exit(0);
     case 'r': opt_run = true; break;
     case 'p': opt_print_asm = true; break;
+    case 'd': opt_print_regstate = true; break;
     case 'R': nerrs += setreg(iregs, optarg); break;
     case 'o': outfile = optarg; break;
     case 'm': nerrs += parse_bytesize_opt(optopt, optarg, &vm_memsize); break;
@@ -286,7 +289,10 @@ int main(int argc, char*const* argv) {
   char duration[25];
   fmtduration(duration, time);
   log("execution finished in %s", duration);
-  print_regstate(iregs);
+
+  if (opt_print_regstate)
+    print_regstate(iregs);
+
   return 0;
 }
 

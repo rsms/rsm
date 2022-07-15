@@ -23,15 +23,15 @@ fun main(i32) {
 
   // read up to STKSIZE bytes from STDIN into stack memory at SP
   R0 = STKSIZE // number of bytes to read
-  R1 = read SP R0 STDIN
-  R0 = R1 < 0 // check if read failed
+  R8 = read SP R0 STDIN
+  R0 = R8 < 0 // check if read failed
   if R0 end
-  R0 = R1 <= 1 // check if read was empty (count "\n" as empty)
+  R0 = R8 <= 1 // check if read was empty (count "\n" as empty)
   if R0 noname
 
   // reply with the user's name
   call print reply_msg1 6
-  R1 = sub R4 1 // arg2 = length of name -1 for terminating line break
+  R1 = sub R8 1 // arg2 = length of name -1 for terminating line break
   call print SP // arg1 = address of read() name
   call print reply_msg2 18
 

@@ -12,7 +12,7 @@ static const char* prog = ""; // argv[0]
 static const char* outfile = NULL;
 static bool opt_run = false;
 static bool opt_print_asm = false;
-static bool opt_print_regstate = false;
+static bool opt_print_debug = false;
 static usize vm_memsize = 1024*1024;
 
 #define errmsg(fmt, args...) fprintf(stderr, "%s: " fmt "\n", prog, ##args)
@@ -83,7 +83,7 @@ static void usage() {
     "  -h           Show help and exit\n"
     "  -r           Run the program (implied unless -o or -p are set)\n"
     "  -p           Print assembly on stdout\n"
-    "  -d           Print register state on stdout after program ends\n"
+    "  -d           Print timing and register state on stdout at end\n"
     "  -R<N>=<val>  Initialize register R<N> to <val> (e.g. -R0=4, -R3=0xff)\n"
     "  -m <nbytes>  Set VM memory to <nbytes> (default: %zu)\n"
     "  -o <file>    Write compiled ROM to <file>\n"
@@ -113,7 +113,7 @@ static int parse_cli_opts(int argc, char*const* argv, u64* iregs) {
     case 'h': usage(); exit(0);
     case 'r': opt_run = true; break;
     case 'p': opt_print_asm = true; break;
-    case 'd': opt_print_regstate = true; break;
+    case 'd': opt_print_debug = true; break;
     case 'R': nerrs += setreg(iregs, optarg); break;
     case 'o': outfile = optarg; break;
     case 'm': nerrs += parse_bytesize_opt(optopt, optarg, &vm_memsize); break;
@@ -147,12 +147,15 @@ static bool loadfile(rmem mem, const char* nullable infile, void** p, usize* siz
 }
 
 static void print_asm(rmem mem, const rinstr* iv, usize icount) {
-  char* buf = rmem_alloc(mem, 512); if (!buf) panic("out of memory");
+  const usize initcap = 4096;
+  char* buf = rmem_alloc(mem, initcap);
+  if (!buf) panic("out of memory");
   rfmtflag fl = isatty(1) ? RSM_FMT_COLOR : 0;
-  usize n = rsm_fmtprog(buf, 512, iv, icount, fl);
-  if (n >= 512) {
-    buf = rmem_resize(mem, buf, 512, n + 1); if (!buf) panic("out of memory");
-    rsm_fmtprog(buf, n, iv, icount, fl);
+  usize n = rsm_fmtprog(buf, initcap, iv, icount, fl);
+  if (n >= initcap) {
+    buf = rmem_resize(mem, buf, initcap, n + 1);
+    if (!buf) panic("out of memory");
+    rsm_fmtprog(buf, n + 1, iv, icount, fl);
   }
   fwrite(buf, n, 1, stdout); putc('\n', stdout);
 }
@@ -286,12 +289,12 @@ int main(int argc, char*const* argv) {
     return 1;
   }
 
-  char duration[25];
-  fmtduration(duration, time);
-  log("execution finished in %s", duration);
-
-  if (opt_print_regstate)
+  if (opt_print_debug) {
+    char duration[25];
+    fmtduration(duration, time);
+    log("Execution finished in %s", duration);
     print_regstate(iregs);
+  }
 
   return 0;
 }

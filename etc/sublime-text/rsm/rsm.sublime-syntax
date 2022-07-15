@@ -152,15 +152,17 @@ contexts:
           | lte?[us]
           | gte?[us]
 
-          | br
-          | brz
-          | brlt
+          | ifz?
           | call
           | scall
           | jump
           | ret
 
           | write
+          | read
+          | devopen
+          | mcopy
+          | mcmp
           | devopen
           )\b
       scope: keyword.instruction.rsm

@@ -1401,7 +1401,11 @@ enum {
 };
 
 rerror parse_init() {
-  static void* memory[3104/sizeof(void*)];
+  #if USIZE_MAX >= 0xFFFFFFFFFFFFFFFFu
+    static void* memory[3104/sizeof(void*)];
+  #else
+    static void* memory[1552/sizeof(void*)];
+  #endif
   rmem mem = rmem_mkbufalloc(memory, sizeof(memory));
   smap* m = smap_make(&kwmap, mem, kwcount, MAPLF_2); // increase sizeof(memory)
   if UNLIKELY(m == NULL)

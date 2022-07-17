@@ -15,26 +15,37 @@
 #endif
 
 
-rerror unixtime(i64* sec, u64* nsec) {
-  #ifdef CLOCK_REALTIME
+WASM_IMPORT rerror unixtime(i64* sec, u64* nsec);
+#ifdef CLOCK_REALTIME
+  rerror unixtime(i64* sec, u64* nsec) {
     struct timespec ts;
     if (clock_gettime(CLOCK_REALTIME, &ts))
       return rerror_errno(errno);
     *sec = (i64)ts.tv_sec;
     *nsec = (u64)ts.tv_nsec;
     return 0;
-  #elif !defined(RSM_NO_LIBC)
+  }
+#elif !defined(RSM_NO_LIBC)
+  rerror unixtime(i64* sec, u64* nsec) {
     struct timeval tv;
     if (gettimeofday(&tv, 0) != 0)
       return rerror_errno(errno);
     *sec = (i64)tv.tv_sec;
     *nsec = ((u64)tv.tv_usec) * 1000;
     return 0;
-  #else
-    #warning TODO RSM_NO_LIBC unixtime
-    return err_not_supported;
-  #endif
-}
+  }
+#elif !defined(__wasm__)
+  #warning TODO RSM_NO_LIBC unixtime
+  rerror unixtime(i64* sec, u64* nsec) {
+    return rerr_not_supported;
+  }
+#endif
+
+
+#if defined(__wasm__)
+  WASM_IMPORT double wasm_nanotime(void);
+#endif
+
 
 u64 nanotime(void) {
   #if defined(__APPLE__)
@@ -50,6 +61,8 @@ u64 nanotime(void) {
     struct timeval tv;
     safecheckexpr(gettimeofday(&tv, nullptr), 0);
     return ((u64)(tv.tv_sec) * 1000000000) + ((u64)(tv.tv_usec) * 1000);
+  #elif defined(__wasm__)
+    return (u64)wasm_nanotime();
   #else
     #warning TODO RSM_NO_LIBC nanotime
     return 0;

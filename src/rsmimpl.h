@@ -100,6 +100,14 @@ typedef unsigned long       usize;
   #define NOINLINE
 #endif
 
+#ifdef __wasm__
+  #define WASM_EXPORT __attribute__((visibility("default")))
+  #define WASM_IMPORT __attribute__((visibility("default")))
+#else
+  #define WASM_EXPORT
+  #define WASM_IMPORT
+#endif
+
 // ATTR_FORMAT(archetype, string-index, first-to-check)
 // archetype determines how the format string is interpreted, and should be printf, scanf,
 // strftime or strfmon.

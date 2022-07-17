@@ -173,22 +173,26 @@ rerror read_stdin_data(rmem m, usize maxlen, void** p_put, usize* len_out) {
 }
 
 rerror writefile(const char* filename, u32 mode, const void* data, usize size) {
-  assert(size <= ISIZE_MAX);
-  int fd = open(filename, O_WRONLY|O_CREAT|O_TRUNC, 0777);
-  if (fd < 0)
-    return rerror_errno(errno);
-  rerror err = 0;
-  while (size) {
-    isize n = write(fd, data, size);
-    if (n < (isize)size) {
-      err = n < 0 ? rerror_errno(errno) : rerr_canceled;
-      break;
+  #ifdef RSM_NO_LIBC
+    return rerr_not_supported;
+  #else
+    assert(size <= ISIZE_MAX);
+    int fd = open(filename, O_WRONLY|O_CREAT|O_TRUNC, 0777);
+    if (fd < 0)
+      return rerror_errno(errno);
+    rerror err = 0;
+    while (size) {
+      isize n = write(fd, data, size);
+      if (n < (isize)size) {
+        err = n < 0 ? rerror_errno(errno) : rerr_canceled;
+        break;
+      }
+      data += n;
+      size -= (usize)n;
     }
-    data += n;
-    size -= (usize)n;
-  }
-  close(fd);
-  return err;
+    close(fd);
+    return err;
+  #endif
 }
 
 static char* strrevn(char* s, usize len) {
@@ -752,19 +756,20 @@ rerror parse_init();
 bool rsm_init() {
   static bool y = false; if (y) return true; y = true;
   rerror err;
-  #define CHECK_ERR(expr) err = (expr); if (err) goto error
+  const char* err_what = "?";
+  #define CHECK_ERR(expr, what) err = (expr); if (err) { err_what = (what); goto error; }
 
-  CHECK_ERR(time_init());
+  CHECK_ERR(time_init(), "time_init");
 
   u64 sec, nsec;
-  CHECK_ERR(unixtime((i64*)&sec, &nsec));
+  CHECK_ERR(unixtime((i64*)&sec, &nsec), "unixtime");
   fastrand_seed(nsec);
 
-  CHECK_ERR(parse_init());
+  CHECK_ERR(parse_init(), "parse_init");
 
   return true;
 error:
-  log("rsm_init error: %s", rerror_str(err));
+  log("rsm_init error: %s (%s)", rerror_str(err), err_what);
   return false;
 }
 

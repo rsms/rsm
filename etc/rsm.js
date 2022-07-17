@@ -1,10 +1,34 @@
 const ISIZE = 4 // sizeof(isize) (wasm32=4, wasm64=8)
+const PTRSIZE = 4 // sizeof(void*) (wasm32=4, wasm64=8)
 const PTR = Symbol("ptr")
 
 // UTF8 encoder & decoder
 // note: nodejs has require("util").TextEncoder & .TextDecoder
 const txt_enc = new TextEncoder("utf-8")
 const txt_dec = new TextDecoder("utf-8")
+
+class ROM {
+  constructor(rsm, filename, imgptr, imgsize) {
+    this.rsm = rsm // :RSMInstance
+    this.imgptr = imgptr
+    this.imgsize = imgsize
+    this.filename = filename
+  }
+
+  dispose() {
+    if (this.imgptr == 0)
+      return
+    //console.log(`ROM@${this.imgptr.toString(16)}.dispose`)
+    this.rsm.memfree(this.imgptr, this.imgsize)
+    this.imgptr = 0
+    this.imgsize = 0
+    this.rsm = null
+  }
+
+  data() { // :Uint8Array
+    return this.rsm.mem_u8.subarray(this.imgptr, this.imgptr + this.imgsize)
+  }
+}
 
 class RSMInstance {
   constructor(memory) {
@@ -14,52 +38,66 @@ class RSMInstance {
     this.mem_u32 = new Uint32Array(memory.buffer)
     if (typeof BigUint64Array != "undefined") {
       this.mem_u64 = new BigUint64Array(memory.buffer)
+      this.mem_i64 = new BigInt64Array(memory.buffer)
       this.u64 = (ptr) => this.mem_u64[ptr >>> 3]
+      this.i64 = (ptr) => this.mem_i64[ptr >>> 3]
+      this.setU64 = (ptr, v) => { this.mem_u64[ptr >>> 3] = BigInt(v >>> 0) }
+      this.setI64 = (ptr, v) => { this.mem_i64[ptr >>> 3] = BigInt(v | 0) }
       this.R = (iregno) => this.u64(this.iregvp + (iregno * 8))
       this.setR = (iregno, v) => {
         this.mem_u64[(this.iregvp + (iregno * 8)) >>> 3] = BigInt(v)
       }
     } else {
+      this.u64 = this.u32
+      this.i64 = this.i32
+      this.setU64 = this.setU32
+      this.setI64 = this.setI32
       this.R = (iregno) => this.u32(this.iregvp + (iregno * 8))
       this.setR = (iregno, v) => {
         this.setU32(this.iregvp + (iregno * 8), v)
       }
     }
-    this.instance = null // set by wasm_load
+    this.instance = null // wasm instance, set by init()
+    this.api = null // ==this.instance.exports, set by init()
     this.tmpbufcap = 0
     this.tmpbufp = 0
   }
 
   init(instance) {
     this.instance = instance
-    instance.exports.winit(this.memory.buffer.byteLength)
-    this.iregvp = this.instance.exports.wvmiregs()
+    this.api = instance.exports
+    if (!this.api.winit(this.memory.buffer.byteLength))
+      throw new Error("rsm wasm module failed to initialize")
+    this.iregvp = this.api.wvmiregs()
   }
 
   log(message) { console.log(message) }
 
   memalloc(size) {
-    const p = this.instance.exports.wmalloc(size)
+    const p = this.api.wmalloc(size)
     if (p == 0) throw new Error("out of memory")
     return p
   }
   memresize(p, currsize, newsize) {
-    p = this.instance.exports.wmresize(p, currsize, newsize)
+    p = this.api.wmresize(p, currsize, newsize)
     if (p == 0) throw new Error("out of memory")
     return p
   }
-  memfree(p, size) { this.instance.exports.wmfree(p, size) }
+  memfree(p, size) { this.api.wmfree(p, size) }
 
   u8(ptr)  { return this.mem_u8[ptr] }
 
   i32(ptr) { return this.mem_i32[ptr >>> 2] }
   u32(ptr) { return this.mem_u32[ptr >>> 2] }
 
-  setI32(ptr, v) { this.mem_u32[ptr >>> 2] = v }
+  setI32(ptr, v) { this.mem_u32[ptr >>> 2] = (v | 0) }
   setU32(ptr, v) { this.mem_u32[ptr >>> 2] = (v >>> 0) }
 
   isize(ptr) { return this.mem_i32[ptr >>> 2] }
-  usize(ptr) { return this.mem_u32[ptr >>> 2] >>> 0 }
+  usize(ptr) { return this.mem_u32[ptr >>> 2] }
+
+  uintptr(ptr) { return this.mem_u32[ptr >>> 2] }
+  setUintptr(ptr) { this.mem_u32[ptr >>> 2] = (v >>> 0) }
 
   Rarray(count) {
     let a = []
@@ -83,6 +121,7 @@ class RSMInstance {
     let buf = txt_enc.encode(String(jsstr)+"\0")
     return this.copyToWasm(dstptr, cap, buf)
   }
+
   copyToWasm(dstptr, cap, buf) {
     if (buf.length > cap)
       buf = buf.subarray(0, cap)
@@ -101,8 +140,18 @@ class RSMInstance {
     return [this.tmpbufp, this.tmpbufcap]
   }
 
-  compile(source, filename) {
-    let srcbuf = txt_enc.encode(String(source)) // Uint8Array
+  // createROM(imgbuf :ArrayBuffer|Uint8Array, filename? :string) :ROM
+  createROM(imgbuf, filename) {
+    let buf = (imgbuf instanceof Uint8Array) ? imgbuf : new Uint8Array(imgbuf)
+    let imgsize = buf.length
+    let imgptr = this.memalloc(imgsize)
+    this.mem_u8.set(buf, imgptr)
+    return new ROM(this, filename, imgptr, imgsize)
+  }
+
+  // assemble(source :string|Uint8Array, filename? :string) :ROM
+  assemble(source, filename) {
+    let srcbuf = (source instanceof Uint8Array) ? source : txt_enc.encode(String(source))
 
     if (!this.srcnamecap) {
       this.srcnamecap = 128
@@ -113,29 +162,39 @@ class RSMInstance {
     let [tmpbufp, tmpbufcap] = this.tmpbuf(srcbuf.length)
     let tmpbuflen = this.copyToWasm(tmpbufp, tmpbufcap, srcbuf)
 
-    // rptr : struct compile_result {
-    //   usize   c;
-    //   rinstr* v;
-    //   const char* nullable errmsg;
-    // }
-    const rptr = this.instance.exports.wcompile(this.srcnamep, tmpbufp, tmpbuflen)
-    const ilen = this.u32(rptr)
-    const iptr = this.u32(rptr + ISIZE)
-    const errmsgp = this.u32(rptr + ISIZE*2)
-    if (errmsgp)
-      throw new Error(this.cstr(errmsgp))
+    // struct cresult { rromimg* imgptr; usize imgsize; const char* errmsg; }
+    let p = this.api.wcompile(this.srcnamep, tmpbufp, tmpbuflen)
+    const imgptr = this.uintptr(p) ; p += PTRSIZE
+    const imgsize = this.usize(p) ; p += ISIZE
+    const errmsgptr = this.uintptr(p)
+    if (errmsgptr)
+      throw new Error(this.cstr(errmsgptr))
 
-    return { filename, length: ilen, [PTR]: iptr }
+    return new ROM(this, filename, imgptr, imgsize)
   }
 
-  vmfmt(vmcode) {
-    // usize wfmtprog(char* buf, usize bufcap, rinstr* nullable inv, u32 inc)
-    let [tmpbufp, tmpbufcap] = this.tmpbuf(vmcode.length * 128)
-    let len = this.instance.exports.wfmtprog(tmpbufp, tmpbufcap, vmcode[PTR], vmcode.length)
-    return this.str(tmpbufp, len)
+  // fmtprog(rom :ROM) :string
+  fmtprog(rom) {
+    let [tmpbufp, tmpbufcap] = this.tmpbuf(rom.imgsize * 8)
+    let canResize = true
+    while (canResize) {
+      let len = this.api.wfmtprog(tmpbufp, tmpbufcap, rom.imgptr, rom.imgsize)
+      if (len < 0)
+        throw new Error(`invalid ROM data`)
+      if (len > tmpbufcap) {
+        [tmpbufp, tmpbufcap] = this.tmpbuf(len)
+        canResize = false // avoid infinite loop in case of bug
+        continue
+      }
+      return this.str(tmpbufp, len)
+    }
   }
 
-  vmexec(vmcode, ...args) { // => [R0 ... R7]
+  // exec(rom :ROM, ...args :int[]) :int[8]
+  exec(rom, ...args) { // => [R0 ... R7]
+    // TODO: refactor: create an execution instance
+    // Move "this.iregvp = this.api.wvmiregs()" to it, too, along with R functions.
+    //
     if (args.length > 8)
       throw new Error(`too many arguments`)
     for (let i = 0; i < args.length; i++) {
@@ -148,42 +207,50 @@ class RSMInstance {
       }
       this.setR(i, arg)
     }
-    this.instance.exports.wvmexec(this.iregvp, vmcode[PTR], vmcode.length)
+    let err = this.api.wvmexec(this.iregvp, rom.imgptr, rom.imgsize)
+    if (err)
+      throw new Error(`wvmexec rerror#${err}`)
     return this.Rarray(8)
-  }
-
-  vmfree(vmcode) {
-    if (vmcode[PTR] == 0)
-      return
-    this.memfree(vmcode[PTR], vmcode.length * 4)
-    vmcode.length = 0
-    vmcode[PTR] = 0
   }
 }
 
 let wasm_mod = null
 
-function createNthInstance(instance, import_obj, nmempages) {
-  return WebAssembly.instantiate(wasm_mod, import_obj).then(winstance => {
-    instance.init(winstance)
-    return instance
+function createNthInstance(rsm, import_obj, nmempages) {
+  return WebAssembly.instantiate(wasm_mod, import_obj).then(wasm_instance => {
+    rsm.init(wasm_instance)
+    return rsm
   })
+}
+
+function unixtime(rsm, secp, nsecp) { // time.c
+  const t = Date.now()
+  rsm.setI64(secp, t / 1000)
+  rsm.setU64(secp, (t % 1000) * 1000000)
+  return 0;
+}
+
+function wasm_nanotime() { // time.c
+  return performance.now() * 1000000
 }
 
 // createRSMInstance creates a new RSM WASM module instance and initializes it.
 // nmempages is optional and specifies memory pages to allocate for the wasm instance.
 // One page is 65536 B (64 ikB).
 export async function createRSMInstance(urlorpromise, nmempages) {
-  const memory = new WebAssembly.Memory({ initial: nmempages||64 }) // 4MB by default
-  const instance = new RSMInstance(memory)
+  if (!nmempages) nmempages = 1024 // 65MB by default
+  const memory = new WebAssembly.Memory({ initial: nmempages })
+  const rsm = new RSMInstance(memory)
   const import_obj = {
     env: {
       memory,
-      log1: (strp, len) => { instance.log(instance.str(strp, len)) },
+      wasm_log(strp, len) { rsm.log(rsm.str(strp, len)) },
+      unixtime: unixtime.bind(null, rsm),
+      wasm_nanotime,
     },
   }
   if (wasm_mod)
-    return createNthInstance(instance, import_obj, nmempages)
+    return createNthInstance(rsm, import_obj, nmempages)
   const fetchp = urlorpromise instanceof Promise ? urlorpromise : fetch(urlorpromise)
   const istream = WebAssembly.instantiateStreaming
   return (
@@ -191,7 +258,7 @@ export async function createRSMInstance(urlorpromise, nmempages) {
     fetchp.then(r => r.arrayBuffer()).then(buf => WebAssembly.instantiate(buf, import_obj))
   ).then(r => {
     wasm_mod = r.module
-    instance.init(r.instance)
-    return instance
+    rsm.init(r.instance)
+    return rsm
   })
 }

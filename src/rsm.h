@@ -329,13 +329,16 @@ struct rromimg {
   u8 data[];
 };
 struct rrom {
-  const rromimg* img;       // ROM image
-  usize          imgsize;   // size of img, in bytes
-  const rinstr*  code;      // vm instructions array
-  usize          codelen;   // vm instructions array length
-  const void*    data;      // data segment initializer
-  usize          datasize;  // data segment size
-  u32            dataalign; // data segment alignment (in bytes)
+  // ROM image
+  rromimg* img;
+  usize    imgsize; // size of img, in bytes
+
+  // fields populated on demand by rsm_loadrom
+  const rinstr* code;      // vm instructions array (pointer into img)
+  usize         codelen;   // vm instructions array length
+  const void*   data;      // data segment initializer (pointer into img)
+  usize         datasize;  // data segment size
+  u32           dataalign; // data segment alignment (in bytes)
 };
 
 
@@ -348,7 +351,7 @@ RSMAPI bool rsm_init();
 RSMAPI rerror rsm_vmexec(rrom* rom, u64* iregs, void* rambase, usize ramsize);
 
 // rsm_loadrom parses rom->img of rom->imgsize bytes,
-// filling the rest of the fields of the rrom struct.
+// populating the rest of the fields of the rrom struct.
 RSMAPI rerror rsm_loadrom(rrom* rom);
 
 // rsm_fmtprog formats an array of instructions ip as "assembly" text to buf.
@@ -362,7 +365,8 @@ RSMAPI usize rsm_fmtprog(
   char* buf, usize bufcap, const rinstr* nullable ip, usize ilen, rfmtflag);
 // if pcaddp is not null, it is set to the PC advance for the instruction,
 // which is 1 for all except COPYV.
-RSMAPI usize rsm_fmtinstr(char* buf, usize bufcap, rinstr, u32* nullable pcaddp, rfmtflag);
+RSMAPI usize rsm_fmtinstr(
+  char* buf, usize bufcap, rinstr, u32* nullable pcaddp, rfmtflag);
 
 // RMEM_MK_MIN is the minimum size for rmem_mk*alloc functions
 #define RMEM_MK_MIN (sizeof(void*)*4)
@@ -516,7 +520,8 @@ struct rnode {
 // rasm_parse parses assembly source text into an AST.
 // Uses a->mem for allocating AST nodes. a can be reused.
 // Returns AST representing the source (a->src* fields) module (NULL on memory alloc fail.)
-// Caller should check a->errcount on return.
+// Caller should check a->errcount on return and call rasm_free_rnode when done with the
+// resulting rnode.
 RSMAPI rnode* nullable rasm_parse(rasm* a);
 
 // rasm_gen builds VM code from AST.
@@ -526,7 +531,7 @@ RSMAPI rerror rasm_gen(rasm* a, rnode* module, rmem rommem, rrom* rom);
 // rasm_dispose frees resources of a
 RSMAPI void rasm_dispose(rasm* a);
 
-// rasm_free_rnode frees n (entire tree, includin all children) back to a->mem
+// rasm_free_rnode frees n (entire tree, including all children) back to a->mem
 RSMAPI void rasm_free_rnode(rasm* a, rnode* n);
 
 #endif // RSM_NO_ASM

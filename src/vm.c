@@ -5,7 +5,11 @@
 //#define DEBUG_VM_LOG_LOADSTORE // define to dlog LOAD and STORE operations
 
 #define M_SEG_COUNT 64  // must be pow2. max mapped devices = M_SEG_COUNT-2
-#define M_SEG_SIZE  ((u64)1024*1024*1024*1024) // 1TB. must be pow2
+#if USIZE_MAX >= 0xFFFFFFFFFFFFFFFFu
+  #define M_SEG_SIZE ((usize)1024*1024*1024*1024) // 1TB. must be pow2
+#else
+  #define M_SEG_SIZE ((usize)1024*1024*1024) // 1GB. must be pow2
+#endif
 static_assert(M_SEG_COUNT == CEIL_POW2(M_SEG_COUNT), "M_SEG_COUNT is not pow2");
 static_assert(M_SEG_SIZE == CEIL_POW2(M_SEG_SIZE), "M_SEG_SIZE is not pow2");
 static_assert(U64_MAX/M_SEG_COUNT >= M_SEG_SIZE, "too many segments / M_SEG_SIZE too large");
@@ -45,8 +49,9 @@ struct vmstate {
     #define log_loadstore(...) ((void)0)
   #endif
 #else
-  #define logstate(...)      ((void)0)
-  #define log_loadstore(...) ((void)0)
+  #define logstate(...)        ((void)0)
+  #define logstate_header(...) ((void)0)
+  #define log_loadstore(...)   ((void)0)
 #endif
 
 // constants
@@ -559,7 +564,7 @@ rerror rsm_vmexec(rrom* rom, u64* iregs, void* rambase, usize ramsize) {
 
   // limit RAM memory size to M_SEG_SIZE
   if (ramsize > M_SEG_SIZE) {
-    dlog("memory size capped at %llu B", M_SEG_SIZE);
+    dlog("memory size capped at %zu B", M_SEG_SIZE);
     ramsize = M_SEG_SIZE;
   }
 

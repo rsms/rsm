@@ -11,6 +11,7 @@ _WATCHED=
 RUN=
 NINJA_ARGS=()
 TESTING_ENABLED=
+STRIP=false
 
 while [[ $# -gt 0 ]]; do case "$1" in
   -v)      NINJA_ARGS+=(-v); shift ;;
@@ -21,12 +22,14 @@ while [[ $# -gt 0 ]]; do case "$1" in
   -debug)  BUILD_MODE=debug; TESTING_ENABLED=1; shift ;;
   -safe)   BUILD_MODE=safe; TESTING_ENABLED=; shift ;;
   -fast)   BUILD_MODE=fast; TESTING_ENABLED=; shift ;;
+  -strip)  STRIP=true; shift ;;
   -h|-help|--help) cat << _END
 usage: $0 [options] [<target> ...]
 options:
   -safe      Build optimized product with some assertions enabled (default)
   -fast      Build optimized product without any assertions
   -debug     Build debug product
+  -strip     Do not include debug data
   -w         Rebuild as sources change
   -wf=<file> Watch <file> for changes (can be provided multiple times)
   -run=<cmd> Run <cmd> after successful build
@@ -126,12 +129,8 @@ fi
 
 # flags for all targets (in addition to unconditional flags in ninja template)
 CFLAGS=( $CFLAGS )
-
 [ "$BUILD_MODE" = "safe" ] && CFLAGS+=( -DRSM_SAFE )
-$DEBUG                     && CFLAGS+=( -O0 -DDEBUG -ferror-limit=6 )
-! $DEBUG                   && CFLAGS+=( -DNDEBUG )
 [ -n "$TESTING_ENABLED" ]  && CFLAGS+=( -DRSM_TESTING_ENABLED )
-! $DEBUG && $CC_IS_CLANG   && CFLAGS+=( -flto )
 
 # target-specific flags (in addition to unconditional flags in ninja template)
 CFLAGS_WASM=( -DRSM_NO_LIBC )
@@ -139,14 +138,24 @@ CFLAGS_HOST=()
 LDFLAGS_HOST=( $LDFLAGS )      # LDFLAGS from env
 LDFLAGS_WASM=( $LDFLAGS_WASM ) # LDFLAGS_WASM from env (note: liker is wasm-ld, not cc)
 
-if ! $DEBUG; then
+if $DEBUG; then
+  CFLAGS+=( -O0 -DDEBUG -ferror-limit=6 )
+else
+  CFLAGS+=( -DNDEBUG )
   CFLAGS_HOST+=( -O3 -mtune=native -fomit-frame-pointer )
   CFLAGS_WASM+=( -Oz )
-  LDFLAGS_WASM+=( --lto-O3 --no-lto-legacy-pass-manager )
+  LDFLAGS_WASM+=( -O3 --lto-O3 --no-lto-legacy-pass-manager )
+  LDFLAGS_HOST+=( -dead_strip )
   # LDFLAGS_WASM+=( -z stack-size=$[128 * 1024] ) # larger stack, smaller heap
-  # LDFLAGS_WASM+=( --compress-relocations --strip-debug )
-  # LDFLAGS_HOST+=( -dead_strip )
+  $CC_IS_CLANG && CFLAGS+=( -flto )
   $CC_IS_CLANG && LDFLAGS_HOST+=( -flto )
+fi
+
+if $STRIP; then
+  LDFLAGS_WASM+=( --compress-relocations --strip-debug )
+  LDFLAGS_HOST+=( -Wl,-s )
+else
+  CFLAGS+=( -g -feliminate-unused-debug-types )
 fi
 
 # enable llvm address and UD sanitizer in debug builds
@@ -180,9 +189,7 @@ objdir = \$builddir/$BUILD_MODE
 
 cflags = $
   -std=c11 $
-  -g $
   -fcolor-diagnostics $
-  -feliminate-unused-debug-types $
   -fvisibility=hidden $
   -Wall -Wextra -Wvla $
   -Wimplicit-fallthrough $
@@ -205,7 +212,7 @@ ldflags_host = ${LDFLAGS_HOST[@]}
 ldflags_wasm = $
   -allow-undefined-file etc/wasm.syms $
   --no-entry $
-  --no-gc-sections $
+  --gc-sections $
   --export-dynamic $
   --import-memory ${LDFLAGS_WASM[@]}
 

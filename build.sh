@@ -218,12 +218,12 @@ rule link_wasm
   description = link \$out
 
 rule cc
-  command = $CC -MMD -MF \$out.d \$cflags \$cflags_host -c \$in -o \$out
+  command = $CC -MMD -MF \$out.d \$cflags \$cflags_host \$flags -c \$in -o \$out
   depfile = \$out.d
   description = compile \$in
 
 rule cc_wasm
-  command = $CC -MMD -MF \$out.d \$cflags \$cflags_wasm -c \$in -o \$out
+  command = $CC -MMD -MF \$out.d \$cflags \$cflags_wasm \$flags -c \$in -o \$out
   depfile = \$out.d
   description = compile \$in
 
@@ -233,14 +233,18 @@ _END
 _objfile() { echo \$objdir/${1//\//.}.o; }
 _gen_obj_build_rules() {
   local FLAVOR=$1 ; shift
+  local CC_EXTRAS=$1 ; shift
   local OBJECT
   local CC_RULE=cc
-  [ "$FLAVOR" = wasm ] && CC_RULE=cc_wasm
+  [ "$FLAVOR" = "wasm" -o "$FLAVOR" = "wasm-rt" ] && CC_RULE=cc_wasm
+  [ -n "$CC_EXTRAS" ] && CC_EXTRAS="flags = $CC_EXTRAS"
   for SOURCE in "$@"; do
     OBJECT=$(_objfile "$FLAVOR-$SOURCE")
     case "$SOURCE" in
       *.c|*.m)
         echo "build $OBJECT: $CC_RULE $SOURCE" >> build.ninja
+        [ -n "$CC_EXTRAS" ] &&
+        echo "  $CC_EXTRAS" >> build.ninja
         ;;
       *) _err "don't know how to compile this file type ($SOURCE)"
     esac
@@ -254,8 +258,9 @@ else
   SOURCES=( $(find src -name '*.c' -not -name '*_test.c' -not -name 'test.c') )
 fi
 
-HOST_OBJECTS=( $(_gen_obj_build_rules "host" "${SOURCES[@]}") )
-WASM_OBJECTS=( $(_gen_obj_build_rules "wasm" "${SOURCES[@]}") )
+HOST_OBJECTS=( $(_gen_obj_build_rules "host" "" "${SOURCES[@]}") )
+WASM_OBJECTS=( $(_gen_obj_build_rules "wasm" "" "${SOURCES[@]}") )
+WASMRT_OBJECTS=( $(_gen_obj_build_rules "wasm-rt" "-DRSM_NO_ASM=1" "${SOURCES[@]}") )
 echo >> build.ninja
 
 echo "build rsm: phony \$builddir/rsm" >> build.ninja
@@ -264,6 +269,10 @@ echo >> build.ninja
 
 echo "build rsm.wasm: phony \$builddir/rsm.wasm" >> build.ninja
 echo "build \$builddir/rsm.wasm: link_wasm ${WASM_OBJECTS[@]}" >> build.ninja
+echo >> build.ninja
+
+echo "build rsm-rt.wasm: phony \$builddir/rsm-rt.wasm" >> build.ninja
+echo "build \$builddir/rsm-rt.wasm: link_wasm ${WASMRT_OBJECTS[@]}" >> build.ninja
 echo >> build.ninja
 
 echo "default rsm" >> build.ninja

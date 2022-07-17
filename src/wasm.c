@@ -16,12 +16,6 @@ static rmem  mem;                    // the one memory allocator, owning the was
 static u64   iregs[RSM_NREGS] = {0}; // register state
 static char* tmpbuf;                 // for temporary formatting etc
 static usize tmpbufcap;
-struct { // compilation result
-  // IF THIS CHANGES, UPDATE rsm.js
-  rromimg*             rom_img;
-  usize                rom_imgsize;
-  const char* nullable errmsg;
-} cresult;
 
 
 // WASM imports (provided by rsm.js)
@@ -84,14 +78,22 @@ WASM_EXPORT bool winit(usize memsize) {
 }
 
 
+//———————————————————————————————————————————————————————————————————————————————————
+#ifndef RSM_NO_ASM
+
+
+struct { // compilation result
+  // IF THIS CHANGES, UPDATE rsm.js
+  rromimg*             rom_img;
+  usize                rom_imgsize;
+  const char* nullable errmsg;
+} cresult;
+
+
 static bool wdiaghandler(const rdiag* d, void* _) {
   cresult.errmsg = d->msg;
   return d->code != 1; // stop on error
 }
-
-
-//———————————————————————————————————————————————————————————————————————————————————
-#ifndef RSM_NO_ASM
 
 
 WASM_EXPORT void* wcompile(const char* srcname, const char* srcdata, usize srclen) {

@@ -765,7 +765,9 @@ bool rsm_init() {
   CHECK_ERR(unixtime((i64*)&sec, &nsec), "unixtime");
   fastrand_seed(nsec);
 
-  CHECK_ERR(parse_init(), "parse_init");
+  #ifndef RSM_NO_ASM
+    CHECK_ERR(parse_init(), "parse_init");
+  #endif
 
   return true;
 error:

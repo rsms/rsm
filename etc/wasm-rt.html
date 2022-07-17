@@ -1,0 +1,30 @@
+<html lang="en">
+<head><meta charset="utf-8"><title>rsm</title>
+<script type="module">
+
+import { createRSMInstance } from "./rsm.js"
+(async() => {
+
+let rsm = await createRSMInstance("../out/rsm-rt.wasm?" + Date.now())
+console.log("rsm", rsm)
+
+let rom = rsm.createROM(new Uint8Array([
+  82, 83, 77, 0, 0, 4, 29, 0, 0, 2, 0, 0, 0,
+  65, 0, 0, 38, 131, 0, 128, 17, 64, 0, 0, 16,
+  67, 8, 0, 37, 3, 255, 127, 41, 0, 0, 0]))
+
+console.log("loaded ROM", rom, rom.data())
+console.log("vm code:\n" + rsm.fmtprog(rom))
+
+console.log("running program")
+let result = rsm.exec(rom, 6)
+console.log("program ended. Register state:", result)
+
+rom.dispose()
+
+})()
+</script>
+</head>
+<body>
+</body>
+</html>

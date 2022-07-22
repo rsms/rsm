@@ -92,11 +92,12 @@ Page Table Entry
 
   With 4096B pages, we need 52 bits for host-page addresses (addr >> 12 (12=log2(4096)).)
   In practice we could use fewer bits as the host is likely only using 48 or 52 bits of
-  address space, not the full 64 bits. But to make the implementation simpler, use 52.
-  Each page table is allocated in an even number of host pages, making it
-  possible to store the PTE "value" (address of the next table or page) in 36 bits.
-  Making each PTE 8 bytes (64 bits total) with 4 levels page tables means each page
-  table is exactly one 4096 page large: (2^9=512) * 8 = 4096. Nice.
+  address space, not the full 64 bits. But, to make the implementation simpler,
+  we assume 64 bits (i.e 52 bits of the PTE, for page addressing.)
+  Each page table is allocated in an even number of host pages, making it possible
+  to store the PTE "value" (address of the next table or page) in 52 bits.
+  Making each PTE 8 bytes (64 bits total) with 4 levels page tables means that
+  each page table is exactly one 4096 page large: (2^9=512) * 8 = 4096. Nice.
 
         ┌─────────────────────────────────────────────────────────────────────┐
         │                          Page Table Entry                           │
@@ -120,7 +121,7 @@ References
   https://pages.cs.wisc.edu/~remzi/OSTEP/vm-smalltables.pdf
 
   "Introduction to Virtual Memory"
-  Burt Rosenberg, Oct 2009
+  Burt Rosenberg (2009)
   https://cs.miami.edu/home/burt/learning/Csc521.101/notes/virtual-memory-notes.html
 
   "FreeBSD Architecture Handbook", chapter 7 "Virtual Memory System"
@@ -150,3 +151,6 @@ References
   "Hypervisor From Scratch – Part 4: Address Translation Using Extended Page Table (EPT)"
   Mohammad Sina Karvandi
   https://rayanfam.com/topics/hypervisor-from-scratch-part-4/
+
+  "PAGE REPLACEMENT IN VMSIM"
+  Ananya R, Chirag Jamadagni (2015)

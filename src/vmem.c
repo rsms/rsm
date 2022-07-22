@@ -26,9 +26,9 @@
 #define PTE_FMT          "(0x%llx)"
 #define PTE_FMTARGS(pte) (pte).outaddr
 
-static_assert(IS_POW2(PAGE_SIZE), "PAGE_SIZE is not a power-of-two");
+static_assert(IS_POW2(PAGE_SIZE),       "PAGE_SIZE is not a power-of-two");
 static_assert(PAGE_SIZE >= sizeof(u64), "PAGE_SIZE too small");
-static_assert(PAGE_SIZE <= 65536, "PAGE_SIZE too large");
+static_assert(PAGE_SIZE <= 65536,       "PAGE_SIZE too large");
 
 
 // mhost_t - host memory map
@@ -200,6 +200,7 @@ static void vmem_test() {
   dlog("PAGE_SIZE:       %5u", PAGE_SIZE);
   dlog("VADDR_BITS:      %5u", VADDR_BITS);
   dlog("VADDR_OFFS_BITS: %5u", VADDR_OFFS_BITS);
+  dlog("VFN_BITS:        %5u", VFN_BITS);
   dlog("PT_LEVELS:       %5u", PT_LEVELS);
   dlog("PT_BITS:         %5u", PT_BITS);
 
@@ -223,11 +224,11 @@ static void vmem_test() {
     u64 vfn = vaddr_to_vfn(vaddr);
     dlog("—— mpagedir_lookup(addr 0x%llx, vfn 0x%llx) ——", vaddr, vfn);
     mpte_t pte = mpagedir_lookup_pte(pagedir, vfn);
-    uintptr host_page = (uintptr)(pte.outaddr << VADDR_OFFS_BITS);
-    uintptr host_addr = host_page + (uintptr)vaddr_offs(vaddr);
+    uintptr hpage = (uintptr)(pte.outaddr << VADDR_OFFS_BITS);
+    uintptr haddr = hpage + (uintptr)vaddr_offs(vaddr);
     // dlog("=> PTE" PTE_FMT ", host page 0x%lx, host address 0x%lx",
-    //   PTE_FMTARGS(pte), host_page, host_addr);
-    dlog("vaddr 0x%llx => host address 0x%lx (page 0x%lx)", vaddr, host_page, host_addr);
+    //   PTE_FMTARGS(pte), hpage, haddr);
+    dlog("vaddr 0x%llx => host address 0x%lx (page 0x%lx)", vaddr, haddr, hpage);
   }
 
 

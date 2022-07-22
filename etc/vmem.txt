@@ -105,3 +105,48 @@ Page Table Entry
         │ ............ │ .................................................... │
   use   │ metadata     │ output address                                       │
         └──────────────┴──────────────────────────────────────────────────────┘
+
+
+References
+
+  "The Adaptive Radix Tree: ARTful Indexing for Main-Memory Databases"
+  Viktor Leis, Alfons Kemper, Thomas Neumann
+
+  "Some Efficient Techniques for Simulating Memory"
+  Peter Magnusson, Bengt Werner
+
+  "Operating Systems: Three Easy Pieces", chapter 20 "Advanced Page Tables"
+  Remzi H. Arpaci-Dusseau, Andrea C. Arpaci-Dusseau
+  https://pages.cs.wisc.edu/~remzi/OSTEP/vm-smalltables.pdf
+
+  "Introduction to Virtual Memory"
+  Burt Rosenberg, Oct 2009
+  https://cs.miami.edu/home/burt/learning/Csc521.101/notes/virtual-memory-notes.html
+
+  "FreeBSD Architecture Handbook", chapter 7 "Virtual Memory System"
+  https://docs.freebsd.org/en/books/arch-handbook/vm/
+
+  "Code Tour: Kernel virtual memory system in SerenityOS"
+  https://youtube.com/watch?v=3xgOybGlYes
+
+  "Paging" in the OS Dev wiki (x86)
+  https://wiki.osdev.org/Paging
+
+  "Notes on x86_64 Linux Memory Management Part 1: Memory Addressing"
+  Jason Cai
+  https://jasoncc.github.io/kernel/jasonc-mm-x86.html
+
+  "AArch64 MMU Programming"
+  Ilya Kartashov
+  https://lowenware.com/blog/osdev/aarch64-mmu-programming/
+
+  "x86 Paging Tutorial"
+  Ciro Santilli
+  https://cirosantilli.com/x86-paging
+
+  paging in bochs emulator (bochs/cpu/paging.cc@b8f38eb8d3a9a3dd57a)
+  https://github.com/stlintel/Bochs
+
+  "Hypervisor From Scratch – Part 4: Address Translation Using Extended Page Table (EPT)"
+  Mohammad Sina Karvandi
+  https://rayanfam.com/topics/hypervisor-from-scratch-part-4/

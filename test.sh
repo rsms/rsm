@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 
 for f in examples/*.rsm; do
   echo "——————————————————————————————————————————————————————————————————————————"
-  ROM=${f%*.rsm}.rom
+  ROM=${f##*/} ; ROM=out/test_${ROM%*.rsm}.rom
 
   echo "rsm -o '$ROM' '$f'"
   out/rsm -o "$ROM" "$f"

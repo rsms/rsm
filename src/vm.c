@@ -4,63 +4,375 @@
 
 //#define DEBUG_VM_LOG_LOADSTORE // define to dlog LOAD and STORE operations
 
-#define M_SEG_COUNT 64  // must be pow2. max mapped devices = M_SEG_COUNT-2
-#if USIZE_MAX >= 0xFFFFFFFFFFFFFFFFu
-  #define M_SEG_SIZE ((usize)1024*1024*1024*1024) // 1TB. must be pow2
-#else
-  #define M_SEG_SIZE ((usize)1024*1024*1024) // 1GB. must be pow2
-#endif
-static_assert(M_SEG_COUNT == CEIL_POW2(M_SEG_COUNT), "M_SEG_COUNT is not pow2");
-static_assert(M_SEG_SIZE == CEIL_POW2(M_SEG_SIZE), "M_SEG_SIZE is not pow2");
-static_assert(U64_MAX/M_SEG_COUNT >= M_SEG_SIZE, "too many segments / M_SEG_SIZE too large");
-
-typedef struct vmstate vmstate;
-struct vmstate {
-  usize inlen; // number of instructions at inv
-  union { usize datasize, stacktop; };  // aka
-  union { usize heapbase, stackbase; }; // aka
-  // memory segments
-  void* mbase[M_SEG_COUNT]; // [0]=RAM, [N]=devN ... [M_SEG_COUNT-1]=invalid
-  usize msize[M_SEG_COUNT];
-};
-
-// vm interperter functions signature
-#define VMPARAMS vmstate* vs, u64* iregs, const rinstr* inv, usize pc
-#define VMARGS   vs, iregs, inv, pc
-
-#if defined(DEBUG) && !defined(RSM_NO_LIBC)
-  #include <stdio.h>
-  static void logstate_header() {
-    fprintf(stderr, "\e[2m");
-    for (int i = 0; i < 6; i++)
-      fprintf(stderr, "  " REG_FMTNAME_PAT, REG_FMTNAME(i));
-    fprintf(stderr, "  │  PC  INSTRUCTION\e[22m\n");
-  }
-  static void logstate(VMPARAMS) {
-    for (int i = 0; i < 6; i++)
-      fprintf(stderr, REG_FMTVAL_PAT("%4llx"), REG_FMTVAL(i, iregs[i]));
-    char buf[128];
-    rsm_fmtinstr(buf, sizeof(buf), inv[pc], NULL, RSM_FMT_COLOR);
-    fprintf(stderr, "  │ %3ld  %s\n", pc, buf);
-  }
-  #ifdef DEBUG_VM_LOG_LOADSTORE
-    #define log_loadstore dlog
-  #else
-    #define log_loadstore(...) ((void)0)
-  #endif
-#else
-  #define logstate(...)        ((void)0)
-  #define logstate_header(...) ((void)0)
-  #define log_loadstore(...)   ((void)0)
-#endif
-
-// constants
+// stack constants
 #define STK_ALIGN    8           // stack alignment (== sizeof(u64))
 #define STK_MIN      2048        // minium stack size (TODO: consider making part of ROM)
 #define STK_MAX      (1024*1024) // maximum stack size
-#define MAIN_RET_PC  USIZE_MAX   // special PC value representing the main return address
+static_assert(STK_MIN % STK_ALIGN == 0, "STK_MIN not aligned to STK_ALIGN");
 
-// accessor macros
+// MAIN_RET_PC: special PC value representing the main return address
+#define MAIN_RET_PC  USIZE_MAX
+
+//———————————————————————————————————————————————————————————————————————————————————
+// vm v2
+
+// SCHED_TRACE: when defined, verbose log tracing on stderr is enabled.
+// The value is used as a prefix for log messages.
+#define SCHED_TRACE "\e[1m▍\e[0m "
+
+// S_MAXPROCS is the upper limit of concurrent P's; the effective CPU parallelism limit.
+// There are no fundamental restrictions on the value.
+// S_MAXPROCS pointers are allocated in S.allp[S_MAXPROCS].
+#define S_MAXPROCS 256
+
+// P_RUNQSIZE is the size of P.runq. Must be power-of-two (2^N)
+#define P_RUNQSIZE 256 // 256 is the value Go 1.16 uses
+
+// - stack per coroutine
+// - shared heap
+// - ROM data is shared (like a second heap)
+// - TODO: ROM instructions assume its global data starts at address 0x0
+//         Either a "linker" needs to rewrite all data addresses when loading a ROM,
+//         or we need memory translation per ROM (ie. depending on instruction origin.)
+//
+// Main scheduling concepts:
+// - T for Task, a coroutine task
+// - M for Machine, an OS thread
+// - P for Processor, an execution resource required to execute a T
+// - S for Scheduler
+// M must have an associated P to execute T, however
+// a M can be blocked or in a syscall without an associated P.
+typedef struct S S;
+typedef struct T T;
+typedef struct M M;
+typedef struct P P;
+
+typedef u8 TStatus;
+enum TStatus {
+  // T_IDLE: task was just allocated and has not yet been initialized
+  T_IDLE = 0,
+
+  // T_RUNNABLE: task is on a run queue.
+  // It is not currently executing user code.
+  // The stack is not owned.
+  T_RUNNABLE, // 1
+
+  // T_RUNNING: task may execute user code.
+  // The stack is owned by this task.
+  // It is not on a run queue.
+  // It is assigned an M and a P (t.m and t.m.p are valid).
+  T_RUNNING, // 2
+
+  // T_SYSCALL: task is executing a system call.
+  // It is not executing user code.
+  // The stack is owned by this task.
+  // It is not on a run queue.
+  // It is assigned an M.
+  T_SYSCALL, // 3
+
+  // T_WAITING: task is blocked in the runtime.
+  // It is not executing user code.
+  // It is not on a run queue, but should be recorded somewhere
+  // (e.g., a channel wait queue) so it can be ready()d when necessary.
+  // The stack is not owned *except* that a channel operation may read or
+  // write parts of the stack under the appropriate channel
+  // lock. Otherwise, it is not safe to access the stack after a
+  // task enters T_WAITING (e.g., it may get moved).
+  T_WAITING, // 4
+
+  // T_DEAD: task is unused.
+  // It may be just exited, on a free list, or just being initialized.
+  // It is not executing user code.
+  // It may or may not have a stack allocated.
+  // The T and its stack (if any) are owned by the M that is exiting the T
+  // or that obtained the T from the free list.
+  T_DEAD, // 5
+};
+
+typedef u8 PStatus;
+enum PStatus {
+  P_IDLE = 0,
+  P_RUNNING, // Only this P is allowed to change from P_RUNNING
+  P_SYSCALL,
+  P_DEAD,
+};
+
+// tctx: task execution context used for task switching, stored on stack
+typedef struct {
+  double fregs[RSM_NREGS - RSM_NTMPREGS];
+  u64    iregs[RSM_NREGS - RSM_NTMPREGS - 1]; // does not include SP
+} __attribute__((__aligned__(STK_ALIGN))) tctx;
+
+struct T {
+  u64         id;
+  S*          s;         // parent scheduler
+  M* nullable m;         // attached M
+  T* nullable parent;    // task that spawned this task
+  T* nullable schedlink; // next task to be scheduled
+
+  usize         pc;     // program counter; next instruction = iv[pc]
+  usize         instrc; // instruction count
+  const rinstr* instrv; // instruction array
+  const void*   rodata; // global read-only data (from ROM)
+
+  void*   sp;       // saved SP register value used by m_switchtask
+  uintptr stacktop; // end of stack (lowest valid stack address)
+
+  u64              waitsince; // approx time when the T became blocked
+  _Atomic(TStatus) status;
+};
+
+struct M {
+  u32         id;
+  T           t0;       // task with scheduling stack (m_start entry)
+  S*          s;        // parent scheduler
+  P* nullable p;        // attached p for executing Ts (NULL if not executing)
+  T* nullable currt;    // current running task
+  u32         locks;    // number of logical locks held by Ts to this M
+  bool        spinning; // m is out of work and is actively looking for work
+  bool        blocked;  // m is blocked on a note
+
+  // vm register values
+  u64    iregs[RSM_NREGS];
+  double fregs[RSM_NREGS];
+};
+
+struct P {
+  u32         id;        // corresponds to offset in s.allp
+  u32         schedtick; // incremented on every scheduler call
+  PStatus     status;
+  bool        preempt; // this P should be enter the scheduler ASAP
+  S*          s;       // parent scheduler
+  M* nullable m;       // associated m (NULL when P is idle)
+
+  // Queue of runnable tasks. Accessed without lock.
+  _Atomic(u32) runqhead;
+  _Atomic(u32) runqtail;
+  T*           runq[P_RUNQSIZE];
+  // runnext, if non-NULL, is a runnable T that was ready'd by
+  // the current T and should be run next instead of what's in
+  // runq if there's time remaining in the running T's time
+  // slice. It will inherit the time left in the current time
+  // slice. If a set of coroutines is locked in a
+  // communicate-and-wait pattern, this schedules that set as a
+  // unit and eliminates the (potentially large) scheduling
+  // latency that otherwise arises from adding the ready'd
+  // coroutines to the end of the run queue.
+  _Atomic(T*) runnext;
+};
+
+// typedef struct mpage mpage;
+// struct mpage {
+//   mpage* nullable next;
+//   mpage* nullable prev;
+// };
+
+struct S {
+  rvm  pub;       // public API
+  rmem mem;       // memory allocator
+  M    m0;        // main M (bound to the OS thread which rvm_main is called on)
+  T*   t0;        // main task on m0
+  u32  maxmcount; // limit number of M's created (ie. OS thread limit)
+
+  _Atomic(u64) tidgen; // T.id generator
+  _Atomic(u32) midgen; // M.id generator
+
+  P*           allp[S_MAXPROCS]; // all live P's (managed by s_procresize)
+  _Atomic(u32) nprocs;           // max active Ps (also num valid P's in allp)
+
+  // TODO: paged virtual memory implementation
+  void* heapbase; // heap memory base address
+  usize heapsize; // heap memory size
+
+  // allt holds all live T's
+  struct {
+    mtx_t        lock;
+    _Atomic(T**) ptr; // atomic for reading; lock used for writing
+    _Atomic(u32) len; // atomic for reading; lock used for writing
+    u32          cap; // capacity of ptr array
+  } allt;
+
+  // // vmem holds virtual memory data
+  // struct {
+  //   mpage* freephead;
+  //   mpage* usedphead;
+  // } vmem;
+};
+
+// stackbase == address of T*
+#define TASK_STACKBASE(t) ((void*)(t))
+
+
+// t_get() and _g_t is thread-local storage of the current task on current OS thread
+static _Thread_local T* _g_t = NULL;
+static ALWAYS_INLINE T* t_get() { return _g_t; }
+
+
+// vm interperter functions signature
+#define VMPARAMS T* t, u64* iregs, const rinstr* inv, usize pc
+#define VMARGS   t, iregs, inv, pc
+
+
+// trace(const char* fmt, ...) -- debug tracing
+#if defined(SCHED_TRACE) && !defined(RSM_NO_LIBC)
+  #include <stdio.h>
+  static void _vmtrace(const char* fmt, ...) {
+    T* _t_ = t_get();
+    FILE* fp = stderr;
+    flockfile(fp);
+    const char* prefix = SCHED_TRACE;
+    fwrite(prefix, strlen(prefix), 1, fp);
+    if (_t_ != NULL) {
+      char T_color = (char)('1' + (_t_->id % 6));
+      if (_t_->m != NULL) {
+        char M_color = (char)('1' + (_t_->m->id % 6));
+        if (_t_->m->p != NULL) {
+          char P_color = (char)('1' + (_t_->m->p->id % 6));
+          fprintf(fp, "\e[1;3%cmM%u\e[0m \e[1;3%cmP%u\e[0m \e[1;3%cmT%-2llu\e[0m ",
+            M_color, _t_->m->id,
+            P_color, _t_->m->p->id,
+            T_color, _t_->id);
+        } else {
+          fprintf(fp, "\e[1;3%cmM%u\e[0m \e[1;2mP-\e[0m \e[1;3%cmT%-2llu\e[0m ",
+            M_color, _t_->m->id,
+            T_color, _t_->id);
+        }
+      } else {
+        fprintf(fp, "\e[1;2mM-\e[0m \e[1;3%cmT%-2llu\e[0m ",
+          T_color, _t_->id);
+      }
+    } else {
+      fprintf(fp, "\e[1;2mM- T-\e[0m ");
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(fp, fmt, ap);
+    va_end(ap);
+    funlockfile(fp);
+  }
+  #define trace(fmt, ...) \
+    _vmtrace("\e[1;36m%-15s\e[39m " fmt "\e[0m\n", __FUNCTION__, ##__VA_ARGS__)
+#else
+  #define trace(...) do{}while(0)
+#endif
+
+
+#if defined(DEBUG) && !defined(RSM_NO_LIBC)
+  #include <stdio.h>
+  static void vmexec_logstate_header() {
+    fprintf(stderr, "\e[2m");
+    for (int i = 0; i < 6; i++) {
+      fprintf(stderr, "  " REG_FMTNAME_PAT, REG_FMTNAME(i));
+    }
+    fprintf(stderr, "    \e[9%cmSP\e[39m  │  PC  INSTRUCTION\e[22m\n",
+      REG_FMTCOLORC(RSM_MAX_REG));
+  }
+  static void vmexec_logstate(VMPARAMS) {
+    for (int i = 0; i < 6; i++) {
+      fprintf(stderr, REG_FMTVAL_PAT("%4llx"), REG_FMTVAL(i, iregs[i]));
+    }
+    char buf[128];
+    rsm_fmtinstr(buf, sizeof(buf), inv[pc], NULL, RSM_FMT_COLOR);
+    fprintf(stderr, REG_FMTVAL_PAT("%6llx") "  │ %3ld  %s\n",
+      REG_FMTVAL(RSM_MAX_REG, iregs[RSM_MAX_REG]), pc, buf);
+  }
+  #ifdef DEBUG_VM_LOG_LOADSTORE
+    #define vmexec_logmemop dlog
+  #else
+    #define vmexec_logmemop(...) ((void)0)
+  #endif
+#else
+  #define vmexec_logstate(...)        ((void)0)
+  #define vmexec_logstate_header(...) ((void)0)
+  #define vmexec_logmemop(...)        ((void)0)
+#endif
+
+
+//———————————————————————————————————————————————————————————————————————————————————
+// runtime error checking & reporting
+typedef u32 vmerror;
+enum vmerror {
+  VM_E_UNALIGNED_STORE = 1,
+  VM_E_UNALIGNED_ACCESS,
+  VM_E_UNALIGNED_STACK,
+  VM_E_STACK_OVERFLOW,
+  VM_E_OOB_LOAD,
+  VM_E_OOB_STORE,
+  VM_E_OOB_PC,
+  VM_E_OPNOI,
+  VM_E_SHIFT_EXP,
+} RSM_END_ENUM(vmerror)
+#if RSM_SAFE
+  static void _vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
+    char buf[2048];
+    abuf s1 = abuf_make(buf, sizeof(buf)); abuf* b = &s1;
+    pc--; // undo the increment to make pc point to the violating instruction
+    #define _(ERR, fmt, args...) case ERR: abuf_fmt(b, fmt, ##args); break;
+    switch ((enum vmerror)err) {
+      _(VM_E_UNALIGNED_STORE, "unaligned memory store %llx (align %llu B)", arg1, arg2)
+      _(VM_E_UNALIGNED_ACCESS,"unaligned memory access %llx (align %llu B)", arg1, arg2)
+      _(VM_E_UNALIGNED_STACK, "unaligned stack pointer SP=%llx (align %d B)", arg1, STK_ALIGN)
+      _(VM_E_STACK_OVERFLOW,  "stack overflow %llx (align %llu B)", arg1, arg2)
+      _(VM_E_OOB_LOAD,        "memory load out of bounds %llx (align %llu B)", arg1, arg2)
+      _(VM_E_OOB_STORE,       "memory store out of bounds %llx (align %llu B)", arg1, arg2)
+      _(VM_E_OOB_PC,          "PC out of bounds %llx", arg1)
+      _(VM_E_OPNOI,           "op %s does not accept immediate value", rop_name(arg1))
+      _(VM_E_SHIFT_EXP,       "shift exponent %llu is too large", arg1)
+    }
+    #undef _
+    abuf_c(b, '\n');
+
+    abuf_fmt(b, "  %08lx  ", pc);
+    fmtinstr(b, inv[pc], RSM_FMT_COLOR);
+    abuf_c(b, '\n');
+
+    abuf_str(b, "Register state:");
+    for (u32 i = 0, endi = RSM_MAX_REG; i < endi; i++) {
+      if (i % 8 == 0) {
+        usize len = b->len;
+        abuf_fmt(b, "\n  R%u…%u", i, MIN(i+7, endi-1));
+        abuf_fill(b, ' ', 10 - (b->len - len - 1));
+      }
+      abuf_fmt(b, " %8llx", iregs[i]);
+    }
+
+    abuf_terminate(b);
+    log("%s", buf);
+    abort();
+  }
+  #define __vmerr_NARGS_X(a,b,c,d,...) d
+  #define __vmerr_NARGS(...) __vmerr_NARGS_X(__VA_ARGS__,3,2,1,0,)
+  #define __vmerr_CONCAT_X(a,b) a##b
+  #define __vmerr_CONCAT(a,b) __vmerr_CONCAT_X(a,b)
+  #define __vmerr_DISP(a,...) __vmerr_CONCAT(a,__vmerr_NARGS(__VA_ARGS__))(__VA_ARGS__)
+  #define __vmerr1(err)     err, 0, 0
+  #define __vmerr2(err,a)   err, a, 0
+  #define __vmerr3(err,a,b) err, a, b
+  #define vmerr(...) _vmerr(VMARGS, __vmerr_DISP(__vmerr,__VA_ARGS__))
+  #define check(cond, ...) if UNLIKELY(!(cond)) vmerr(__VA_ARGS__)
+#else
+  #define check(cond, ...) ((void)0)
+#endif // RSM_SAFE
+
+#define check_loadstore(addr, align, ealign, eoob) { \
+  check(IS_ALIGN2(addr, align), ealign, addr, align); \
+  check(addr <= endaddr(VMARGS, addr), eoob, addr, align); \
+}
+
+#define check_shift(exponent) check((exponent) < 64, VM_E_SHIFT_EXP, exponent)
+
+#if RSM_SAFE
+  // endaddr returns the fist invalid address for the segment addr is apart of.
+  // (In other words: it returns the last valid address + 1.)
+  inline static u64 endaddr(VMPARAMS, u64 addr) {
+    return addr + t->s->heapsize;
+  }
+#endif
+
+// END runtime error checking & reporting
+//———————————————————————————————————————————————————————————————————————————————————
+// register accessor macros
+
 #define SP  iregs[RSM_MAX_REG]  // R31
 #define PC  pc
 
@@ -89,110 +401,16 @@ struct vmstate {
 #define RCrs ((i64)( RSM_GET_i(in) ? RSM_GET_Cs(in) : iregs[RSM_GET_Cu(in)] ))
 #define RDrs ((i64)( RSM_GET_i(in) ? RSM_GET_Ds(in) : iregs[RSM_GET_Du(in)] ))
 
-// runtime error checking & reporting
-#if RSM_SAFE
-typedef u32 vmerror;
-enum vmerror {
-  VM_E_UNALIGNED_STORE = 1,
-  VM_E_UNALIGNED_ACCESS,
-  VM_E_UNALIGNED_STACK,
-  VM_E_STACK_OVERFLOW,
-  VM_E_OOB_LOAD,
-  VM_E_OOB_STORE,
-  VM_E_OOB_PC,
-  VM_E_OPNOI,
-  VM_E_SHIFT_EXP,
-} RSM_END_ENUM(vmerror)
-
-static void _vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
-  char buf[2048];
-  abuf s1 = abuf_make(buf, sizeof(buf)); abuf* s = &s1;
-  pc--; // undo the increment to make pc point to the violating instruction
-  #define S(ERR, fmt, args...) case ERR: abuf_fmt(s, fmt, ##args); break;
-  switch ((enum vmerror)err) {
-    S(VM_E_UNALIGNED_STORE, "unaligned memory store %llx (align %llu B)", arg1, arg2)
-    S(VM_E_UNALIGNED_ACCESS,"unaligned memory access %llx (align %llu B)", arg1, arg2)
-    S(VM_E_UNALIGNED_STACK, "unaligned stack pointer SP=%llx (align %d B)", arg1, STK_ALIGN)
-    S(VM_E_STACK_OVERFLOW,  "stack overflow %llx (align %llu B)", arg1, arg2)
-    S(VM_E_OOB_LOAD,        "memory load out of bounds %llx (align %llu B)", arg1, arg2)
-    S(VM_E_OOB_STORE,       "memory store out of bounds %llx (align %llu B)", arg1, arg2)
-    S(VM_E_OOB_PC,          "PC out of bounds %llx", arg1)
-    S(VM_E_OPNOI,           "op %s does not accept immediate value", rop_name(arg1))
-    S(VM_E_SHIFT_EXP,       "shift exponent %llu is too large", arg1)
-  }
-  #undef S
-  abuf_c(s, '\n');
-
-  abuf_fmt(s, "  %08lx  ", PC);
-  fmtinstr(s, inv[pc], RSM_FMT_COLOR);
-  abuf_c(s, '\n');
-
-  abuf_str(s, "Register state:");
-
-  for (u32 i = 0, endi = RSM_MAX_REG; i < endi; i++) {
-    if (i % 8 == 0) {
-      usize len = s->len;
-      abuf_fmt(s, "\n  R%u…%u", i, MIN(i+7, endi-1));
-      abuf_fill(s, ' ', 10 - (s->len - len - 1));
-    }
-    abuf_fmt(s, " %8llx", iregs[i]);
-  }
-  usize stacktop = ALIGN2(vs->datasize, STK_ALIGN);
-  usize stacksize = vs->stackbase - stacktop;
-  abuf_fmt(s, "\n  SP     %8llx", SP);
-
-  usize heapsize = vs->msize[0] - vs->heapbase;
-  abuf_fmt(s, "\nMemory: (%lu B)", vs->msize[0]);
-  abuf_fmt(s, "\n  data         0...%-8lx %10lu B", vs->datasize, vs->datasize);
-  abuf_fmt(s, "\n  stack %8lx...%-8lx %10lu B", stacktop, vs->heapbase, stacksize);
-  abuf_fmt(s, "\n  heap  %8lx...%-8lx %10lu B", vs->heapbase, vs->msize[0], heapsize);
-
-  abuf_terminate(s);
-  log("%s", buf);
-  abort();
-}
-#define __vmerr_NARGS_X(a,b,c,d,...) d
-#define __vmerr_NARGS(...) __vmerr_NARGS_X(__VA_ARGS__,3,2,1,0,)
-#define __vmerr_CONCAT_X(a,b) a##b
-#define __vmerr_CONCAT(a,b) __vmerr_CONCAT_X(a,b)
-#define __vmerr_DISP(a,...) __vmerr_CONCAT(a,__vmerr_NARGS(__VA_ARGS__))(__VA_ARGS__)
-#define __vmerr1(err)     err, 0, 0
-#define __vmerr2(err,a)   err, a, 0
-#define __vmerr3(err,a,b) err, a, b
-#define vmerr(...) _vmerr(VMARGS, __vmerr_DISP(__vmerr,__VA_ARGS__))
-#define check(cond, ...) if UNLIKELY(!(cond)) vmerr(__VA_ARGS__)
-#else
-  #define check(cond, ...) ((void)0)
-#endif // RSM_SAFE
-
-#define check_loadstore(addr, align, ealign, eoob) { \
-  check(IS_ALIGN2(addr, align), ealign, addr, align); \
-  check(addr <= endaddr(VMARGS, addr), eoob, addr, align); \
-}
-
-#define check_shift(exponent) check((exponent) < 64, VM_E_SHIFT_EXP, exponent)
-
-#if RSM_SAFE
-  // endaddr returns the fist invalid address for the segment addr is apart of.
-  // (In other words: it returns the last valid address + 1.)
-  inline static u64 endaddr(VMPARAMS, u64 addr) {
-    usize index = MIN((usize)(addr / M_SEG_SIZE), M_SEG_COUNT-1);
-    return index*M_SEG_SIZE + vs->msize[index];
-  }
-#endif
-
-// mbase_index translates a vm address to a host address's index in vs->mbase
-inline static usize mbase_index(VMPARAMS, u64 addr) {
-  usize index = (usize)(addr / M_SEG_SIZE);
-  check(index < M_SEG_COUNT, VM_E_OOB_STORE, addr);
-  return index;
-}
 
 // hostaddr translates a vm address to a host address
 inline static void* hostaddr(VMPARAMS, u64 addr) {
-  usize index = mbase_index(VMARGS, addr);
-  addr -= index * M_SEG_SIZE;
-  return vs->mbase[index] + addr;
+  // TODO FIXME virtual address table (or something more reliable)
+  // [TMP XXX] for now, assume lower addresses refer to global data
+  if (addr < 0xffff) {
+    //dlog("get host address of ROM global 0x%llu", addr);
+    return (void*)t->rodata + (uintptr)addr;
+  }
+  return (void*)(uintptr)addr;
 }
 
 inline static void* hostaddr_check_access(VMPARAMS, u64 align, u64 addr) {
@@ -200,124 +418,26 @@ inline static void* hostaddr_check_access(VMPARAMS, u64 align, u64 addr) {
   return hostaddr(VMARGS, addr);
 }
 
-// inline u64 LOAD(TYPE, u64 addr)
-#define LOAD(TYPE, addr) ({ u64 a__=(addr); \
+// inline u64 MLOAD(TYPE, u64 addr)
+#define MLOAD(TYPE, addr) ({ \
+  u64 a__=(addr); \
   u64 v__ = *(TYPE*)hostaddr_check_access(VMARGS, sizeof(TYPE), a__); \
-  log_loadstore("LOAD  %s mem[0x%llx] => 0x%llx", #TYPE, a__, v__); \
+  vmexec_logmemop("LOAD  %s mem[0x%llx] => 0x%llx", #TYPE, a__, v__); \
   v__; \
 })
 
-// inline void STORE(TYPE, u64 addr, u64 value)
-#define STORE(TYPE, addr, value) { u64 a__=(addr), v__=(value); \
-  log_loadstore("STORE %s mem[0x%llx] <= 0x%llx", #TYPE, a__, v__); \
+// inline void MSTORE(TYPE, u64 addr, u64 value)
+#define MSTORE(TYPE, addr, value) { \
+  u64 a__=(addr), v__=(value); \
+  vmexec_logmemop("STORE %s mem[0x%llx] <= 0x%llx", #TYPE, a__, v__); \
   check_loadstore(a__, sizeof(TYPE), VM_E_UNALIGNED_STORE, VM_E_OOB_STORE); \
-  usize index = mbase_index(VMARGS, a__); \
-  *(TYPE*)(vs->mbase[index] + a__ - index*M_SEG_SIZE) = v__; \
-}
-
-// inline void STORE_RAM(TYPE, u64 addr, u64 value)
-#define STORE_RAM(TYPE, addr, value) { u64 a__=(addr), v__=(value);  \
-  log_loadstore("STORE %s mem[0x%llx] <= 0x%llx", #TYPE, a__, v__); \
-  assert(a__ < M_SEG_SIZE); \
-  check_loadstore(a__, sizeof(TYPE), VM_E_UNALIGNED_STORE, VM_E_OOB_STORE); \
-  *(u64*)(vs->mbase[0] + (uintptr)a__) = v__; \
-}
-
-// libc
-isize write(int fd, const void* buf, usize nbyte);
-isize read(int fd, void* buf, usize nbyte);
-
-static u64 _write(VMPARAMS, u64 fd, u64 addr, u64 size) {
-  // RA = write srcaddr=RB size=R(C) fd=Du
-  void* src = hostaddr_check_access(VMARGS, 1, addr);
-  return (u64)write((int)fd, src, (usize)size);
-}
-
-static u64 _read(VMPARAMS, u64 fd, u64 addr, u64 size) {
-  // RA = read dstaddr=RB size=R(C) fd=Du
-  void* dst = hostaddr_check_access(VMARGS, 1, addr);
-  return (u64)read((int)fd, dst, (usize)size);
-}
-
-//————————————————————————————————————————————————————————————————————————————————————————
-// BEGIN memory-mapped devices experiment
-typedef struct rvm_dev_t rvm_dev_t;
-struct rvm_dev_t {
-  u32 id;
-  rerror(*open)(rvm_dev_t*, void** mp, usize* msizep, u32 flags);
-  rerror(*close)(rvm_dev_t*, void* m, usize msize);
-  rerror(*refresh)(rvm_dev_t*, void* m, usize msize, u32 flags);
-};
-
-static void* testdev_mem[32/sizeof(void*)];
-static rerror tesdev_open(rvm_dev_t* dev, void** mp, usize* msizep, u32 flags) {
-  *mp = testdev_mem;
-  *msizep = sizeof(testdev_mem);
-  return 0;
-}
-static rerror tesdev_close(rvm_dev_t* dev, void* m, usize msize) {
-  return 0;
-}
-static rerror testdev_refresh(rvm_dev_t* dev, void* m, usize msize, u32 flags) {
-  char buf[(sizeof(testdev_mem)*3) + 1];
-  abuf s = abuf_make(buf, sizeof(buf));
-  abuf_repr(&s, testdev_mem, sizeof(testdev_mem));
-  abuf_terminate(&s);
-  dlog("[testdev_refresh] device memory contents:\n\"%s\"", buf);
-  return 0;
-}
-static rvm_dev_t testdev = {
-  .id      = 1,
-  .open    = &tesdev_open,
-  .close   = &tesdev_close,
-  .refresh = &testdev_refresh,
-};
-
-static u64 dev_open(VMPARAMS, u64 devid) {
-  dlog("dev_open #%llu", devid);
-  if (devid < 1 || devid > M_SEG_COUNT-1)
-    return 0;
-  testdev.id = (u32)devid;
-  rerror err = testdev.open(&testdev, &vs->mbase[devid], &vs->msize[devid], 0);
-  if (err) {
-    log("devopen [%u] failed: %s", testdev.id, rerror_str(err));
-    return 0;
-  }
-  u64 addr = devid * M_SEG_SIZE;
-  dlog("[dev_open] addr 0x%llx, membase %p", addr, vs->mbase[devid]);
-  return addr;
-}
-// END memory-mapped devices experiment
-//————————————————————————————————————————————————————————————————————————————————————————
-
-static void scall(VMPARAMS, u8 ar, rinstr in) {
-  dlog("scall not implemented");
-}
-
-inline static void push(VMPARAMS, u64 size, u64 val) {
-  u64 addr = SP;
-  check(addr >= size && addr - size >= vs->stacktop, VM_E_STACK_OVERFLOW, addr);
-  addr -= size;
-  SP = addr;
-  STORE_RAM(u64, addr, val);
-}
-
-inline static u64 pop(VMPARAMS, usize size) {
-  usize addr = SP;
-  check(USIZE_MAX-addr >= size && addr+size <= vs->stackbase, VM_E_STACK_OVERFLOW, addr);
-  SP = addr + size;
-  return LOAD(u64, addr);
-}
-
-static void push_PC(VMPARAMS) {
-  // save PC on stack
-  check(IS_ALIGN2(SP, STK_ALIGN), VM_E_UNALIGNED_STACK, SP, STK_ALIGN);
-  push(VMARGS, 8, (u64)pc);
+  void* addr__ = hostaddr(VMARGS, a__); \
+  *(TYPE*)addr__ = v__; \
 }
 
 static u64 copyv(VMPARAMS, u64 n) {
   // A = instr[PC+1] + instr[PC+2]; PC+=2
-  check(pc+n < vs->inlen, VM_E_OOB_PC, (u64)pc);
+  check(pc+n < t->instrc, VM_E_OOB_PC, (u64)pc);
   if (n == 1) return (u64)inv[pc];
   assert(n == 2);
   return (((u64)inv[pc]) << 32) | (u64)inv[pc+1];
@@ -335,7 +455,63 @@ static i64 mcmp(VMPARAMS, u64 xaddr, u64 yaddr, u64 size) {
   return (i64)memcmp(x, y, (usize)size);
 }
 
-static void vmexec(VMPARAMS) {
+// —————————— vm I/O
+
+// libc prototypes
+isize write(int fd, const void* buf, usize nbyte);
+isize read(int fd, void* buf, usize nbyte);
+
+static u64 _write(VMPARAMS, u64 fd, u64 addr, u64 size) {
+  // RA = write srcaddr=RB size=R(C) fd=Du
+  void* src = hostaddr_check_access(VMARGS, 1, addr);
+  return (u64)write((int)fd, src, (usize)size);
+}
+
+static u64 _read(VMPARAMS, u64 fd, u64 addr, u64 size) {
+  // RA = read dstaddr=RB size=R(C) fd=Du
+  void* dst = hostaddr_check_access(VMARGS, 1, addr);
+  return (u64)read((int)fd, dst, (usize)size);
+}
+
+// —————————— vm syscall
+
+static void scall(VMPARAMS, u8 ar, rinstr in) {
+  dlog("scall not implemented");
+}
+
+static u64 dev_open(VMPARAMS, u64 devid) {
+  // DEPRECATED (memory mapped devices via memory segmentation)
+  return 0;
+}
+
+// —————————— vm stack operations
+
+inline static void push(VMPARAMS, u64 size, u64 val) {
+  u64 addr = SP;
+  check(addr >= size && addr - size >= t->stacktop, VM_E_STACK_OVERFLOW, addr);
+  addr -= size;
+  SP = addr;
+  MSTORE(u64, addr, val);
+}
+
+inline static u64 pop(VMPARAMS, usize size) {
+  usize addr = SP;
+  check(
+    USIZE_MAX-addr >= size && (uintptr)addr+size <= (uintptr)TASK_STACKBASE(t),
+    VM_E_STACK_OVERFLOW, addr);
+  SP = addr + size;
+  return MLOAD(u64, addr);
+}
+
+static void push_PC(VMPARAMS) {
+  // save PC on stack
+  check(IS_ALIGN2(SP, STK_ALIGN), VM_E_UNALIGNED_STACK, SP, STK_ALIGN);
+  push(VMARGS, 8, (u64)pc);
+}
+
+// —————————— vm interpreter
+
+static void t_vmexec(VMPARAMS) {
   // This is the interpreter loop.
   // It executes instructions until the entry function returns or an error occurs.
   //
@@ -393,10 +569,12 @@ static void vmexec(VMPARAMS) {
     #endif
   #endif
 
+  vmexec_logstate_header();
+
   // instruction feed loop
   for (;;) {
     // load the next instruction and advance program counter
-    assertf(pc < vs->inlen, "pc overrun %lu", pc); logstate(VMARGS);
+    assertf(pc < t->instrc, "pc overrun %lu", pc); vmexec_logstate(VMARGS);
     rinstr in = inv[pc++];
     // preload arguments A and B as most instructions need it
     u8 ar = RSM_GET_A(in);
@@ -414,18 +592,18 @@ static void vmexec(VMPARAMS) {
     #define do_COPY(B)  RA = B
     #define do_COPYV(B) RA = copyv(VMARGS, B); pc += B;
 
-    #define do_LOAD(C)   RA = LOAD(u64, (u64)((i64)RB+(i64)C))
-    #define do_LOAD4U(C) RA = LOAD(u32, (u64)((i64)RB+(i64)C)) // zero-extend i32 to i64
-    #define do_LOAD4S(C) RA = LOAD(u32, (u64)((i64)RB+(i64)C)) // sign-extend i32 to i64
-    #define do_LOAD2U(C) RA = LOAD(u16, (u64)((i64)RB+(i64)C)) // zero-extend i16 to i64
-    #define do_LOAD2S(C) RA = LOAD(u16, (u64)((i64)RB+(i64)C)) // sign-extend i16 to i64
-    #define do_LOAD1U(C) RA = LOAD(u8,  (u64)((i64)RB+(i64)C)) // zero-extend i8 to i64
-    #define do_LOAD1S(C) RA = LOAD(u8,  (u64)((i64)RB+(i64)C)) // sign-extend i8 to i64
+    #define do_LOAD(C)   RA = MLOAD(u64, (u64)((i64)RB+(i64)C))
+    #define do_LOAD4U(C) RA = MLOAD(u32, (u64)((i64)RB+(i64)C)) // zero-extend i32 to i64
+    #define do_LOAD4S(C) RA = MLOAD(u32, (u64)((i64)RB+(i64)C)) // sign-extend i32 to i64
+    #define do_LOAD2U(C) RA = MLOAD(u16, (u64)((i64)RB+(i64)C)) // zero-extend i16 to i64
+    #define do_LOAD2S(C) RA = MLOAD(u16, (u64)((i64)RB+(i64)C)) // sign-extend i16 to i64
+    #define do_LOAD1U(C) RA = MLOAD(u8,  (u64)((i64)RB+(i64)C)) // zero-extend i8 to i64
+    #define do_LOAD1S(C) RA = MLOAD(u8,  (u64)((i64)RB+(i64)C)) // sign-extend i8 to i64
 
-    #define do_STORE(C)  STORE(u64, (u64)((i64)RB+(i64)C), RA)
-    #define do_STORE4(C) STORE(u32, (u64)((i64)RB+(i64)C), RA) // wrap i64 to i32
-    #define do_STORE2(C) STORE(u16, (u64)((i64)RB+(i64)C), RA) // wrap i64 to i16
-    #define do_STORE1(C) STORE(u8 , (u64)((i64)RB+(i64)C), RA) // wrap i64 to i8
+    #define do_STORE(C)  MSTORE(u64, (u64)((i64)RB+(i64)C), RA)
+    #define do_STORE4(C) MSTORE(u32, (u64)((i64)RB+(i64)C), RA) // wrap i64 to i32
+    #define do_STORE2(C) MSTORE(u16, (u64)((i64)RB+(i64)C), RA) // wrap i64 to i16
+    #define do_STORE1(C) MSTORE(u8 , (u64)((i64)RB+(i64)C), RA) // wrap i64 to i8
 
     #define do_PUSH(A)  push(VMARGS, 8, A)
     #define do_POP(A)   A = pop(VMARGS, 8)
@@ -499,119 +677,491 @@ static void vmexec(VMPARAMS) {
   } // loop
 }
 
-#if DEBUG
-static void log_memory(rrom* rom, vmstate* vs) {
-  void* membase = vs->mbase[0];
-  usize memsize = (usize)vs->msize[0];
-  usize stacksize = vs->stackbase - vs->stacktop;
-  usize heapsize = memsize - vs->stackbase;
-  dlog(
-    "Memory layout: (%.3f MB total)\n"
-    "     ┌─────────────────────┬────────────────────┬───────────────────────┐\n"
-    "segm │ data %12lu B │ %8lu B ← stack │ heap → %12lu B │\n"
-    "     ├─────────────────────┼────────────────────┼───────────────────────┘\n"
-    "addr 0             %8lx│%-8lx           %-8lx",
-    (double)memsize/1024.0/1024.0,
-    rom->datasize, stacksize, heapsize,
-    rom->datasize, vs->stacktop, vs->stackbase
-  );
-  if (rom->datasize > 0) {
-    char buf[1024];
-    abuf s = abuf_make(buf, sizeof(buf));
-    if (rom->datasize > sizeof(buf)/3) {
-      abuf_reprhex(&s, membase, sizeof(buf)/3 - strlen("…"));
-      abuf_str(&s, "…");
-    } else {
-      abuf_reprhex(&s, membase, rom->datasize);
-    }
-    abuf_terminate(&s);
-    dlog("Initial data contents:\n%s", buf);
+
+static inline void m_acquire(M* m) { m->locks++; }
+static inline void m_release(M* m) { m->locks--; }
+
+
+// static void t_free(T* task) {
+//   usize memsize = (usize)(((uintptr)task + (uintptr)sizeof(T)) - task->stacktop);
+//   rmem_free(task->s->mem, (void*)task->stacktop, memsize);
+// }
+
+
+// t_readstatus returns the value of t->status.
+// On many archs, including x86, this is just a plain load.
+static inline TStatus t_readstatus(T* t) {
+  return AtomicLoad(&t->status, memory_order_relaxed);
+}
+
+// t_setstatus updates t->status using using an atomic store.
+// This is only used when setting up new or recycled Ts.
+// To change T.status for an existing T, use t_casstatus instead.
+static void t_setstatus(T* t, TStatus newval) {
+  AtomicStore(&t->status, newval, memory_order_relaxed);
+}
+
+
+// t_casstatus updates t->status using compare-and-swap.
+// It blocks until it succeeds (until t->status==oldval.)
+static void t_casstatus(T* t, TStatus oldval, TStatus newval) {
+  assert(oldval != newval);
+
+  // use a temporary variable for oldval since AtomicCAS will store the current value
+  // to it on failure, but we want to swap values only when the current value is
+  // explicitly oldval.
+  TStatus oldvaltmp = oldval;
+
+  // // See https://golang.org/cl/21503 for justification of the yield delay.
+  // const u64 yieldDelay = 5 * 1000;
+  // u64 nextYield = 0;
+
+  for (int i = 0; !AtomicCASRelaxed(&t->status, &oldvaltmp, newval); i++) {
+    // Note: on failure, when we get here, oldval has been updated; we compare it
+    assertf(!(oldval == T_WAITING && oldvaltmp == T_RUNNABLE),
+           "waiting for T_WAITING but is T_RUNNABLE");
+    oldvaltmp = oldval; // restore oldvaltmp for next attempt
+
+    // TODO:
+    // if (i == 0)
+    //   nextYield = nanotime() + yieldDelay;
+    //
+    // if (nanotime() < nextYield) {
+    //   for x := 0; x < 10 && t.status != oldval; x++ {
+    //     procyield(1);
+    //   }
+    // } else {
+    //   osyield();
+    //   nextYield = nanotime() + yieldDelay/2;
+    // }
+    //
+    // temporary solution until the above has been researched & implemented
+    YIELD_THREAD();
   }
 }
-#endif // DEBUG
 
-rerror rsm_vmexec(rrom* rom, u64* iregs, void* rambase, usize ramsize) {
-  // load ROM if needed
-  if (rom->img == NULL || rom->imgsize == 0)
-    return rerr_invalid;
-  if (rom->code == NULL) {
-    rerror err = rsm_loadrom(rom);
-    if (err)
-      return err;
-    if (rom->code == NULL || rom->codelen == 0) // can't execute a ROM without code
-      return rerr_invalid;
+
+// Put t and a batch of work from local runnable queue on global queue.
+// Executed only by the owner P.
+static bool p_runqputslow(P* p, T* t, u32 head, u32 tail) {
+  panic("TODO");
+  return false;
+}
+
+
+// p_runqput tries to put t on the local runnable queue.
+// If runnext if false, runqput adds T to the tail of the runnable queue.
+// If runnext is true, runqput puts T in the p.runnext slot.
+// If the run queue is full, runnext puts T on the global queue.
+// Executed only by the owner P.
+static void p_runqput(P* p, T* t, bool runnext) {
+  // if (randomizeScheduler && runnext && (fastrand() % 2) == 0)
+  //   runnext = false;
+  T* tp = t;
+
+  if (runnext) {
+    // puts t in the p.runnext slot.
+    T* oldnext = p->runnext;
+    while (!AtomicCASAcqRel(&p->runnext, &oldnext, t)) {
+      // Note that when AtomicCAS fails, it performs a loads of the current value
+      // into oldnext, thus we can simply loop here without having to explicitly
+      // load oldnext=p->runnext.
+    }
+    trace("set p.runnext = T%llu", tp->id);
+    if (oldnext == NULL)
+      return;
+    // Kick the old runnext out to the regular run queue
+    tp = oldnext;
   }
 
-  // memory layout:
-  //    ┌─────────────┬─────────────┬───────────···
-  //    │ data        │     ← stack │ heap →
-  //    ├─────────────┼─────────────┼───────────···
-  // rambase      datasize      heapbase
-  //              stacktop      stackbase
-  //
-  // make sure rambase is aligned to most stringent alignment of data
-  uintptr ma = ALIGN2((uintptr)rambase, MAX((uintptr)rom->dataalign, STK_ALIGN));
-  if UNLIKELY(ma != (uintptr)rambase) {
-    uintptr diff = ma - (uintptr)rambase;
-    ramsize = diff > ramsize ? 0 : ramsize - diff;
-    rambase = (void*)ma;
-    dlog("adjusting rambase+%lu ramsize-%lu (address alignment)", (usize)diff, (usize)diff);
+  while (1) {
+    // load-acquire, sync with consumers
+    u32 head = AtomicLoadAcq(&p->runqhead);
+    u32 tail = p->runqtail;
+    if (tail - head < P_RUNQSIZE) {
+      trace("set p.runq[%u] = T%llu", tail % P_RUNQSIZE, tp->id);
+      p->runq[tail % P_RUNQSIZE] = tp;
+      // store memory_order_release makes the item available for consumption
+      AtomicStoreRel(&p->runqtail, tail + 1);
+      return;
+    }
+    // Put t and move half of the locally scheduled runnables to global runq
+    if (p_runqputslow(p, tp, head, tail))
+      return;
+    // the queue is not full, now the put above must succeed. retry...
+  }
+}
+
+
+// Get T from local runnable queue.
+// If inheritTime is true, T should inherit the remaining time in the current time slice.
+// Otherwise, it should start a new time slice.
+// Executed only by the owner P.
+static T* p_runqget(P* p, bool* inheritTime) {
+  // If there's a runnext, it's the next G to run.
+  while (1) {
+    T* next = p->runnext;
+    if (next == NULL)
+      break;
+    if (AtomicCASAcqRel(&p->runnext, &next, NULL)) {
+      *inheritTime = true;
+      return next;
+    }
   }
 
-  // check if we have enough memory for ROM data
-  if UNLIKELY(ramsize < STK_MIN || rom->datasize > ramsize - STK_MIN)
-    return rerr_nomem;
+  trace("no runnext; trying dequeue p->runq");
+  *inheritTime = false;
 
-  // limit RAM memory size to M_SEG_SIZE
-  if (ramsize > M_SEG_SIZE) {
-    dlog("memory size capped at %zu B", M_SEG_SIZE);
-    ramsize = M_SEG_SIZE;
+  while (1) {
+    u32 head = AtomicLoadAcq(&p->runqhead); // load-acquire, sync with consumers
+    u32 tail = p->runqtail;
+    if (tail == head)
+      return NULL;
+    // trace("loop2 tail != head; load p->runq[%u]", head % P_RUNQSIZE);
+    T* tp = p->runq[head % P_RUNQSIZE];
+    // trace("loop2 tp => %p", tp);
+    // trace("loop2 tp => T#%llu", tp->id);
+    if (AtomicCASRel(&p->runqhead, &head, head + 1)) // cas-release, commits consume
+      return tp;
+    trace("CAS failure; retry");
+  }
+}
+
+
+static rerror s_allt_add(S* s, T* t) {
+  assert(t->s == s);
+  assert(t_readstatus(t) != T_IDLE);
+
+  mtx_lock(&s->allt.lock);
+
+  if (s->allt.len == s->allt.cap) {
+    s->allt.cap = s->allt.cap + 64;
+    s->allt.ptr = rmem_resize(
+      s->mem, s->allt.ptr, s->allt.len, s->allt.cap, _Alignof(void*));
+    if UNLIKELY(s->allt.ptr == NULL) {
+      mtx_unlock(&s->allt.lock);
+      return rerr_nomem;
+    }
+    AtomicStore(&s->allt.ptr, s->allt.ptr, memory_order_release);
   }
 
-  // calculate stackbase and check if we have enough memory
-  usize stackbase; {
-    usize stacksize = MAX(STK_MIN, MIN(STK_MAX, (ramsize - rom->datasize)/2));
-    usize stacktop = ALIGN2(rom->datasize, STK_ALIGN);
-    stackbase = stacktop + ALIGN2_FLOOR(stacksize, STK_ALIGN);
-    // note: At this point stacksize is no longer logically correct.
-    //       The correct value is now: stacksize = stackbase - stacktop
-    if UNLIKELY(stackbase > ramsize)
-      return rerr_nomem; // not enough memory for STK_MIN
+  trace("set s.allt[%u] = T%llu", s->allt.len, t->id);
+  s->allt.ptr[s->allt.len++] = t;
+  AtomicStore(&s->allt.len, s->allt.len, memory_order_release);
+
+  mtx_unlock(&s->allt.lock);
+  return 0;
+}
+
+
+// TCTX_SIZE: bytes needed on stack to store a task's persistent register values
+#define TCTX_SIZE ( \
+  ((RSM_NREGS - RSM_NTMPREGS) * sizeof(u64)) + \
+  ((RSM_NREGS - RSM_NTMPREGS) * sizeof(double)) )
+
+
+// tctx layout:
+//   [byte 0] F{RSM_NTMPREGS} F{RSM_NTMPREGS+1} F{...} F{RSM_NREGS-1} ...
+//        ... R{RSM_NTMPREGS} R{RSM_NTMPREGS+1} R{...} R{RSM_NREGS-2}
+
+static void m_switchtask(M* m, T* nullable t) {
+  if (m->currt) {
+    // save context
+    panic("TODO: save context");
+  }
+  m->currt = t;
+  if (t) {
+    // restore context
+    // tctx is stored on the task stack at address SP-sizeof(tctx)
+    tctx* ctx = t->sp;
+    for (usize i = 0; i < countof(ctx->fregs); i++)
+      m->fregs[i + RSM_NTMPREGS] = ctx->fregs[i];
+    for (usize i = 0; i < countof(ctx->iregs); i++)
+      m->iregs[i + RSM_NTMPREGS] = ctx->iregs[i];
+    u64 sp = (u64)(uintptr)t->sp;
+    dlog("TODO: translate vm stack address to host address");
+    m->iregs[RSM_MAX_REG] = sp;
+  }
+}
+
+
+static T* nullable s_alloctask(S* s, usize stacksize) {
+  // task memory layout:
+  //    ┌───────────┬───────────┐
+  //    │   ← stack │ T struct  │
+  //    ├───────────┼───────────┘
+  // stacktop   stackbase
+  //            initial SP
+
+  usize alignment = MAX(_Alignof(T), STK_ALIGN);
+  stacksize = ALIGN2(stacksize, alignment);
+  usize memsize = stacksize + sizeof(T);
+
+  void* stacktop = rmem_alloc(s->mem, memsize, alignment);
+  if UNLIKELY(!stacktop)
+    return NULL;
+  memset(stacktop, 0, memsize);
+  assertf(IS_ALIGN2((uintptr)stacktop, (uintptr)alignment), "bug in rmem_alloc impl");
+
+  void* stackbase = stacktop + stacksize;
+
+  T* t = (T*)stackbase;
+  t->s = s;
+  t->stacktop = (uintptr)stacktop;
+  t->sp = stackbase;
+
+  // initialize tctx
+  tctx* ctx = (tctx*)(stackbase - sizeof(tctx));
+  ctx->iregs[RSM_MAX_REG - RSM_NTMPREGS - 1] = (u64)(uintptr)t; // CTX
+
+  // dlog("s_alloctask stack %p … %p (%lu B)",
+  //   stacktop, stackbase, (usize)((uintptr)stackbase - (uintptr)stacktop));
+
+  return t;
+}
+
+
+// s_spawn creates a new T running fn with argsize bytes of arguments.
+// stacksize is a requested minimum number of bytes to allocate for its stack. A stacksize
+// of 0 means to allocate a stack of default standard size.
+// Put it on the queue of T's waiting to run.
+// The compiler turns a go statement into a call to this.
+static rerror s_spawn(S* s, const rinstr* iv, usize ic, const void* rodata, usize pc) {
+  T* t = t_get();
+  M* m = t->m;
+  rerror err = 0;
+
+  // disable preemption
+  m_acquire(m);
+
+  // create main task
+  T* newtask = s_alloctask(s, STK_MIN);
+  if (!newtask) {
+    err = rerr_nomem;
+    goto onerr;
   }
 
-  // initialize vm state
-  vmstate vs = {
-    .inlen     = rom->codelen,
-    .datasize  = rom->datasize, // aka stacktop
-    .stackbase = stackbase,     // aka heapbase
-    .mbase = {rambase},
-    .msize = {ramsize},
-  };
+  // setup program instruction array, program counter and task ID
+  newtask->pc = pc;
+  newtask->instrc = ic;
+  newtask->instrv = iv;
+  newtask->rodata = rodata;
+  newtask->id = AtomicAdd(&s->tidgen, 1, memory_order_acquire);
 
-  // initialize registers
-  SP = (u64)stackbase;       // stack pointer
-  iregs[8] = (u64)stackbase; // R8 = heapstart
-  iregs[9] = (u64)ramsize;   // R9 = heapend
+  // add the task to the scheduler
+  t_setstatus(newtask, T_DEAD);
+  if ((err = s_allt_add(s, newtask)))
+    goto onerr;
 
-  // push main return address on stack
-  push(&vs, iregs, rom->code, 0, 8, MAIN_RET_PC);
+  // set status to runnable
+  t_setstatus(newtask, T_RUNNABLE);
 
-  // initialize global data by copying from ROM
-  if (rom->datasize > 0)
-    memcpy(rambase, rom->data, rom->datasize);
+  // get P associated with current M
+  P* p = assertnotnull(m->p);
 
-  #if DEBUG
-    log_memory(rom, &vs);
-    logstate_header();
-  #endif
+  // re-enable preemption
+  m_release(m);
 
-  vmexec(&vs, iregs, rom->code, 0);
+  // add newtask to run queue
+  p_runqput(p, newtask, /*runnext*/true);
 
-  if (vs.mbase[testdev.id]) {
-    rerror err = testdev.refresh(&testdev, vs.mbase[testdev.id], vs.msize[testdev.id], 0);
-    rerror err2 = testdev.close(&testdev, vs.mbase[testdev.id], vs.msize[testdev.id]);
-    return err ? err : err2;
-  }
+  // TODO // wake P (unless we are spawning the main task)
+  // if (s->mainstarted)
+  //   p_wake();
+
+  return 0;
+
+onerr:
+  m_release(m); // re-enable preemption
+  return err;
+}
+
+
+static rerror m_init(M* m, u64 id) {
+  m->id = id;
+
+  // configure main task
+  m->t0.m = m;
+  m->t0.status = T_RUNNING;
+  m->t0.id = AtomicAdd(&m->s->tidgen, 1, memory_order_acquire);
 
   return 0;
 }
+
+
+// schedule performs one pass of scheduling: find a runnable coroutine and execute it.
+// Never returns.
+static void schedule() {
+  T* parent_t = t_get();
+  M* m = parent_t->m;
+  P* p = m->p;
+
+  p->preempt = false;
+  bool inheritTime = false;
+
+  trace("try p_runqget");
+  T* t = p_runqget(p, &inheritTime);
+  // We can see t != NULL here even if the M is spinning,
+  // if checkTimers added a local goroutine via goready.
+  if (t)
+    trace("p_runqget found T%llu", t->id);
+
+  // This thread is going to run a coroutine and is not spinning anymore,
+  // so if it was marked as spinning we need to reset it now and potentially
+  // start a new spinning M.
+  if (m->spinning)
+    panic("TODO: m_resetspinning(m)");
+
+  // TODO: lockedm
+  // if (t->lockedm != NULL) {
+  //   // Hands off own p to the locked m, then blocks waiting for a new p
+  //   panic("TODO: startlockedm(t) ; goto top");
+  // }
+
+  // save any current task's state and restore t's state, setting m->currt
+  m_switchtask(m, t);
+
+  // Assign t->m before entering T_RUNNING so running Ts have an M
+  t->m = m;
+  t_casstatus(t, T_RUNNABLE, T_RUNNING);
+  t->waitsince = 0;
+  t->parent = parent_t;
+
+  p->schedtick += (u32)inheritTime;
+
+  _g_t = t;
+
+  t_vmexec(t, m->iregs, t->instrv, t->pc);
+}
+
+
+// m_start is the entry-point for new M's.
+// Basically the "OS thread main function."
+// M doesn't have a P yet.
+NOINLINE static rerror m_start(M* m) {
+  assert(t_get() == &m->t0);
+  // TODO: loop
+  schedule();
+  return 0;
+}
+
+
+static void p_init(P* p, u32 id) {
+  p->id = id;
+  p->status = P_IDLE;
+}
+
+
+static void p_acquire(P* p, M* m) {
+  // associates P with the current M
+  assertf(p->m == NULL, "P in use with other M");
+  assertf(m->p == NULL, "M in use with other P");
+  assert(p->status == P_IDLE);
+  m->p = p;
+  p->m = m;
+  p->status = P_RUNNING;
+}
+
+// static void p_release(P* p) {
+//   // disassociates P from its M
+//   assertnotnull(p->m);
+//   p->m->p = NULL;
+//   p->m = NULL;
+//   p->status = P_IDLE;
+// }
+
+
+static rerror s_init(S* s) {
+  // clear allt struct
+  memset(&s->allt, 0, sizeof(s->allt));
+  mtx_init(&s->allt.lock, mtx_plain);
+
+  // initialize main M (id=0) on current OS thread
+  s->midgen = 1;
+  s->maxmcount = 1000;
+  s->m0.s = s;
+  rerror err = m_init(&s->m0, 0);
+  if UNLIKELY(err)
+    return err;
+
+  // set "current task" to M's root task
+  _g_t = &s->m0.t0;
+
+  // create processors
+  u32 nprocs = 2;
+  assert(nprocs <= S_MAXPROCS);
+  s->nprocs = nprocs;
+  trace("s.nprocs=%u", nprocs);
+  for (u32 pid = 0; pid < nprocs; pid++) {
+    P* p = rmem_alloc(s->mem, sizeof(P), _Alignof(P));
+    if (!p) // TODO: free other P's we allocated
+      return rerr_nomem;
+    memset(p, 0, sizeof(P));
+    p_init(p, pid);
+    s->allp[pid] = p;
+  }
+
+  // associate P0 with M0
+  P* p = s->allp[0];
+  p->status = P_IDLE;
+  p_acquire(p, &s->m0); // associate P and M (p->m=m, m->p=p, p.status=P_RUNNING)
+
+  return err;
+}
+
+
+rerror rvm_main(rvm* vm, rrom* rom) {
+  S* s = (S*)vm;
+
+  // initialize the scheduler
+  rerror err = s_init(s);
+  if (err)
+    return err;
+
+  // load ROM
+  if (!rom->code) {
+    rerror err = rsm_loadrom(rom);
+    if (err == 0 && (rom->code == NULL || rom->codelen == 0))
+      err = rerr_invalid; // ROM without (or with empty) code section
+    return err;
+  }
+
+  // create main task
+  err = s_spawn(s, rom->code, rom->codelen, rom->data, /*pc=*/0);
+  if (err)
+    return err;
+
+  // save pointer to main task
+  s->t0 = s->m0.p->runnext;
+
+  // enter scheduler loop in M0
+  return m_start(&s->m0);
+}
+
+
+rvm* nullable rvm_create(rmem mem) {
+  S* s = rmem_alloc(mem, sizeof(S), _Alignof(S));
+  if (!s)
+    return NULL;
+  memset(s, 0, sizeof(S));
+
+  // allocate heap
+  // TODO: vmem
+  s->heapsize = mem_pagesize() * 1024; // 4MB @ 4k page size
+  s->heapbase = rmem_alloc(mem, s->heapsize, sizeof(u64));
+  if UNLIKELY(!s->heapbase) {
+    rmem_free(mem, s, sizeof(S));
+    return NULL;
+  }
+
+  s->mem = mem;
+  return (rvm*)s;
+}
+
+
+void rvm_dispose(rvm* vm) {
+  S* s = (S*)vm;
+  rmem_free(s->mem, s->heapbase, s->heapsize);
+  rmem_free(s->mem, s, sizeof(S));
+}
+

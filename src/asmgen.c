@@ -134,21 +134,22 @@ static bool check_alloc(gstate* g, void* nullable p) {
   if (check_alloc(g, vp__)) return ERRRET;          \
   vp__; })
 
-#define GSLAB_ALLOC(g, HEADFIELD, CURRFIELD, ERRRET...) ({                          \
-  if UNLIKELY(g->CURRFIELD->len == countof(g->HEADFIELD.data)) {                    \
-    if (g->CURRFIELD->next) {                                                       \
-      g->CURRFIELD = g->CURRFIELD->next;                                            \
-      assert(g->CURRFIELD->len == 0);                                               \
-    } else {                                                                        \
-      __typeof__(g->CURRFIELD) tmp__ = rmem_alloc(g->a->mem, sizeof(g->HEADFIELD)); \
-      if (check_alloc(g, tmp__))                                                    \
-        return ERRRET;                                                              \
-      tmp__->len = 0;                                                               \
-      tmp__->next = g->CURRFIELD;                                                   \
-      g->CURRFIELD = tmp__;                                                         \
-    }                                                                               \
-  }                                                                                 \
-  &g->CURRFIELD->data[g->CURRFIELD->len++];                                         \
+#define GSLAB_ALLOC(g, HEADFIELD, CURRFIELD, ERRRET...) ({          \
+  if UNLIKELY(g->CURRFIELD->len == countof(g->HEADFIELD.data)) {    \
+    if (g->CURRFIELD->next) {                                       \
+      g->CURRFIELD = g->CURRFIELD->next;                            \
+      assert(g->CURRFIELD->len == 0);                               \
+    } else {                                                        \
+      __typeof__(g->CURRFIELD) tmp__ =                              \
+        rmem_alloc(g->a->mem, sizeof(g->HEADFIELD), sizeof(void*)); \
+      if (check_alloc(g, tmp__))                                    \
+        return ERRRET;                                              \
+      tmp__->len = 0;                                               \
+      tmp__->next = g->CURRFIELD;                                   \
+      g->CURRFIELD = tmp__;                                         \
+    }                                                               \
+  }                                                                 \
+  &g->CURRFIELD->data[g->CURRFIELD->len++];                         \
 })
 
 #define NAME_LOOKUP(g, name, namelen) ({          \
@@ -1129,7 +1130,7 @@ static void report_unresolved(gstate* g) {
 static gstate* nullable init_gstate(rasm* a, rmem rommem) {
   gstate* g = rasm_gstate(a);
   if (!g) {
-    g = rmem_alloc(a->mem, sizeof(gstate));
+    g = rmem_alloc(a->mem, sizeof(gstate), _Alignof(gstate));
     if (!g)
       return NULL;
     memset(g, 0, sizeof(gstate));

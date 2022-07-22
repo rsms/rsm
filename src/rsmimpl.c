@@ -59,7 +59,7 @@
   #endif // _WIN32
 #endif // RSM_NO_LIBC
 #ifndef MEM_PAGESIZE
-  // fallback value (should match wasm32)
+  // fallback value
   #define MEM_PAGESIZE ((usize)4096U)
 #endif
 
@@ -153,7 +153,7 @@ rerror read_stdin_data(rmem m, usize maxlen, void** p_put, usize* len_out) {
       return rerr_badfd;
     usize cap = 4096;
     usize len = 0;
-    void* dst = rmem_alloc(m, cap);
+    void* dst = rmem_alloc(m, cap, 1);
     for (;;) {
       if (!dst)
         return rerr_nomem;
@@ -163,7 +163,7 @@ rerror read_stdin_data(rmem m, usize maxlen, void** p_put, usize* len_out) {
       len += (usize)n;
       if ((usize)n < cap - len)
         break;
-      dst = rmem_resize(m, dst, cap, cap*2);
+      dst = rmem_resize(m, dst, cap, cap*2, 1);
       cap *= 2;
     }
     *p_put = dst;
@@ -492,11 +492,11 @@ noreturn void _panic(const char* file, int line, const char* fun, const char* fm
 
 
 usize mem_pagesize() {
-  return MEM_PAGESIZE;
+  return (usize)MEM_PAGESIZE;
 }
 
 
-void* nullable vmem_alloc(usize nbytes) {
+void* nullable osvmem_alloc(usize nbytes) {
   #ifndef HAS_MMAP
     return NULL;
   #else
@@ -522,9 +522,6 @@ void* nullable vmem_alloc(usize nbytes) {
     #endif
 
     int mmapflags = MAP_PRIVATE | MAP_ANON
-      #ifdef MAP_NOCACHE
-      | MAP_NOCACHE // don't cache pages for this mapping
-      #endif
       #ifdef MAP_NORESERVE
       | MAP_NORESERVE // don't reserve needed swap area
       #endif
@@ -561,7 +558,7 @@ void* nullable vmem_alloc(usize nbytes) {
 }
 
 
-bool vmem_free(void* ptr, usize nbytes) {
+bool osvmem_free(void* ptr, usize nbytes) {
   #ifdef HAS_MMAP
     return munmap(ptr, nbytes) == 0;
   #else
@@ -587,7 +584,7 @@ bool rarray_grow(rarray* a, rmem m, usize elemsize, u32 addl) {
   usize newsize;
   if (check_mul_overflow((usize)newcap, elemsize, &newsize))
     return false;
-  void* p2 = rmem_resize(m, a->v, a->cap*elemsize, newsize);
+  void* p2 = rmem_resize(m, a->v, a->cap*elemsize, newsize, elemsize);
   if UNLIKELY(!p2)
     return false;
   a->v = p2;
@@ -752,6 +749,7 @@ void* memmove(void* dest, const void* src, usize n) {
 // one-time initialization of global state
 rerror time_init();
 rerror parse_init();
+rerror vmem_init();
 
 bool rsm_init() {
   static bool y = false; if (y) return true; y = true;
@@ -768,6 +766,8 @@ bool rsm_init() {
   #ifndef RSM_NO_ASM
     CHECK_ERR(parse_init(), "parse_init");
   #endif
+
+  CHECK_ERR(vmem_init(), "vmem_init");
 
   return true;
 error:
@@ -1078,7 +1078,7 @@ static void* nullable bufslab_alloc_more(bufslabs* slabs, rmem mem, u32 len) {
   }
   // no free space found -- allocate new slab
   u32 cap = MAX(BUFSLAB_MIN_CAP, ALIGN2(len, 16));
-  free = rmem_alloc(mem, sizeof(bufslab) + cap);
+  free = rmem_alloc(mem, sizeof(bufslab) + cap, _Alignof(bufslab));
   if UNLIKELY(free == NULL)
     return NULL;
   free->cap = cap;

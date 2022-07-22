@@ -230,7 +230,7 @@ rerror rom_build(rrombuild* rb, rmem mem, rrom* rom) {
   }
 
   // allocate memory
-  rromimg* img = rmem_alloc(mem, imgz); // TODO: align allocation?
+  rromimg* img = rmem_alloc(mem, imgz, sizeof(void*)); // TODO: alignment
   if UNLIKELY(img == NULL)
     return rerr_nomem;
 

@@ -1,0 +1,107 @@
+Common terminology found in across literature and implementations:
+  Page
+    Region of memory. Usually 4096, 8192 or 16384 bytes
+  Page Frame
+    Same as a Page but when talking about physical memory. Same size as a Page.
+  Page Table
+    Per virtual address space table mapping virtual addresses to Pages.
+  Page Directory
+    Like Page Table and is often the same thing. The first level of Page Tables.
+  PTE - Page Table Entry
+    A "record" or "row" of a Page Table
+  VFN - Virtual Frame Number
+    Index of a Page (aka frame?) in the context of a Page Table
+  PFN - Physical Frame Number
+    Index of a physical memory frame/page in the context of the host
+  TLB - Translation Lookaside Buffer
+    Virtaddr-to-hostaddr cache. Used for avoiding expensive Page Table lookups.
+
+Page table layout
+
+  We need kVFNBits bits to represent all possible VFNs.
+  Examples using 4096 B page size:
+    32-bit address space needs 20 bits to index          1048576 VFNs (  4 GiB.)
+    48-bit address space needs 36 bits to index      68719476736 VFNs (256 TiB.)
+    52-bit address space needs 40 bits to index    1099511627776 VFNs (  4 PiB.)
+    64-bit address space needs 52 bits to index 4503599630000000 VFNs ( 16 ZiB.)
+
+Address translation
+
+  Assuming a page size of 4096 and 48-bit address space.
+  We need 12 bits for the offset (kVFNBits=12=log2(4096)),
+  which in turn means that we need 36 bits (48-12) for the page number (VFN.)
+  Allocating one big array the size of 2^36 would be crazy; 64 GiB!
+  So instead we use a hierarchy of page tables allocated as needed,
+  splitting up the VFN space.
+  Each page table should ideally be sized at an even multiple of the page size.
+  This leaves us with the following set of constraints:
+  - offset must be 12 bits
+  - VFN must be 36 total spread over n page tables
+  - each page table should be a multiple of 4096
+  A few possible solutions:
+    LEVELS  TABLE BITS     TABLE SIZE (#PTEs)
+    2       18+18              262144
+    3       12+12+12             4096
+    4       9+9+9+9               512
+    4       12+8+8+8         4096,512
+    6       6+6+6+6+6+6            64
+    ...
+  We want to choose a balance between few levels and small tables.
+  Further, our implementation will be simpler with symmetric tables; same size.
+  Fewer levels means faster lookup. Smaller tables means less memory needed on average.
+  The first page table is always allocated and never swapped (part the page directory.)
+  Lets say sizeof(PTE)=64B, then a two-level approach means the page directory is huge:
+  16 MB (262144*64). And this is per process.
+  Amd64 uses 4 levels, 9 bit per page table with a pagesize of 4096.
+  That's what we'll be using too.
+
+
+Address translation example
+
+  Let's explore translating the address 0xdeadbeef (little endian.)
+
+  First we split up the address into its Virtual Frame Number (VFN) and offset.
+    addr    0xdeadbeef  11011110101011011011111011101111  ()
+    ------  ----------  --------------------------------  ---------------
+    VFN     0xdeadb     11011110101011011011              (addr >> 12)
+    offset  0xeef                           111011101111  (addr & 4096-1)
+
+  Next we traverse the page table hierarchy using the VFN: (9 bits per table)
+
+        ┌─────────────────┬─────────────────┬─────────────────┬─────────────────┐
+  bit#  │                 │1 1 1 1 1 1 1 1 1│1 2 2 2 2 2 2 2 2│2 2 3 3 3 3 3 3 3│
+        │1 2 3 4 5 6 7 8 9│0 1 2 3 4 5 6 7 8│9 0 1 2 3 4 5 6 7│8 9 0 1 2 3 4 5 6│
+        ├─────────────────┼─────────────────┼─────────────────┼─────────────────┤
+  VFN   │0 0 0 0 0 0 0 0 0│0 0 0 0 0 0 0 1 1│0 1 1 1 1 0 1 0 1│0 1 1 0 1 1 0 1 1│
+        │        0        │        3        │       245       │       219       │
+        └─────────────────┴─────────────────┴─────────────────┴─────────────────┘
+        ┌────────────┐    ┌────────────┐    ┌────────────┐    ┌────────────┐
+        │ PT1        │    │ PT2        │    │ PT3        │    │ PT4        │
+  addr  │ 148600000  │    │ 148601000  │    │ 148602000  │    │ 148603000  │
+        ├────────────┤    ├────────────┤    ├────────────┤    ├────────────┤
+        │   0 148601 ━━━━▶│ ...        │ ┏━▶│ ...        │ ┏━▶│ ...        │
+        │ ...        │    │   3 148602 ━━┛  │ 245 148603 ━━┛  │ 219 106800 ━━▶ page
+        └────────────┘    └────────────┘    └────────────┘    └────────────┘
+        512 GB regions     1 GB regions      2 MB regions      4 kB regions
+
+  We now know what host address 0xdeadbeef maps to: 0x106800eef
+    page_addr = page << 12         │ 0x106800 << 12 = 0x106800000
+    host_addr = page_addr + offset │ 0x106800000 + 0xeef = 0x106800eef
+
+Page Table Entry
+
+  With 4096B pages, we need 52 bits for host-page addresses (addr >> 12 (12=log2(4096)).)
+  In practice we could use fewer bits as the host is likely only using 48 or 52 bits of
+  address space, not the full 64 bits. But to make the implementation simpler, use 52.
+  Each page table is allocated in an even number of host pages, making it
+  possible to store the PTE "value" (address of the next table or page) in 36 bits.
+  Making each PTE 8 bytes (64 bits total) with 4 levels page tables means each page
+  table is exactly one 4096 page large: (2^9=512) * 8 = 4096. Nice.
+
+        ┌─────────────────────────────────────────────────────────────────────┐
+        │                          Page Table Entry                           │
+        ├──────────────┬──────────────────────────────────────────────────────┤
+  bit#  │ 1…12         │ 13…64                                                │ MSB
+        │ ............ │ .................................................... │
+  use   │ metadata     │ output address                                       │
+        └──────────────┴──────────────────────────────────────────────────────┘

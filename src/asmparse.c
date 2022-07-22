@@ -711,7 +711,7 @@ static rnode last_resort_node = {0};
 
 // mk* functions makes new nodes
 static rnode* mknodet(pstate* p, rtok t) {
-  rnode* n = rmem_alloc(p->a->mem, sizeof(rnode));
+  rnode* n = rmem_alloc(p->a->mem, sizeof(rnode), _Alignof(rnode));
   if UNLIKELY(n == NULL) {
     errf(p->a, (rposrange){0}, "out of memory");
     return &last_resort_node;
@@ -1197,7 +1197,7 @@ rnode* nullable rasm_parse(rasm* a) {
 
   pstate* p = rasm_pstate(a);
   if (!p) {
-    p = rmem_alloc(a->mem, PSTATE_ALLOC_SIZE);
+    p = rmem_alloc(a->mem, PSTATE_ALLOC_SIZE, _Alignof(pstate));
     if (!p)
       return NULL;
     memset(p, 0, sizeof(pstate));
@@ -1427,7 +1427,7 @@ rerror parse_init() {
 
   #ifdef DEBUG
     // dlog("kwmap hash0 0x%lx", m->hash0);
-    void* p = rmem_alloc(mem,1);
+    void* p = rmem_alloc(mem, 1, 1);
     if (p) dlog("kwmap uses only %zu B memory -- trim memory", (usize)(p - (void*)memory));
   #endif
   print_keywords();

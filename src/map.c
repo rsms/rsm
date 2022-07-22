@@ -35,7 +35,7 @@ smap* nullable smap_make(smap* m, rmem mem, u32 hint, maplf lf) {
   usize nbytes;
   if (check_mul_overflow((usize)m->cap, sizeof(smapent), &nbytes))
     return NULL;
-  void* entries = rmem_alloc(mem, nbytes);
+  void* entries = rmem_alloc(mem, nbytes, _Alignof(smapent));
   if UNLIKELY(entries == NULL)
     return NULL;
   memset(entries, 0, nbytes);
@@ -74,7 +74,7 @@ static bool smap_grow(smap* m) {
   if (check_mul_overflow((usize)newcap, sizeof(smapent), &nbytes))
     return false;
   // dlog("grow len cap %u %u => cap size %u %zu", m->len, m->cap, newcap, nbytes);
-  smapent* new_entries = rmem_alloc(m->mem, nbytes);
+  smapent* new_entries = rmem_alloc(m->mem, nbytes, _Alignof(smapent));
   if (new_entries == NULL)
     return false;
   // rehash
@@ -182,7 +182,7 @@ static void insert_coll(smapent* entries, u32 cap, u32 index, const smapent* e) 
 // Has no effect if smap_score(m)==0.
 // Returns false if scratch memory allocation in mem failed.
 static bool smap_compact(smap* m, rmem mem) {
-  void* newentries = rmem_alloc(mem, sizeof(smapent)*m->cap);
+  void* newentries = rmem_alloc(mem, sizeof(smapent)*m->cap, _Alignof(smapent));
   if UNLIKELY(newentries == NULL)
     return false;
   cstate cs = { m, newentries };
@@ -270,7 +270,7 @@ ATTR_UNUSED static void dump_smap(
 #endif
 
 double smap_optimize(smap* m, usize iterations, rmem mem) {
-  smapent* entries = rmem_alloc(mem, m->cap*sizeof(smapent));
+  smapent* entries = rmem_alloc(mem, m->cap*sizeof(smapent), _Alignof(smapent));
   if (entries == NULL)
     return -1.0;
   memcpy(entries, m->entries, m->cap*sizeof(smapent));

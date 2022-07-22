@@ -205,9 +205,12 @@ _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 #define RSM_MIN_Cs   (-RSM_MAX_Cs - 1) /*                        -4,096   -0x1000 */
 #define RSM_MIN_Ds   (-RSM_MAX_Ds - 1) /*                          -128     -0x80 */
 
-#define RSM_NREGS    32
-#define RSM_MAX_REG  (RSM_NREGS - 1) /* == SP */
+#define RSM_NREGS   32 /* total number of registers */
+#define RSM_MAX_REG (RSM_NREGS - 1) /* == SP */
+
+// calling convention
 #define RSM_NARGREGS 8 /* number of regs to use for arguments (R0...R{RSM_NARGREGS}-1) */
+#define RSM_NTMPREGS 19 /* R0…(RSM_NTMPREGS-1) are callee-owned/caller-save */
 
 // u32 RSM_GET_ARGN(rinstr, uint pos, uint size)
 // rinstr RSM_SET_ARGN(rinstr, uint pos, uint size, uint val)
@@ -314,21 +317,22 @@ enum rerror {
   rerr_overflow      = -14, // value too large
 };
 
-typedef struct rmem rmem; // memory allocator
-struct rmem {
-  void* nullable (*a)(void* state, void* nullable p, usize oldsize, usize newsize);
+// rmem: memory allocator
+typedef struct {
+  void* nullable (*a)(
+    void* state, void* nullable p, usize oldsize, usize newsize, usize newalignment);
   void* state;
-};
+} rmem;
 
-// ROM -- read only media; the container for an RSM program
-typedef struct rrom    rrom;
-typedef struct rromimg rromimg; // portable binary blob
-struct rromimg {
+// rromimg: ROM image layout, a portable binary blob
+typedef struct {
   u8 magic[4]; // RSM_ROM_MAGIC
   u8 version;
   u8 data[];
-};
-struct rrom {
+} rromimg;
+
+// rrom: ROM (read only media); the container for an RSM program
+typedef struct {
   // ROM image
   rromimg* img;
   usize    imgsize; // size of img, in bytes
@@ -339,16 +343,43 @@ struct rrom {
   const void*   data;      // data segment initializer (pointer into img)
   usize         datasize;  // data segment size
   u32           dataalign; // data segment alignment (in bytes)
+} rrom;
+
+// rvmstatus: VM status
+typedef u8 rvmstatus;
+enum rvmstatus {
+  RVM_INIT,
+  RVM_ERROR, // check rvm.error
+  RVM_END = 0xff,
 };
+
+// rvm: VM instance
+typedef struct {
+  rvmstatus status;
+  u64       iregs[RSM_NREGS];
+  double    fregs[RSM_NREGS];
+  void*     rambase;
+  usize     ramsize;
+  void*     internal;
+} rvm;
 
 
 // rsm_init initializes global state; must be called before using the rest of the API.
 // Returns false if initialization failed.
 RSMAPI bool rsm_init();
 
-// rsm_vmexec executes a program, starting with instruction inv[0]
+// rvm_create creates a new VM instance
+rvm* nullable rvm_create(rmem mem);
+
+// rvm_dispose frees a VM instance
+void rvm_dispose(rvm* vm);
+
+// rvm_main loads & runs a program in a ROM image
+rerror rvm_main(rvm* vm, rrom* rom);
+
+// rsm_vmexec executes a program, starting with instruction 0
 // Loads the ROM if needed.
-RSMAPI rerror rsm_vmexec(rrom* rom, u64* iregs, void* rambase, usize ramsize);
+RSMAPI rerror rsm_vmexec(rvm* vm, rrom* rom);
 
 // rsm_loadrom parses rom->img of rom->imgsize bytes,
 // populating the rest of the fields of the rrom struct.
@@ -388,8 +419,9 @@ RSMAPI rmem rmem_mkvmalloc(usize size);
 RSMAPI void rmem_freealloc(rmem m);
 
 // memory allocation interface
-static void* nullable rmem_alloc(rmem m, usize size);
-static void* nullable rmem_resize(rmem m, void* nullable p, usize oldsize, usize newsize);
+static void* nullable rmem_alloc(rmem m, usize size, usize alignment);
+static void* nullable rmem_resize(
+  rmem m, void* nullable p, usize oldsize, usize newsize, usize newalignment);
 static void rmem_free(rmem m, void* p, usize size);
 
 // enum related functions
@@ -539,22 +571,22 @@ RSMAPI void rasm_free_rnode(rasm* a, rnode* n);
 // inline implementations
 
 RSM_ATTR_MALLOC RSM_WARN_UNUSED_RESULT
-inline static void* nullable rmem_alloc(rmem m, usize size) {
-  return m.a(m.state, NULL, 0, size);
+inline static void* nullable rmem_alloc(rmem m, usize size, usize alignment) {
+  return m.a(m.state, NULL, 0, size, alignment);
 }
 
 RSM_ATTR_MALLOC RSM_WARN_UNUSED_RESULT
 inline static void* nullable rmem_resize(
-  rmem m, void* nullable p, usize oldsize, usize newsize)
+  rmem m, void* nullable p, usize oldsize, usize newsize, usize alignment)
 {
-  return m.a(m.state, p, oldsize, newsize);
+  return m.a(m.state, p, oldsize, newsize, alignment);
 }
 
 inline static void rmem_free(rmem m, void* p, usize size) {
   #if __has_attribute(unused)
   __attribute__((unused))
   #endif
-  void* _ = m.a(m.state,p,size,0);
+  void* _ = m.a(m.state, p, size, 0, 0);
 }
 
 RSM_ASSUME_NONNULL_END

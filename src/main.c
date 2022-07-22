@@ -13,7 +13,7 @@ static const char* outfile = NULL;
 static bool opt_run = false;
 static bool opt_print_asm = false;
 static bool opt_print_debug = false;
-static usize vm_memsize = 1024*1024;
+static usize vm_ramsize = 1024*1024;
 
 #define errmsg(fmt, args...) fprintf(stderr, "%s: " fmt "\n", prog, ##args)
 
@@ -96,7 +96,7 @@ static void usage() {
     "  %s compiled.rom                     # run precompiled ROM\n"
     "  echo 'fun main() { R0=123; }' | %s  # compile & run stdin\n"
     ,prog
-    ,vm_memsize
+    ,vm_ramsize
     ,prog
     ,prog
     ,prog
@@ -116,7 +116,7 @@ static int parse_cli_opts(int argc, char*const* argv, u64* iregs) {
     case 'd': opt_print_debug = true; break;
     case 'R': nerrs += setreg(iregs, optarg); break;
     case 'o': outfile = optarg; break;
-    case 'm': nerrs += parse_bytesize_opt(optopt, optarg, &vm_memsize); break;
+    case 'm': nerrs += parse_bytesize_opt(optopt, optarg, &vm_ramsize); break;
     case ':': errmsg("option -%c requires a value", optopt); nerrs++; break;
     case '?': errmsg("unrecognized option -%c", optopt); nerrs++; break;
   }
@@ -148,12 +148,12 @@ static bool loadfile(rmem mem, const char* nullable infile, void** p, usize* siz
 
 static void print_asm(rmem mem, const rinstr* iv, usize icount) {
   const usize initcap = 4096;
-  char* buf = rmem_alloc(mem, initcap);
+  char* buf = rmem_alloc(mem, initcap, 1);
   if (!buf) panic("out of memory");
   rfmtflag fl = isatty(1) ? RSM_FMT_COLOR : 0;
   usize n = rsm_fmtprog(buf, initcap, iv, icount, fl);
   if (n >= initcap) {
-    buf = rmem_resize(mem, buf, initcap, n + 1);
+    buf = rmem_resize(mem, buf, initcap, n + 1, 1);
     if (!buf) panic("out of memory");
     rsm_fmtprog(buf, n + 1, iv, icount, fl);
   }
@@ -274,15 +274,30 @@ int main(int argc, char*const* argv) {
   if (!opt_run)
     return 0;
 
+  // —————————————— vm v2 ——————————————
+
+  dlog("mem_pagesize() %zu", mem_pagesize());
+
+  rvm* vm2 = safechecknotnull( rvm_create(mem) );
+  rerror err2 = rvm_main(vm2, &rom);
+  rvm_dispose(vm2);
+  if (err2) {
+    errmsg("rvm_main: %s", rerror_str(err2));
+    return 1;
+  }
+
+  // —————————————— vm v1 ——————————————
+
   // allocate memory and execute program
-  void* membase = vmem_alloc(vm_memsize);
-  if UNLIKELY(membase == NULL) {
-    errmsg("failed to allocate %zu B of memory", vm_memsize);
+  void* rambase = osvmem_alloc(vm_ramsize);
+  if UNLIKELY(rambase == NULL) {
+    errmsg("failed to allocate %zu B of memory", vm_ramsize);
     return 1;
   }
 
   u64 time = nanotime();
-  rerror err = rsm_vmexec(&rom, iregs, membase, vm_memsize);
+  rvm vm = { .rambase=rambase, .ramsize=vm_ramsize };
+  rerror err = rsm_vmexec(&vm, &rom);
   time = nanotime() - time;
   if (err) {
     errmsg("vmexec: %s", err == rerr_nomem ? "not enough memory" : rerror_str(err));

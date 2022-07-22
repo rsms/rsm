@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
 
-
-#define RMEM_ALIGN sizeof(void*) // allocation alignment (must be pow2)
+// RMEM_ALIGN is the address alignment of slabs (must be pow2)
+#define RMEM_ALIGN sizeof(void*)
 
 // buffer-backed allocator, used for both rmem_mkvmalloc and rmem_mkbufalloc
 typedef struct bufalloc bufalloc;
@@ -28,7 +28,9 @@ inline static usize ba_avail(bufalloc* a) { // available capacity
 //   ba_alloc(s, NULL,       0, newsize) = new allocation
 //   ba_alloc(s,    p, oldsize, newsize) = resize allocation
 //   ba_alloc(s,    p, oldsize,       0) = free allocation
-static void* nullable ba_alloc(void* state, void* nullable p, usize oldsize, usize newsize) {
+static void* nullable ba_alloc(
+  void* state, void* nullable p, usize oldsize, usize newsize, usize align)
+{
   bufalloc* a = state;
   if UNLIKELY(p != NULL) {
     if LIKELY(newsize == 0) {
@@ -43,6 +45,8 @@ static void* nullable ba_alloc(void* state, void* nullable p, usize oldsize, usi
       // shrink
       if (ba_istail(a, p, oldsize))
         a->len -= oldsize - newsize;
+      assertf(IS_ALIGN2((uintptr)p, align),
+        "TODO: shrink allocation with different alignment");
       return p;
     }
     // grow
@@ -51,10 +55,12 @@ static void* nullable ba_alloc(void* state, void* nullable p, usize oldsize, usi
       if UNLIKELY(ba_avail(a) < newsize - oldsize)
         return NULL; // out of memory
       a->len += newsize - oldsize;
+      assertf(IS_ALIGN2((uintptr)p, align),
+        "TODO: grow allocation with different alignment");
       return p;
     }
     // relocate
-    void* p2 = ba_alloc(state, NULL, 0, newsize);
+    void* p2 = ba_alloc(state, NULL, 0, newsize, align);
     if UNLIKELY(p2 == NULL)
       return NULL;
     return memcpy(p2, p, oldsize);
@@ -64,7 +70,7 @@ static void* nullable ba_alloc(void* state, void* nullable p, usize oldsize, usi
   assert(newsize > 0);
 
   uintptr addr = (uintptr)(a->buf + a->len);
-  uintptr aligned_addr = ALIGN2(addr, (uintptr)sizeof(void*));
+  uintptr aligned_addr = ALIGN2(addr, (uintptr)align);
   newsize += (usize)(aligned_addr - addr);
   if UNLIKELY(ba_avail(a) < newsize)
     return NULL; // out of memory
@@ -106,9 +112,9 @@ rmem rmem_mkbufalloc(void* buf, usize size) {
 rmem rmem_mkvmalloc(usize size) {
   usize pagesize = mem_pagesize();
   if (size == 0) { // "I just want a huge allocation"
-    size = U32_MAX + (pagesize - (U32_MAX % pagesize));
+    size = U32_MAX + ((u32)pagesize - (U32_MAX % (u32)pagesize));
     for (;;) {
-      void* buf = vmem_alloc(size);
+      void* buf = osvmem_alloc(size);
       if LIKELY(buf != NULL)
         return ba_make(buf, buf + sizeof(bufalloc), size - sizeof(bufalloc), true);
       if (size <= 0xffff) // we weren't able to allocate 16kB; give up
@@ -123,7 +129,7 @@ rmem rmem_mkvmalloc(usize size) {
   usize rem = size % pagesize;
   if (rem)
     size += pagesize - rem;
-  void* buf = vmem_alloc(size);
+  void* buf = osvmem_alloc(size);
   if UNLIKELY(buf == NULL)
     return (rmem){0,0};
   return ba_make(buf, buf + sizeof(bufalloc), size - sizeof(bufalloc), true);
@@ -137,7 +143,7 @@ void rmem_freealloc(rmem m) {
     #if DEBUG
     memset(a, 0, sizeof(*a));
     #endif
-    vmem_free(buf, cap);
+    osvmem_free(buf, cap);
     return;
   }
   #if DEBUG

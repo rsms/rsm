@@ -3,6 +3,7 @@
 /work
 /build.ninja
 /_*
+/etc/rsm.min.js
 .DS_Store
 .ninja*
 ~*

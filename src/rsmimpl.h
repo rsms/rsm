@@ -237,6 +237,10 @@ typedef unsigned long       usize;
   // turns into CMP + CMOV{L,G} on x86_64
   // turns into CMP + CSEL on arm64
 
+// T IDIV_CEIL(T x, ANY divisor) divides x by divisor, rounding up.
+// If x is zero, returns max value of x (wraps.)
+#define IDIV_CEIL(x, divisor) ( (__typeof__(x))1 + ( ((x) - 1) / (divisor) ) )
+
 // T ALIGN2<T>(T x, anyuint a)       rounds up x to nearest a (a must be a power of two)
 // T ALIGN2_FLOOR<T>(T x, anyuint a) rounds down x to nearest a
 // bool IS_ALIGN2(T x, anyuint a)    true if x is aligned to a
@@ -258,20 +262,20 @@ typedef unsigned long       usize;
 // int rsm_ctz(ANYUINT x) returns the number of trailing 0-bits in x,
 // starting at the least significant bit position. If x is 0, the result is undefined.
 #define rsm_ctz(x) _Generic((x), \
-  u8:    __builtin_ctz, \
-  u16:   __builtin_ctz, \
-  u32:   __builtin_ctz, \
-  usize: __builtin_ctzl, \
-  u64:   __builtin_ctzll)(x)
+  i8:    __builtin_ctz,   u8:    __builtin_ctz, \
+  i16:   __builtin_ctz,   u16:   __builtin_ctz, \
+  i32:   __builtin_ctz,   u32:   __builtin_ctz, \
+  isize: __builtin_ctzl,  usize: __builtin_ctzl, \
+  i64:   __builtin_ctzll, u64:   __builtin_ctzll)(x)
 
 // int rsm_clz(ANYUINT x) returns the number of leading 0-bits in x,
 // starting at the most significant bit position. If x is 0, the result is undefined.
 #define rsm_clz(x) _Generic((x), \
-  u8:    __builtin_clz, \
-  u16:   __builtin_clz, \
-  u32:   __builtin_clz, \
-  usize: __builtin_clzl, \
-  u64:   __builtin_clzll)(x)
+  i8:    __builtin_clz,   u8:    __builtin_clz, \
+  i16:   __builtin_clz,   u16:   __builtin_clz, \
+  i32:   __builtin_clz,   u32:   __builtin_clz, \
+  isize: __builtin_clzl,  usize: __builtin_clzl, \
+  i64:   __builtin_clzll, u64:   __builtin_clzll)(x)
 
 // int rsm_ffs(ANYINT x) returns one plus the index of the least significant 1-bit of x,
 // or if x is zero, returns zero.
@@ -397,8 +401,9 @@ typedef __builtin_va_list va_list;
   sizeof(u32) < sizeof(z__) ? (u32)MIN((__typeof__(z__))U32_MAX,z__) : (u32)z__; \
 })
 
-#define MiB 0x100000   /* 1024*1024 */
-#define GiB 0x40000000 /* 1024*1024*1024 */
+#define kiB 1024u
+#define MiB 0x100000u   /* 1024*1024 */
+#define GiB 0x40000000u /* 1024*1024*1024 */
 
 // ======================================================================================
 // panic & assert

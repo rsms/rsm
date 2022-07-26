@@ -27,7 +27,7 @@ void* nullable kmem_allocx(usize* size_in_out, usize alignment) // returns actua
 void* nullable kmem_alloc_aligned(usize size, usize alignment)
   __attribute__((malloc, alloc_size(1), alloc_align(2)));
 
-void kmem_free(void* ptr, usize size);
+void kmem_free(void* ptr);
 
 // TODO
 // void* nullable kmem_resize(void* oldptr, usize oldsize, usize newsize)
@@ -45,9 +45,9 @@ usize kmem_alloc_size(usize);
 // heap is allocated and added to the subheaps list.
 //
 
-#define trace(fmt, args...) dlog("[kmalloc] " fmt, ##args)
-
 // CHUNK_SIZE: allocation chunk size, in bytes (must be a power of two)
+// All allocations are at least CHUNK_SIZE large.
+// All allocations are aligned to CHUNK_SIZE addresses.
 #if UINTPTR_MAX < 0xffffffffffffffff
   #define CHUNK_SIZE 32u
 #else
@@ -55,6 +55,12 @@ usize kmem_alloc_size(usize);
 #endif
 
 #define KMALLOC_INIT_SIZE (2u * MiB)
+static_assert(KMALLOC_INIT_SIZE % PAGE_SIZE == 0, "");
+
+// BEST_FIT_THRESHOLD: if the number of allocation chunks required are at least
+// these many, use a "best fit" search instead of a "first fit" search.
+// Used by kmem_alloc.
+#define BEST_FIT_THRESHOLD 128u
 
 
 typedef struct {
@@ -83,6 +89,8 @@ static_assert(sizeof(subheap_t) <= PAGE_SIZE, "");
 
 // allochead_t* ALLOCHEAD(void* ptr) accesses the allochead_t of an allocation
 #define ALLOCHEAD(ptr)  ((allochead_t*)( (((u8*)ptr) - sizeof(allochead_t)) ))
+
+#define trace(fmt, args...) dlog("[kmalloc] " fmt, ##args)
 
 
 // kmalloc global state
@@ -135,12 +143,13 @@ static void bitset_set_range(bitset_t* bset, usize start, usize len, bool on) {
 }
 
 
-// bitset_find_first_fit searches for the firts hole that is >=minlen large.
+// bitset_find_unset_range searches for a contiguous region of unset bits.
 //   start: #bit to start the search at.
-//   maxlen: search ranges up to this size
-// Returns >=minlen if a range was found and updates start.
-// Returns 0 if no range large enough was found (may still update start.)
-static usize bitset_find_first_fit(
+//   minlen: minimum number of unset bytes needed
+//   maxlen: maximum number of unset bytes to consider
+// Returns >=minlen if a range was found (and updates startp.)
+// Returns 0 if no range large enough was found (may still update startp.)
+static usize bitset_find_unset_range(
   bitset_t* bset, usize* startp, usize minlen, usize maxlen)
 {
   // First fit implementation
@@ -162,20 +171,24 @@ static usize bitset_find_first_fit(
   // range. Finally, if bset->len-start is not aligned to bucket_bits, we scan the
   // "trailing bits" for a free range.
 
+  usize init_start = *startp;
+
   assert(maxlen >= minlen);
 
   // We'll work with a register sized granule ("bucket") over the bitset
   usize bucket_bits = 8 * sizeof(usize); // bit size of one "bucket"
   usize* buckets = (usize*)bset->data;
 
-  const usize start_bucket = *startp / bucket_bits; // bucket index to start with
+  const usize start_bucket = (usize)(uintptr)*startp / bucket_bits;
   const usize end_bucket = bset->len / bucket_bits; // bucket index to stop before
+  //dlog("start_bucket startp=%zu => %zu", *startp, start_bucket);
+
   u8 start_bitoffs = (u8)(*startp % bucket_bits); // bit index to start at
 
   usize freelen = 0; // current "free range" length
 
   for (usize bucket = start_bucket; bucket < end_bucket; bucket++) {
-    //dlog("bucket %zu %zx", bucket, buckets[bucket]);
+    //dlog("** bucket %zu %zx", bucket, buckets[bucket]);
 
     // if bucket is full
     if (buckets[bucket] == USIZE_MAX) {
@@ -190,9 +203,12 @@ static usize bitset_find_first_fit(
     if (buckets[bucket] == 0lu) {
       if (freelen == 0)
         *startp = bucket * bucket_bits;
-      freelen += bucket_bits;
-      if (freelen >= maxlen)
+      freelen += bucket_bits - start_bitoffs;
+      if (freelen >= maxlen) {
+        //dlog("-> %zu", maxlen);
+        *startp += start_bitoffs;
         return maxlen;
+      }
       start_bitoffs = 0; // reset start bit
       continue;
     }
@@ -253,26 +269,81 @@ static usize bitset_find_first_fit(
   // no free range found that satisfies freelen >= minlen
   freelen = 0;
 found:
+  //dlog("-> MIN(%zu, %zu) = %zu", freelen, maxlen, MIN(freelen, maxlen));
   return MIN(freelen, maxlen);
 }
 
 
-// bitset_find_best_fit searches the entire bitset to find the smallest hole
-// that is >=minlen large
-static isize bitset_find_best_fit(
-  bitset_t* bset, usize* start, usize minlen, usize maxlen)
-{
-  panic("TODO bitset_find_best_fit");
-  return -1;
+// bitset_find_best_fit searches for the smallest hole that is >=minlen large
+static usize bitset_find_best_fit(bitset_t* bset, usize* startp, usize minlen) {
+  usize start = *startp;
+  usize best_start = 0;
+  usize best_len = bset->len + 1;
+  usize found = 0;
+  //dlog("bitset_find_best_fit minlen=%zu", minlen);
+  for (;;) {
+    usize rangelen = bitset_find_unset_range(bset, &start, minlen, best_len);
+    //dlog(">> bitset_find_unset_range => start=%zu len=%zu", start, rangelen);
+    if (best_len > rangelen || !found) {
+      if (!rangelen)
+        break;
+      //dlog(">> new best range found: start=%zu len=%zu", start, rangelen);
+      best_start = start;
+      best_len = rangelen;
+      found = USIZE_MAX;
+    }
+    start += rangelen;
+  }
+  *startp = best_start & found;
+  return minlen & found;
 }
 
 
+// heap_init initializes heap h with memory at p of size bytes
 static void heap_init(heap_t* h, u8* p, usize size) {
-  h->chunk_cap = size / (CHUNK_SIZE + 1);
+  assert(size >= CHUNK_SIZE*2);
+  // Top (low address; p) of the heap is memory we allocate.
+  // Bottom (high address) of the heap contains a bitset index of chunk use.
+  // The amount of space we need for the bitset depends on how much space is left
+  // after allocating the bitset, so that makes this a little tricky.
+  //
+  //  p                                                         p+size
+  //  ┣━━━━━━━━━┯━━━━━━━━━┯━━━━━━━━━┯━━━━━━━━━┳━━━━━━━━━━━━━━━━━┫
+  //  ┃ chunk 1 │ chunk 2 │ ...     │ chunk n ┃ bitset          ┃
+  //  ┗━━━━━━━━━┷━━━━━━━━━┷━━━━━━━━━┷━━━━━━━━━╋━━━━━━━━━━━━━━━━━┛
+  //                                        split
+  //
+  // We need to figure out the ideal "split"; where chunks end and bitset begin.
+  // The bitset needs one bit per chunk and must be byte aligned.
+  //
+  // Begin by putting split at the end, leaving just one chunk for the bitset.
+  // This is the highest split we can use, for the smallest size (CHUNK_SIZE*2).
+
+  const u8* p_end = p + size;
+  usize chunk_cap = (size / CHUNK_SIZE) - 1;
+  usize chunk_cap_sub = 1;
+  u8* bitset_end = (p + (chunk_cap * CHUNK_SIZE)) + chunk_cap/8;
+  while (bitset_end > p_end) {
+    // dlog("p %p…%p, end bitset %p", p, p_end, bitset_end);
+    chunk_cap -= chunk_cap_sub;
+    chunk_cap_sub *= 2;
+    bitset_end = (p + (chunk_cap * CHUNK_SIZE)) + chunk_cap/8;
+  }
+  // usize spill = (usize)((uintptr)p_end - (uintptr)bitset_end);
+  // dlog("p %p…%p, split %p, end bitset %p, spill %zu",
+  //   p, p_end, p + (chunk_cap * CHUNK_SIZE), bitset_end, spill);
+  // assert((uintptr)bitset_end <= (uintptr)p_end);
+
+  h->chunk_cap = chunk_cap;
   h->chunk_len = 0;
   h->chunks = p;
-  // put bitset at the end of memory region p
   bitset_init(&h->chunk_use, p + (h->chunk_cap * CHUNK_SIZE), h->chunk_cap);
+
+  // // branchless approximation. Spills ~28 kiB for a 2 MiB memory size (~1.2%).
+  // h->chunk_cap = size / (CHUNK_SIZE + 1);
+  // h->chunk_len = 0;
+  // h->chunks = p;
+  // bitset_init(&h->chunk_use, p + (h->chunk_cap * CHUNK_SIZE), h->chunk_cap);
 }
 
 
@@ -285,6 +356,11 @@ static bool heap_contains(const heap_t* h, void const* ptr) {
   // in range [startaddr, endaddr) ?
   return ((uintptr)a >= (uintptr)h->chunks) & ((uintptr)ptr < endaddr);
 }
+
+
+#if DEBUG
+static bool g_heap_alloc_force_best_fit = false;
+#endif
 
 
 // heap_alloc finds space in the heap h that is at least *sizep bytes.
@@ -314,15 +390,17 @@ static void* nullable heap_alloc(heap_t* h, usize* sizep, usize alignment) {
     return NULL;
 
   // find a free range in the "chunks in use" bitset h->chunk_use
-  //
-  // BEST_FIT_THRESHOLD: if the number of allocation chunks required are at least
-  // these many, use a "best fit" search instead of a "first fit" search.
-  #define BEST_FIT_THRESHOLD 128u
   usize ci = chunkalign_nz - ALLOCHEAD_NCHUNKS, clen;
-  if (needchunks < BEST_FIT_THRESHOLD) {
-    clen = bitset_find_first_fit(&h->chunk_use, &ci, needchunks, needchunks);
+  if (needchunks < BEST_FIT_THRESHOLD
+    #if DEBUG
+    && !g_heap_alloc_force_best_fit
+    #endif
+  ) {
+    // first fit
+    clen = bitset_find_unset_range(&h->chunk_use, &ci, needchunks, needchunks);
   } else {
-    clen = bitset_find_best_fit(&h->chunk_use, &ci, needchunks, needchunks);
+    // best fit
+    clen = bitset_find_best_fit(&h->chunk_use, &ci, needchunks);
   }
 
   if (clen == 0) // no space found
@@ -361,14 +439,9 @@ static void* nullable heap_alloc(heap_t* h, usize* sizep, usize alignment) {
 }
 
 
-static void heap_free(heap_t* h, void* ptr, usize size) {
-  (void)size; // silence "unused" warnings
+static void heap_free(heap_t* h, void* ptr) {
   assert(heap_contains(h, ptr));
   allochead_t* a = ALLOCHEAD(ptr);
-
-  assertf(size <= (a->nchunks * CHUNK_SIZE) - sizeof(allochead_t),
-    "freeing memory %p that is smaller (%zu) than expected (%zu)",
-    ptr, (a->nchunks * CHUNK_SIZE) - sizeof(allochead_t), size);
 
   // calculate chunk index for the allocation
   uintptr ci = ((uintptr)a - (uintptr)h->chunks) / CHUNK_SIZE;
@@ -387,6 +460,73 @@ static void heap_free(heap_t* h, void* ptr, usize size) {
 }
 
 
+#if DEBUG
+  UNUSED static void heap_debug_dump_state(
+    heap_t* h, void* nullable highlight_p, usize highlight_size)
+  {
+    if (h->chunk_len == 0) {
+      fputs("(empty)\n", stderr);
+      return;
+    }
+    // find last set bit in the bitmap
+    const usize bucket_bits = 8 * sizeof(usize);
+    const bitset_t bset = h->chunk_use;
+    const usize last_bucket = bset.len / bucket_bits;
+    const usize* buckets = (const usize*)bset.data;
+    usize last_used_bit = 0;
+    for (usize bucket = 0; bucket < last_bucket; bucket++) {
+      if (buckets[bucket] == 0)
+        continue;
+      last_used_bit = (bucket * bucket_bits) + (usize)rsm_fls(buckets[bucket]);
+    }
+    usize trailing_bytes = (bset.len % bucket_bits) / 8;
+    for (usize i = (bset.len / bucket_bits) * sizeof(usize); i < trailing_bytes; ++i) {
+      if (((u8*)bset.data)[i])
+        last_used_bit = i * 8;
+    }
+
+    assert(h->chunk_use.len > last_used_bit);
+    fputs(
+      "────┬──────────┬───────────"
+      "────────────────────────────────────────────────────────────\n"
+      "page│   address│ chunk use\n"
+      "────┼──────────┼───────────"
+      "────────────────────────────────────────────────────────────\n"
+      , stderr);
+    uintptr page_addr, chunk_idx;
+
+    highlight_size += sizeof(allochead_t);
+    uintptr highlight_start_addr = ALIGN2_FLOOR((uintptr)highlight_p, CHUNK_SIZE);
+    uintptr highlight_end_addr = highlight_start_addr + ALIGN2(highlight_size, CHUNK_SIZE);
+
+    for (chunk_idx = 0; chunk_idx < last_used_bit+1; chunk_idx++) {
+      if ((chunk_idx % (PAGE_SIZE / CHUNK_SIZE)) == 0) {
+        if (chunk_idx) fputc('\n', stderr);
+        page_addr = (uintptr)h->chunks + (chunk_idx * CHUNK_SIZE);
+        usize page_idx = (chunk_idx * CHUNK_SIZE) / PAGE_SIZE;
+        fprintf(stderr, "%4zu│%10lx│%6zu ", page_idx, page_addr, chunk_idx);
+      }
+      uintptr addr = (uintptr)h->chunks + (chunk_idx * CHUNK_SIZE);
+      if (highlight_start_addr <= addr && addr < highlight_end_addr) {
+        fputs(bitset_get(&h->chunk_use, chunk_idx) ? "▓" : "_", stderr);
+      } else {
+        fputs(bitset_get(&h->chunk_use, chunk_idx) ? "░" : "_", stderr);
+      }
+    }
+    fprintf(stderr,
+      "\n···─┼────···───┼───···─────"
+      "────────────────────────────────────────────────────────────\n"
+      "%4zu│%10lx│%6zu END\n"
+      "────┴──────────┴───────────"
+      "────────────────────────────────────────────────────────────\n"
+      ,
+      ((h->chunk_cap * CHUNK_SIZE) / PAGE_SIZE) + 1,
+      (uintptr)h->chunks + (h->chunk_cap * CHUNK_SIZE), // end address
+      h->chunk_cap);
+  }
+#endif // DEBUG
+
+
 inline static void subheap_init(subheap_t* sh, u8* base, usize size) {
   heap_init(&sh->allocator, base, size);
 }
@@ -395,10 +535,10 @@ inline static void* nullable subheap_alloc(subheap_t* sh, usize* size, usize ali
   return heap_alloc(&sh->allocator, size, alignment);
 }
 
-inline static bool subheap_try_free(subheap_t* sh, void* ptr, usize size) {
+inline static bool subheap_try_free(subheap_t* sh, void* ptr) {
   if (!heap_contains(&sh->allocator, ptr))
     return false;
-  heap_free(&sh->allocator, ptr, size);
+  heap_free(&sh->allocator, ptr);
   return true;
 }
 
@@ -413,10 +553,35 @@ static void kmem_add_subheap(void* storage, usize size) {
 }
 
 
+#if DEBUG
+  UNUSED static void kmem_debug_dump_state(
+    void* nullable highlight_p, usize highlight_size)
+  {
+    RHMutexLock(&g_lock);
+    usize i = 0;
+    ilist_for_each(lent, &g_subheaps) {
+      subheap_t* sh = ilist_entry(lent, subheap_t, list_entry);
+      heap_t* h = &sh->allocator;
+      uintptr start_addr = (uintptr)h->chunks;
+      uintptr end_addr = (uintptr)h->chunks + (h->chunk_cap * CHUNK_SIZE);
+      uintptr end_addr_use = (uintptr)h->chunks + (h->chunk_len * CHUNK_SIZE);
+      dlog("subheap %zu %zx…%zx %zu kiB (%zu kiB, %zu chunks in use)",
+        i, start_addr, end_addr,
+        (end_addr - start_addr) / 1024,
+        (end_addr_use - start_addr) / 1024,
+        h->chunk_len);
+      heap_debug_dump_state(h, highlight_p, highlight_size);
+    }
+    RHMutexUnlock(&g_lock);
+  }
+#endif
+
+
 // kmem_allocx attempts to allocate *size bytes.
 // On success, *size is updated to its actual size.
 void* nullable kmem_allocx(usize* size, usize alignment) {
   assertf(IS_POW2(alignment), "alignment %zu is not a power-of-two", alignment);
+  assert(alignment <= PAGE_SIZE);
 
   void* ptr = NULL;
 
@@ -449,16 +614,15 @@ void* nullable kmem_alloc_aligned(usize size, usize alignment) {
 }
 
 
-void kmem_free(void* ptr, usize size) {
+void kmem_free(void* ptr) {
   assertnotnull(ptr);
-  assert(size > 0);
 
   RHMutexLock(&g_lock);
   assert(!g_expansion_in_progress);
 
   ilist_for_each(lent, &g_subheaps) {
     subheap_t* sh = ilist_entry(lent, subheap_t, list_entry);
-    if (subheap_try_free(sh, ptr, size))
+    if (subheap_try_free(sh, ptr))
       goto end;
   }
 
@@ -489,19 +653,49 @@ rerror kmem_init() {
   usize z = kmem_alloc_size(123);
   dlog("kmem_alloc_size(123) => %zu", z);
 
-  void* p = kmem_alloc(z - 3);
-  dlog("kmem_alloc(%zu) => %p", z, p);
+  void* p1, *p2, *p3, *p4, *p5;
+
+  p1 = kmem_alloc(z - 3);
+  dlog("kmem_alloc(%zu) => %p", z, p1);
 
   usize size2 = 100;
-  void* p2 = kmem_allocx(&size2, 512);
+  p2 = kmem_allocx(&size2, 512);
   dlog("kmem_alloc_aligned(100,512) => %p (%p) %zu B",
-    p2, (void*)ALIGN2((uintptr)p,512), size2 );
+    p2, (void*)ALIGN2((uintptr)p2,512), size2 );
 
-  kmem_free(p, z - 3);
-  kmem_free(p2, size2);
+  kmem_free(p1);
+  kmem_free(p2);
 
-  void* p3 = kmem_alloc(800);
+  p3 = kmem_alloc(800);
   dlog("kmem_alloc(800) => %p", p3);
+  kmem_free(p3);
+
+  //                   1111
+  //         01234567890123
+  // chunks: ▒▒____▒▒__▒▒▒▒
+  //         p1 p2 p3p4 p5
+  p1 = kmem_alloc(CHUNK_SIZE*(BEST_FIT_THRESHOLD-2));
+  p1 = kmem_alloc(CHUNK_SIZE);   // 0-2
+  p2 = kmem_alloc(CHUNK_SIZE*3); // 2-6
+  p3 = kmem_alloc(CHUNK_SIZE);   // 6-8
+  p4 = kmem_alloc(CHUNK_SIZE);   // 8-10
+  p5 = kmem_alloc(CHUNK_SIZE*3); // 10-14
+  kmem_free(p2);
+  kmem_free(p4);
+  kmem_debug_dump_state(NULL, 0);
+  // now, for a CHUNK_SIZE allocation,
+  // the "best fit" allocation strategy should select chunks 8-10, and
+  // the "first fit" allocation strategy should select chunks 2-4.
+  g_heap_alloc_force_best_fit = true;
+  p2 = kmem_alloc(CHUNK_SIZE);
+  g_heap_alloc_force_best_fit = false;
+  kmem_debug_dump_state(p2, CHUNK_SIZE);
+
+
+  kmem_free(p5);
+  kmem_free(p3);
+  kmem_free(p2);
+  kmem_free(p1);
 
   // rangealloc_t a = {0};
 

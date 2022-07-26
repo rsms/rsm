@@ -15,8 +15,8 @@
   #define M_SEG_COUNT 8lu
   #define M_SEG_SIZE  0x10000000lu  // 256MB
 #endif
-static_assert(M_SEG_COUNT == CEIL_POW2(M_SEG_COUNT), "M_SEG_COUNT is not pow2");
-static_assert(M_SEG_SIZE == CEIL_POW2(M_SEG_SIZE), "M_SEG_SIZE is not pow2");
+static_assert(IS_POW2(M_SEG_COUNT), "M_SEG_COUNT is not pow2");
+static_assert(IS_POW2(M_SEG_SIZE), "M_SEG_SIZE is not pow2");
 static_assert(U64_MAX/M_SEG_COUNT > M_SEG_SIZE, "too many segments / M_SEG_SIZE too large");
 
 // vmstate: internal vm state

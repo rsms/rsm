@@ -132,7 +132,7 @@ int RWMutexUnlock(RWMutex* m) {
 #define kYieldProcessorTries 1000
 
 
-void _RHMutexWait(RHMutex* m) {
+void _RHMutexLock(RHMutex* m) {
   while (1) {
     if (!AtomicExchange(&m->flag, true, memory_order_acquire))
       break;

@@ -53,7 +53,7 @@ static rerror load_next_section(LPARAMS) {
 }
 
 // skip_section skips the current section (or the remainder of the current section)
-ATTR_UNUSED static rerror skip_section(LPARAMS) {
+UNUSED static rerror skip_section(LPARAMS) {
   p = MIN(end, p + size);
   MUSTTAIL return load_next_section(LARGS);
 }

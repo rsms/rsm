@@ -19,9 +19,6 @@
 #define PT_BITS            9u /* =ILOG2(PAGE_SIZE/sizeof(mpte_t)) */
 #define PT_LEN           512u /* number of PTEs in a page table =(1lu << PT_BITS) */
 
-#define MiB 0x100000   /* 1024*1024 */
-#define GiB 0x40000000 /* 1024*1024*1024 */
-
 // mpte_t printf formatting
 #define PTE_FMT          "(0x%llx)"
 #define PTE_FMTARGS(pte) (pte).outaddr
@@ -30,37 +27,105 @@ static_assert(IS_POW2(PAGE_SIZE),       "PAGE_SIZE is not a power-of-two");
 static_assert(PAGE_SIZE >= sizeof(u64), "PAGE_SIZE too small");
 static_assert(PAGE_SIZE <= 65536,       "PAGE_SIZE too large");
 
+//———————————————————————————————————————————————————————————————————————————————————————
+// mm - memory manager
+// The memory manager owns and manages all of the host memory.
+// It hands it out to requestors as pages (not arbitrary byte ranges.)
 
-// mhost_t - host memory map
-typedef struct {
-  uintptr start; // host address range start
+static struct {
+  uintptr start; // host address range start (PAGE_SIZE aligned)
   uintptr end;   // host address range end (exclusive)
-  uintptr curr;  // next free address (= allocated bytes)
-} mhost_t;
+  uintptr curr;  // next free address (PAGE_SIZE aligned)
+} g_mm;
+
+
+// kHostPageSize is set by vmem_init to the host page size
+static u32 kHostPageSize;
+
+
+rerror mm_init() {
+  // since RSM runs as a regular host OS process, we get our host memory from the
+  // host's virtual memory system via mmap.
+
+  // check that PAGE_SIZE is an even multiple (or divisor) of host pagesize
+  kHostPageSize = (u32)mem_pagesize();
+  if (kHostPageSize % PAGE_SIZE && PAGE_SIZE % kHostPageSize) {
+    assertf(0, "PAGE_SIZE (%u) not a multiple of host page size (%u)",
+      PAGE_SIZE, kHostPageSize);
+    return rerr_invalid;
+  }
+
+  usize host_vmsize = 2u * GiB;
+  assert(host_vmsize % kHostPageSize == 0);
+  void* host_vmptr = assertnotnull( osvmem_alloc(host_vmsize) );
+
+  g_mm.start = (uintptr)host_vmptr;
+  g_mm.end   = (uintptr)host_vmptr + (uintptr)host_vmsize;
+  g_mm.curr  = (uintptr)host_vmptr;
+
+  assert(IS_ALIGN2(g_mm.start, PAGE_SIZE));
+
+  dlog("mm range: %lx…%lx (%.0f MB in %lu pages)",
+    g_mm.start, g_mm.end, (double)(g_mm.end - g_mm.start)/1024.0/1024.0,
+    (g_mm.end - g_mm.start) / kHostPageSize);
+
+  // deinit:
+  // osvmem_free((void*)g_mm.start, (usize)(g_mm.end - g_mm.start));
+
+  return 0;
+}
+
+
+void* nullable mm_allocpages(usize npages) {
+  uintptr addr = g_mm.curr;
+  uintptr endaddr = addr + (npages * PAGE_SIZE);
+  if (endaddr > g_mm.end)
+    return NULL; // not enough memory
+  g_mm.curr = endaddr;
+  return (void*)addr;
+}
+
+
+__attribute__((malloc))
+void* nullable mm_alloc(usize size) {
+  return mm_allocpages(ALIGN2(size, PAGE_SIZE) / PAGE_SIZE);
+}
+
+
+void mm_free(void* ptr) {
+  // TODO: implement mm_free
+}
+
+
+//———————————————————————————————————————————————————————————————————————————————————————
 
 // mpte_t - page table entry
 typedef struct {
 #if RSM_LITTLE_ENDIAN
-  u64 reserved : 12;
-  u64 outaddr : 52;
+  // bool  execute     : 1; // can execute code in this page
+  // bool  read        : 1; // can read from this page
+  // bool  write       : 1; // can write to this page
+  // bool  uncacheable : 1; // can not be cached in TLB
+  // bool  accessed    : 1; // has been accessed
+  // bool  dirty       : 1; // has been written to
+  // usize type        : 3; // type of page
+  // usize reserved    : 3;
+  // u64   outaddr     : 52;
+  usize reserved : 12;
+  u64   outaddr  : 52;
 #else
-  u64 outaddr : 52;
-  u64 reserved : 12;
+  #error TODO
 #endif
 } mpte_t;
+static_assert(sizeof(mpte_t) == sizeof(u64), "");
 
 // mptab_t - virtual memory page table
 typedef mpte_t* mptab_t;
 
 // mpagedir_t - page directory
 typedef struct {
-  mhost_t* mhost;
-  mptab_t  root;
+  mptab_t root;
 } mpagedir_t;
-
-
-// kHostPageSize is set by vmem_init to the host page size
-static u32 kHostPageSize;
 
 
 // getbits returns the (right adjusted) n-bit field of x that begins at position p.
@@ -94,18 +159,6 @@ inline static u64 vaddr_offs(u64 vaddr) {
 }
 
 
-static void* nullable mhost_alloc(mhost_t* mhost, usize size, usize align) {
-  // FIXME this is an incredibly dumb allocator
-  assert(IS_POW2(align));
-  uintptr addr = ALIGN2(mhost->curr, (uintptr)align);
-  uintptr endaddr = addr + (uintptr)size;
-  if (endaddr > mhost->end)
-    return NULL; // not enough memory
-  mhost->curr = endaddr;
-  return (void*)addr;
-}
-
-
 static mpte_t mpte_make(u64 outaddr) {
   mpte_t pte = {0};
   pte.outaddr = outaddr;
@@ -113,9 +166,9 @@ static mpte_t mpte_make(u64 outaddr) {
 }
 
 
-static mptab_t nullable mptab_create(mhost_t* mhost) {
+static mptab_t nullable mptab_create() {
   usize nbyte = PT_LEN * sizeof(mpte_t);
-  mptab_t ptab = mhost_alloc(mhost, nbyte, (usize)PAGE_SIZE);
+  mptab_t ptab = mm_alloc(nbyte);
   if UNLIKELY(ptab == NULL)
     return NULL;
   memset(ptab, 0, nbyte);
@@ -123,18 +176,29 @@ static mptab_t nullable mptab_create(mhost_t* mhost) {
 }
 
 
-static mpagedir_t* nullable mpagedir_create(mhost_t* mhost) {
-  mptab_t root_ptab = mptab_create(mhost);
+static mpagedir_t* nullable mpagedir_create() {
+  mptab_t root_ptab = mptab_create();
   if UNLIKELY(!root_ptab) {
     dlog("failed to allocate root page table");
     return NULL;
   }
-  mpagedir_t* pagedir = mhost_alloc(mhost, sizeof(mpagedir_t), _Alignof(mpagedir_t));
+  mpagedir_t* pagedir = mm_alloc(sizeof(mpagedir_t)); // FIXME whole page allocated!
   if UNLIKELY(!pagedir)
     return NULL;
-  pagedir->mhost = mhost;
   pagedir->root = root_ptab;
   return pagedir;
+}
+
+
+static mpte_t mpagedir_alloc_hpage(mpagedir_t* pagedir, mpte_t* pte) {
+  uintptr haddr = (uintptr)mm_allocpages(1);
+  uintptr hpage_addr = haddr >> VADDR_OFFS_BITS;
+  if UNLIKELY(hpage_addr == 0) {
+    dlog("FAILED to allocate host page");
+    // TODO: swap out an older page
+  }
+  *pte = mpte_make(hpage_addr);
+  return *pte;
 }
 
 
@@ -155,12 +219,10 @@ static mpte_t mpagedir_lookup_pte(mpagedir_t* pagedir, u64 vfn) {
       vfn, level, index, masked_vfn, VFN_BITS, bits, PT_BITS);
 
     if (level == PT_LEVELS) {
-      if LIKELY(*(u64*)&pte != 0)
-        return pte;
-      dlog("first access to page %llu", vfn);
-      u64 host_page_addr = 0x104008000 >> VADDR_OFFS_BITS; // FIXME TODO
-      pte = mpte_make(host_page_addr);
-      ptab[index] = pte;
+      if UNLIKELY(*(u64*)&pte == 0) {
+        dlog("first access to page vfn=0x%llx", vfn);
+        return mpagedir_alloc_hpage(pagedir, &ptab[index]);
+      }
       return pte;
     }
 
@@ -173,7 +235,7 @@ static mpte_t mpagedir_lookup_pte(mpagedir_t* pagedir, u64 vfn) {
       continue;
     }
 
-    mptab_t ptab2 = mptab_create(pagedir->mhost);
+    mptab_t ptab2 = mptab_create();
     assertf(IS_ALIGN2((u64)(uintptr)ptab2, PAGE_SIZE),
       "mptab_create did not allocate mptab_t on a page boundary (0x%lx/%u)",
       (uintptr)ptab2, PAGE_SIZE);
@@ -194,8 +256,8 @@ static mpte_t mpagedir_lookup_pte(mpagedir_t* pagedir, u64 vfn) {
 //   return host_page + (uintptr)vaddr_offs(vaddr);
 // }
 
-
 static void vmem_test() {
+
   dlog("kHostPageSize:   %5u", kHostPageSize);
   dlog("PAGE_SIZE:       %5u", PAGE_SIZE);
   dlog("VADDR_BITS:      %5u", VADDR_BITS);
@@ -204,21 +266,8 @@ static void vmem_test() {
   dlog("PT_LEVELS:       %5u", PT_LEVELS);
   dlog("PT_BITS:         %5u", PT_BITS);
 
-  // allocate host memory
-  usize host_vmsize = 2u * GiB;
-  assert(host_vmsize % kHostPageSize == 0);
-  void* host_vmptr = assertnotnull( osvmem_alloc(host_vmsize) );
-  mhost_t mhost = {
-    .start = (uintptr)host_vmptr,
-    .end   = (uintptr)host_vmptr + (uintptr)host_vmsize,
-    .curr  = (uintptr)host_vmptr,
-  };
-  dlog("host memory: %lx…%lx (%.0f MB in %lu pages)",
-    mhost.start, mhost.end, (double)(mhost.end - mhost.start)/1024.0/1024.0,
-    (mhost.end - mhost.start) / kHostPageSize);
-
   // create a page directory
-  mpagedir_t* pagedir = assertnotnull( mpagedir_create(&mhost) );
+  mpagedir_t* pagedir = assertnotnull( mpagedir_create() );
 
   { u64 vaddr = 0xdeadbeef;
     u64 vfn = vaddr_to_vfn(vaddr);
@@ -230,20 +279,13 @@ static void vmem_test() {
     //   PTE_FMTARGS(pte), hpage, haddr);
     dlog("vaddr 0x%llx => host address 0x%lx (page 0x%lx)", vaddr, haddr, hpage);
   }
-
-
-  osvmem_free((void*)mhost.start, (usize)(mhost.end - mhost.start));
 }
 
 
 rerror vmem_init() {
-  // check that PAGE_SIZE is an even multiple (or divisor) of host pagesize
-  kHostPageSize = (u32)mem_pagesize();
-  if (kHostPageSize % PAGE_SIZE && PAGE_SIZE % kHostPageSize) {
-    assertf(0, "PAGE_SIZE (%u) not a multiple of host page size (%u)",
-      PAGE_SIZE, kHostPageSize);
-    return rerr_invalid;
-  }
+  rerror err = mm_init();
+  if (err)
+    return err;
 
   vmem_test();
   return rerr_canceled;

@@ -85,9 +85,9 @@ typedef unsigned long       usize;
   #define MUSTTAIL
 #endif
 #if __has_attribute(unused)
-  #define ATTR_UNUSED __attribute__((unused))
+  #define UNUSED __attribute__((unused))
 #else
-  #define ATTR_UNUSED
+  #define UNUSED
 #endif
 #if __has_attribute(always_inline)
   #define ALWAYS_INLINE __attribute__((always_inline)) inline
@@ -221,6 +221,14 @@ typedef unsigned long       usize;
   #endif
 #endif
 
+// container_of returns a pointer to the parent struct of one of its members (ptr).
+#define container_of(ptr, struct_type, struct_member) ({ \
+  const __typeof__( ((struct_type*)0)->struct_member )* ptrx__ = (ptr); \
+  (struct_type*)( (u8*)ptrx__ - offsetof(struct_type,struct_member) ); \
+})
+
+#define rsm_same_type(a, b) __builtin_types_compatible_p(__typeof__(a), __typeof__(b))
+
 #define MAX(a,b) ({__typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a > _b ? _a : _b; })
   // turns into CMP + CMOV{L,G} on x86_64
   // turns into CMP + CSEL on arm64
@@ -235,23 +243,62 @@ typedef unsigned long       usize;
 #define ALIGN2(x,a)           _ALIGN2_MASK(x, (__typeof__(x))(a) - 1)
 #define ALIGN2_FLOOR(x, a)    ALIGN2((x) - ((a) - 1), (a))
 #define IS_ALIGN2(x, a)       ( ((x) & ((__typeof__(x))(a) - 1)) == 0 )
-#define IS_POW2(x)            ( ((x) & ((x) - 1)) == 0 )
 #define _ALIGN2_MASK(x, mask) ( ((x) + (mask)) & ~(mask) )
 
-// rsm_ctz returns the number of trailing 0-bits in x,
+// ANYINT COND_BYTE_MASK(ANYINT flags, int flag, bool on)
+// branchless ( on ? (flags | flag) : (flags & ~flag) )
+#define COND_BYTE_MASK(flags, flag, on) ((flags) ^= (-(!!(on)) ^ (flags)) & (flag))
+
+// POISON constants are non-NULL addresses which will result in page faults on access.
+// Values match those of Linux.
+#define GENERIC_POISON1 ((void*)0x100)
+#define GENERIC_POISON2 ((void*)0x122)
+#define PAGE_POISON     0xaa
+
+// int rsm_ctz(ANYUINT x) returns the number of trailing 0-bits in x,
 // starting at the least significant bit position. If x is 0, the result is undefined.
 #define rsm_ctz(x) _Generic((x), \
-  u32:   __builtin_ctz,       \
-  usize: __builtin_ctzl,      \
+  u8:    __builtin_ctz, \
+  u16:   __builtin_ctz, \
+  u32:   __builtin_ctz, \
+  usize: __builtin_ctzl, \
   u64:   __builtin_ctzll)(x)
 
-// rsm_fls(uint n) finds the last (most-significant) bit set
-#define rsm_fls(n) ((sizeof(n) <= 4) ? __fls32(n) : __fls64(n))
+// int rsm_clz(ANYUINT x) returns the number of leading 0-bits in x,
+// starting at the most significant bit position. If x is 0, the result is undefined.
+#define rsm_clz(x) _Generic((x), \
+  u8:    __builtin_clz, \
+  u16:   __builtin_clz, \
+  u32:   __builtin_clz, \
+  usize: __builtin_clzl, \
+  u64:   __builtin_clzll)(x)
+
+// int rsm_ffs(ANYINT x) returns one plus the index of the least significant 1-bit of x,
+// or if x is zero, returns zero.
+#define rsm_ffs(x) _Generic((x), \
+  i8:    __builtin_ffs,   u8:    __builtin_ffs, \
+  i16:   __builtin_ffs,   u16:   __builtin_ffs, \
+  i32:   __builtin_ffs,   u32:   __builtin_ffs, \
+  isize: __builtin_ffsl,  usize: __builtin_ffsl, \
+  i64:   __builtin_ffsll, u64:   __builtin_ffsll)(x)
+
+// int rsm_fls(ANYINT n) finds the Find Last Set bit (last = most-significant)
+// (Note that this is not the same as rsm_ffs(x)-1).
+// e.g. rsm_fls(0b1111111111111111) = 15
+// e.g. rsm_fls(0b1000000000000000) = 15
+// e.g. rsm_fls(0b1000000000000000) = 15
+// e.g. rsm_fls(0b1000) = 3
+#define rsm_fls(x) _Generic((x), \
+  i8:    __fls32, u8:    __fls32, \
+  i16:   __fls32, u16:   __fls32, \
+  i32:   __fls32, u32:   __fls32, \
+  isize: __flsl,  usize: __flsl, \
+  i64:   __fls64, u64:   __fls64)(x)
 static ALWAYS_INLINE int __fls32(unsigned int x) {
-  return x ? sizeof(x) * 8 - __builtin_clz(x) : 0;
+  return x ? (int)(sizeof(x) * 8) - __builtin_clz(x) : 0;
 }
-static ALWAYS_INLINE unsigned long __flsl(unsigned long x) {
-  return (sizeof(x) * 8) - 1 - __builtin_clzl(x);
+static ALWAYS_INLINE int __flsl(unsigned long x) {
+  return (int)(sizeof(x) * 8) - 1 - __builtin_clzl(x);
 }
 #if USIZE_MAX < 0xffffffffffffffff
   static ALWAYS_INLINE int __fls64(u64 x) {
@@ -268,16 +315,51 @@ static ALWAYS_INLINE unsigned long __flsl(unsigned long x) {
   }
 #endif
 
-// ILOG2 calculates the log of base 2
+// int ILOG2(ANYINT n) calculates the log of base 2
 #define ILOG2(n) ( \
-  __builtin_constant_p(n) ? ((n) < 2 ? 0 : 63 - __builtin_clzll(n)) : rsm_fls(n) - 1 )
+  __builtin_constant_p(n) ? ( \
+    (n) < 2 ? 0 : 63 - rsm_clz(n) \
+  ) : \
+  rsm_fls(n) - 1 \
+)
 
-// CEIL_POW2 rounds up n to nearest power of two. Result is undefined when n is 0.
+// ANYINT CEIL_POW2(ANYINT) rounds down n to nearest power of two.
+// Result is undefined when n is 0.
+#define FLOOR_POW2(n) ( \
+  __builtin_constant_p(n) ? ( \
+    ((n) == 1) ? 1 : \
+      ((__typeof__(n))1 << (ILOG2((n) - 1) + 1)) \
+    ) : \
+  ((__typeof__(n))1 << rsm_fls(n - 1)) \
+)
+
+// ANYINT CEIL_POW2(ANYINT n) rounds up n to nearest power of two.
+// Result is undefined when n is 0.
 #define CEIL_POW2(n) ( \
-  __builtin_constant_p(n) ? ( ((n) == 1) ? 1 : (1UL << (ILOG2((n) - 1) + 1)) ) \
-                          : (1UL << rsm_fls(n - 1)) )
+  /* TODO: comptime expr using __builtin_constant_p */ \
+  ((__typeof__(n))1) << rsm_fls((n) + (n) - 1) \
+)
+
+// ANYINT CEIL_POW2_Z(ANYINT n) rounds up n to nearest power of two.
+// Returns 1 if n is 0.
+#define CEIL_POW2_Z(n) ({ \
+  __typeof__(n) ntmp__ = (n); \
+  /* n+!n -- branchless n=n?n:1 */ \
+  CEIL_POW2(ntmp__ + !ntmp__); \
+})
+
+
+#define IS_POW2(x)  ( ((x) & ((x) - 1)) == 0 )
 
 #define RSM_IPOW2(x) ((__typeof__(x))1 << (x))
+
+// int rsm_popcount(ANYINT v) returns the number of set bits in x (i.e. number of 1-bits.)
+#define rsm_popcount(x) _Generic((x), \
+  i8:    __builtin_popcount,   u8:    __builtin_popcount, \
+  i16:   __builtin_popcount,   u16:   __builtin_popcount, \
+  i32:   __builtin_popcount,   u32:   __builtin_popcount, \
+  isize: __builtin_popcountl,  usize: __builtin_popcountl, \
+  i64:   __builtin_popcountll, u64:   __builtin_popcountll)(x)
 
 static inline RSM_WARN_UNUSED_RESULT bool __must_check_unlikely(bool unlikely) {
   return UNLIKELY(unlikely);
@@ -315,6 +397,9 @@ typedef __builtin_va_list va_list;
   sizeof(u32) < sizeof(z__) ? (u32)MIN((__typeof__(z__))U32_MAX,z__) : (u32)z__; \
 })
 
+#define MiB 0x100000   /* 1024*1024 */
+#define GiB 0x40000000 /* 1024*1024*1024 */
+
 // ======================================================================================
 // panic & assert
 
@@ -346,6 +431,7 @@ typedef __builtin_va_list va_list;
 
 // void assert(expr condition)
 #undef assert
+#define comptime_assert(condition, msg) _Static_assert(condition, msg)
 #if defined(DEBUG)
   #ifdef NDEBUG
     #warning both DEBUG and NDEBUG defined
@@ -362,10 +448,10 @@ typedef __builtin_va_list va_list;
   // or else certain applications of this macro are not expanded.
 
   #define assertf(cond, fmt, args...) \
-    if (UNLIKELY(!(cond))) _assertfail(fmt " (%s)", ##args, #cond)
+    (UNLIKELY(!(cond)) ? _assertfail(fmt " (%s)", ##args, #cond) : ((void)0))
 
   #define assert(cond) \
-    if (UNLIKELY(!(cond))) _assertfail("%s", #cond)
+    (UNLIKELY(!(cond)) ? _assertfail("%s", #cond) : ((void)0))
 
   #define assertcstreq(cstr1, cstr2) ({                  \
     const char* cstr1__ = (cstr1);                       \
@@ -377,7 +463,7 @@ typedef __builtin_va_list va_list;
   #define assertnull(a)  assert((a) == NULL)
   #define assertnotnull(a) ({                                              \
     __typeof__(a) val__ = (a);                                             \
-    ATTR_UNUSED const void* valp__ = val__; /* build bug on non-pointer */ \
+    UNUSED const void* valp__ = val__; /* build bug on non-pointer */ \
     if (UNLIKELY(val__ == NULL))                                           \
       _assertfail("%s != NULL", #a);                                       \
     val__; })
@@ -388,22 +474,17 @@ typedef __builtin_va_list va_list;
   #define NDEBUG 1
   #define assert(cond)            ((void)0)
   #define assertf(cond, fmt, ...) ((void)0)
-  #define assertop(a,op,b)        ((void)0)
   #define assertcstreq(a,b)       ((void)0)
-  #define asserteq(a,b)           ((void)0)
-  #define assertne(a,b)           ((void)0)
-  #define assertlt(a,b)           ((void)0)
-  #define assertgt(a,b)           ((void)0)
   #define assertnull(a)           ((void)0)
   #define assertnotnull(a)        ({ a; }) /* note: (a) causes "unused" warnings */
 #endif /* !defined(NDEBUG) */
 
 // RSM_SAFE -- checks enabled in "debug" and "safe" builds (but not in "fast" builds.)
 //
-// void safecheck(COND)                        -- elided from non-safe builds
-// void safecheckf(COND, const char* fmt, ...) -- elided from non-safe builds
-// EXPR safecheckexpr(EXPR, EXPECT)            -- included in non-safe builds (without check)
-// typeof(EXPR) safechecknotnull(EXPR)         -- included in non-safe builds (without check)
+// void safecheck(COND)                        -- stripped from non-safe builds
+// void safecheckf(COND, const char* fmt, ...) -- stripped from non-safe builds
+// typeof(EXPR) safecheckexpr(EXPR, EXPECT)    -- included in non-safe builds w/o check
+// typeof(EXPR) safechecknotnull(EXPR)         -- included in non-safe builds w/o check
 //
 #if defined(RSM_SAFE)
   #undef RSM_SAFE
@@ -418,7 +499,7 @@ typedef __builtin_va_list va_list;
       val__; })
     #define safechecknotnull(a) ({                                           \
       __typeof__(a) val__ = (a);                                             \
-      ATTR_UNUSED const void* valp__ = val__; /* build bug on non-pointer */ \
+      UNUSED const void* valp__ = val__; /* build bug on non-pointer */ \
       safecheckf(val__ != NULL, "unexpected NULL (%s)", #a);                 \
       val__; })
   #else
@@ -427,7 +508,7 @@ typedef __builtin_va_list va_list;
       __typeof__(expr) val__ = (expr); safecheck(val__ == expect); val__; })
     #define safechecknotnull(a) ({                                           \
       __typeof__(a) val__ = (a);                                             \
-      ATTR_UNUSED const void* valp__ = val__; /* build bug on non-pointer */ \
+      UNUSED const void* valp__ = val__; /* build bug on non-pointer */ \
       safecheckf(val__ != NULL, "NULL");                                     \
       val__; })
   #endif
@@ -1071,7 +1152,7 @@ static bool RHMutexInit(RHMutex* m); // returns false if system failed to init s
 static void RHMutexDispose(RHMutex* m);
 static void RHMutexLock(RHMutex* m);
 static void RHMutexUnlock(RHMutex* m);
-void _RHMutexWait(RHMutex* m);
+static bool RHMutexIsLocked(RHMutex* m);
 
 //———————————————————————————————————————————————
 // thread inline impl
@@ -1093,9 +1174,15 @@ inline static void RHMutexDispose(RHMutex* m) {
   RSemaDispose(&m->sema);
 }
 
+void _RHMutexLock(RHMutex* m);
+
 inline static void RHMutexLock(RHMutex* m) {
   if (AtomicExchange(&m->flag, true, memory_order_acquire))
-    _RHMutexWait(m); // already locked -- slow path
+    _RHMutexLock(m); // already locked -- slow path
+}
+
+inline static bool RHMutexIsLocked(RHMutex* m) {
+  return AtomicLoad(&m->flag, memory_order_acquire);
 }
 
 inline static void RHMutexUnlock(RHMutex* m) {

@@ -1148,8 +1148,8 @@ static rnode* pstmt(PPARAMS) {
   }
 
   LOG_PRATT("PREFIX %s call", tokname(p->tok));
-  ATTR_UNUSED const void* p1 = p->inp;
-  ATTR_UNUSED bool insertsemi = p->insertsemi;
+  UNUSED const void* p1 = p->inp;
+  UNUSED bool insertsemi = p->insertsemi;
   rnode* n = ps->prefix(PARGS);
   assertf(insertsemi != p->insertsemi || (uintptr)p1 < (uintptr)p->inp,
     "parselet did not advance scanner");
@@ -1375,7 +1375,7 @@ rnode* nullable rasm_parse(rasm* a) {
   static int cstrsort(const char** p1, const char** p2, void* ctx) {
     return strcmp(*p1, *p2);
   }
-  ATTR_UNUSED static void print_keywords() {
+  UNUSED static void print_keywords() {
     const char* list[128];
     usize n = 0;
     for (const smapent* e = smap_itstart(&kwmap); smap_itnext(&kwmap, &e); )
@@ -1402,14 +1402,18 @@ enum {
 
 rerror parse_init() {
   #if USIZE_MAX >= 0xFFFFFFFFFFFFFFFFu
-    static void* memory[3104/sizeof(void*)];
+    static void* memory[6176/sizeof(void*)];
   #else
     static void* memory[1552/sizeof(void*)];
   #endif
   rmem mem = rmem_mkbufalloc(memory, sizeof(memory));
   smap* m = smap_make(&kwmap, mem, kwcount, MAPLF_2); // increase sizeof(memory)
-  if UNLIKELY(m == NULL)
+  if UNLIKELY(m == NULL) {
+    #if DEBUG
+    panic("sizeof(memory) too small");
+    #endif
     return rerr_nomem;
+  }
   m->hash0 = 0x89f025ba;
   uintptr* vp;
 

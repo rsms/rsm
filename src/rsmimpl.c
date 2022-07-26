@@ -748,8 +748,9 @@ void* memmove(void* dest, const void* src, usize n) {
 
 // one-time initialization of global state
 rerror time_init();
-rerror parse_init();
+rerror kmem_init();
 rerror vmem_init();
+rerror parse_init();
 
 bool rsm_init() {
   static bool y = false; if (y) return true; y = true;
@@ -757,16 +758,23 @@ bool rsm_init() {
   const char* err_what = "?";
   #define CHECK_ERR(expr, what) err = (expr); if (err) { err_what = (what); goto error; }
 
+  // time
   CHECK_ERR(time_init(), "time_init");
-
   u64 sec, nsec;
   CHECK_ERR(unixtime((i64*)&sec, &nsec), "unixtime");
+
+  // PRNG
   fastrand_seed(nsec);
 
+  // kmalloc
+  CHECK_ERR(kmem_init(), "kmem_init");
+
+  // assembly parser
   #ifndef RSM_NO_ASM
     CHECK_ERR(parse_init(), "parse_init");
   #endif
 
+  // virtual memory manager
   CHECK_ERR(vmem_init(), "vmem_init");
 
   return true;

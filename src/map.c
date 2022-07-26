@@ -20,7 +20,7 @@ static const double captab[] = { 0.5, 0.25, 0.125, 0.0625, 0.0 };
 static u32 perfectcap(u32 len, maplf lf) {
   assert(lf > 0 && lf <= countof(captab));
   len++; // must always have one free slot
-  return CEIL_POW2(len  + (u32)( (double)len*captab[lf-1] + 0.5 ));
+  return CEIL_POW2(len + (u32)( (double)len*captab[lf-1] + 0.5 ));
 }
 
 smap* nullable smap_make(smap* m, rmem mem, u32 hint, maplf lf) {
@@ -263,7 +263,7 @@ static double smap_score(const smap* m) {
 }
 
 #ifdef DEBUG
-ATTR_UNUSED static void dump_smap(
+UNUSED static void dump_smap(
   const smap* m, const smap* nullable beforem,
   const smapent** nullable highlightv, usize highlightc,
   int cmp);
@@ -428,7 +428,7 @@ static void dump_smapent(
       printf(" %s", highlight%2 ? cmp < 0 ? "▼" : "▲" : cmp < 0 ? "▲" : "▼");
   }
 }
-ATTR_UNUSED static void dump_smap(
+UNUSED static void dump_smap(
   const smap* m, const smap* nullable beforem,
   const smapent** nullable highlightv, usize highlightc,
   int cmp)

@@ -318,7 +318,11 @@ static void heap_init(heap_t* h, u8* p, usize size) {
   //
   // Begin by putting split at the end, leaving just one chunk for the bitset.
   // This is the highest split we can use, for the smallest size (CHUNK_SIZE*2).
+  //
 
+  // TODO: try binary search
+
+  // ALT 2: exponential search
   const u8* p_end = p + size;
   usize chunk_cap = (size / CHUNK_SIZE) - 1;
   usize chunk_cap_sub = 1;
@@ -334,16 +338,13 @@ static void heap_init(heap_t* h, u8* p, usize size) {
   //   p, p_end, p + (chunk_cap * CHUNK_SIZE), bitset_end, spill);
   // assert((uintptr)bitset_end <= (uintptr)p_end);
 
+  // // ALT 1: branchless approximation. Spills ~28 kiB for a 2 MiB memory size (~1.2%).
+  // usize chunk_cap = size / (CHUNK_SIZE + 1);
+
   h->chunk_cap = chunk_cap;
   h->chunk_len = 0;
   h->chunks = p;
-  bitset_init(&h->chunk_use, p + (h->chunk_cap * CHUNK_SIZE), h->chunk_cap);
-
-  // // branchless approximation. Spills ~28 kiB for a 2 MiB memory size (~1.2%).
-  // h->chunk_cap = size / (CHUNK_SIZE + 1);
-  // h->chunk_len = 0;
-  // h->chunks = p;
-  // bitset_init(&h->chunk_use, p + (h->chunk_cap * CHUNK_SIZE), h->chunk_cap);
+  bitset_init(&h->chunk_use, p + (chunk_cap * CHUNK_SIZE), chunk_cap);
 }
 
 
@@ -670,10 +671,6 @@ rerror kmem_init() {
   dlog("kmem_alloc(800) => %p", p3);
   kmem_free(p3);
 
-  //                   1111
-  //         01234567890123
-  // chunks: ▒▒____▒▒__▒▒▒▒
-  //         p1 p2 p3p4 p5
   p1 = kmem_alloc(CHUNK_SIZE*(BEST_FIT_THRESHOLD-2));
   p1 = kmem_alloc(CHUNK_SIZE);   // 0-2
   p2 = kmem_alloc(CHUNK_SIZE*3); // 2-6
@@ -686,15 +683,22 @@ rerror kmem_init() {
   // now, for a CHUNK_SIZE allocation,
   // the "best fit" allocation strategy should select chunks 8-10, and
   // the "first fit" allocation strategy should select chunks 2-4.
+
   g_heap_alloc_force_best_fit = true;
+  dlog("best fit");
   p2 = kmem_alloc(CHUNK_SIZE);
-  g_heap_alloc_force_best_fit = false;
   kmem_debug_dump_state(p2, CHUNK_SIZE);
+  kmem_free(p2);
+
+  g_heap_alloc_force_best_fit = false;
+  dlog("first fit");
+  p2 = kmem_alloc(CHUNK_SIZE);
+  kmem_debug_dump_state(p2, CHUNK_SIZE);
+  kmem_free(p2);
 
 
   kmem_free(p5);
   kmem_free(p3);
-  kmem_free(p2);
   kmem_free(p1);
 
   // rangealloc_t a = {0};

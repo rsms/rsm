@@ -171,8 +171,6 @@ static usize bitset_find_unset_range(
   // range. Finally, if bset->len-start is not aligned to bucket_bits, we scan the
   // "trailing bits" for a free range.
 
-  usize init_start = *startp;
-
   assert(maxlen >= minlen);
 
   // We'll work with a register sized granule ("bucket") over the bitset

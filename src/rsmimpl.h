@@ -378,6 +378,15 @@ static inline RSM_WARN_UNUSED_RESULT bool __must_check_unlikely(bool unlikely) {
   __builtin_add_overflow(a__, b__, dst__); \
 }))
 
+#define check_sub_overflow(a, b, dst) __must_check_unlikely(({  \
+  __typeof__(a) a__ = (a);                 \
+  __typeof__(b) b__ = (b);                 \
+  __typeof__(dst) dst__ = (dst);           \
+  (void) (&a__ == &b__);                   \
+  (void) (&a__ == dst__);                  \
+  __builtin_sub_overflow(a__, b__, dst__); \
+}))
+
 #define check_mul_overflow(a, b, dst) __must_check_unlikely(({  \
   __typeof__(a) a__ = (a);                 \
   __typeof__(b) b__ = (b);                 \
@@ -1182,7 +1191,7 @@ inline static void RHMutexDispose(RHMutex* m) {
 void _RHMutexLock(RHMutex* m);
 
 inline static void RHMutexLock(RHMutex* m) {
-  if (AtomicExchange(&m->flag, true, memory_order_acquire))
+  if UNLIKELY(AtomicExchange(&m->flag, true, memory_order_acquire))
     _RHMutexLock(m); // already locked -- slow path
 }
 
@@ -1192,7 +1201,7 @@ inline static bool RHMutexIsLocked(RHMutex* m) {
 
 inline static void RHMutexUnlock(RHMutex* m) {
   AtomicExchange(&m->flag, false, memory_order_seq_cst);
-  if (AtomicLoad(&m->nwait, memory_order_seq_cst) != 0) {
+  if UNLIKELY(AtomicLoad(&m->nwait, memory_order_seq_cst) != 0) {
     // at least one thread waiting on a semaphore signal -- wake one thread
     RSemaSignal(&m->sema, 1); // TODO: should we check the return value?
   }

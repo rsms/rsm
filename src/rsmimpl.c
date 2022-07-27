@@ -748,8 +748,9 @@ void* memmove(void* dest, const void* src, usize n) {
 
 // one-time initialization of global state
 rerror time_init();
+rerror init_mm();
 rerror kmem_init();
-rerror vmem_init();
+rerror init_vmem();
 rerror parse_init();
 
 bool rsm_init() {
@@ -766,16 +767,19 @@ bool rsm_init() {
   // PRNG
   fastrand_seed(nsec);
 
-  // kmalloc
+  // memory manager
+  CHECK_ERR(init_mm(), "init_mm");
+
+  // fragment memory allocator
   CHECK_ERR(kmem_init(), "kmem_init");
+
+  // virtual memory manager
+  CHECK_ERR(init_vmem(), "init_vmem");
 
   // assembly parser
   #ifndef RSM_NO_ASM
     CHECK_ERR(parse_init(), "parse_init");
   #endif
-
-  // virtual memory manager
-  CHECK_ERR(vmem_init(), "vmem_init");
 
   return true;
 error:

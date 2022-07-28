@@ -6,7 +6,7 @@
 // Blocks are managed per order of power of two (0 4096, 1 8192, 2 16384, ...)
 //
 // Here's an illustration of what the heirarchy logically looks like when we
-// manage 65 kiB of memory. Blocks are considered "buddies" when they are split.
+// manage 64 kiB of memory. Blocks are considered "buddies" when they are split.
 // The blocks below are filled with "Buddy #" when they are allocated and left
 // empty when they are free. I.e. the second block of the 3rd order is free.
 //
@@ -43,10 +43,8 @@
 #include "bits.h"
 #include "mem.h"
 
-#define MAX_ORDER      20
-#define MIN_ALLOC_SIZE PAGE_SIZE
-#define OBJ_MAXSIZE    (1ul * GiB)
-static_assert((1ul << 30) == (1ul * GiB), "");
+#define MAX_ORDER   19  /* 19=2GiB, 20=4GiB, 21=8GiB, 22=16GiB, ... */
+#define OBJ_MAXSIZE (1ul * GiB)
 
 typedef struct rmm_ {
   RHMutex lock;

@@ -196,11 +196,10 @@ static void vmem_test() {
   dlog("PT_BITS:         %5u", PT_BITS);
 
   // create a memory manager
-  rmm_t mm;
-  rmm_init(&mm, assertnotnull( osvmem_alloc(16 * MiB) ), 16 * MiB);
+  rmm_t* mm = rmm_emplace(assertnotnull( osvmem_alloc(16 * MiB) ), 16 * MiB);
 
   // create a page directory, with a reference to the MM
-  mpagedir_t* pagedir = assertnotnull( mpagedir_create(&mm) );
+  mpagedir_t* pagedir = assertnotnull( mpagedir_create(mm) );
 
   { u64 vaddr = 0xdeadbeef;
     u64 vfn = vaddr_to_vfn(vaddr);

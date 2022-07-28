@@ -2,162 +2,157 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
 #include "list.h"
+#include "bits.h"
 #include "mem.h"
 
+#define MAX_ORDER      20
+#define MIN_ALLOC_SIZE PAGE_SIZE
+#define OBJ_MAXSIZE    (1ul * GiB)
+static_assert((1ul << 30) == (1ul * GiB), "");
 
-typedef struct {
-  struct ilist list;
-} freepage_t;
-
-typedef struct {
-  uintptr      next_unused_addr; // next free page address
-  uintptr      start_addr;       // host address range start (PAGE_SIZE aligned)
-  uintptr      end_addr;         // host address range end (exclusive)
-  struct ilist recycle;          // reclaimed pages
-  RHMutex      lock;
-} mm_t;
-
-static_assert(sizeof(rmm_t) >= sizeof(mm_t), "");
+typedef struct rmm_ {
+  RHMutex lock;
+  uintptr start_addr; // host address range start (PAGE_SIZE aligned, read-only)
+  uintptr end_addr;   // host address range end (exclusive, read-only)
+  usize   free_size;  // number of free bytes (i.e. available to allocate)
+  u8*     bitsets[MAX_ORDER + 1];
+  ilist_t freelists[MAX_ORDER + 1];
+  usize   nalloc[MAX_ORDER + 1]; // number of allocations per order
+} rmm_t;
 
 
-rerror rmm_init(rmm_t* mmp, void* memp, usize memsize) {
-  uintptr addr = ALIGN2((uintptr)memp, PAGE_SIZE);
-  if (addr >= (uintptr)memp + memsize)
-    return rerr_nomem;
+// static usize buddy_order_max_blocks(usize region_len, int order) {
+//   return region_len / ((uintptr)PAGE_SIZE << order);
+// }
 
-  mm_t* mm = (mm_t*)mmp;
-  mm->start_addr = addr;
-  mm->end_addr = addr + memsize;
-  mm->next_unused_addr = mm->start_addr;
-  ilist_init(&mm->recycle);
 
-  if (!RHMutexInit(&mm->lock))
-    return rerr_invalid;
+usize rmm_cap_bytes(const rmm_t* mm) {
+  return (usize)(mm->end_addr - mm->start_addr);
+}
+
+usize rmm_free_bytes(const rmm_t* mm) {
+  return mm->free_size;
+}
+
+
+rmm_t* nullable rmm_emplace(void* memp, usize memsize) {
+  uintptr start = ALIGN2((uintptr)memp, _Alignof(rmm_t));
+  uintptr end_addr = (uintptr)memp + memsize;
+
+  if (start + sizeof(rmm_t) >= end_addr) // TODO: coalesce these checks
+    return NULL;
+
+  rmm_t* mm = (rmm_t*)start;
+
+  start += sizeof(rmm_t);
+  memsize -= sizeof(rmm_t);
+
+  // number of entries per bitmap
+  usize nchunks = (memsize / PAGE_SIZE) / 8; //dlog("nchunks %zu", nchunks);
+
+  // memory we will use for our bitsets
+  usize net_bitset_size = (nchunks * 2) + (MAX_ORDER * 2);
+
+  for(int order = 0; order < MAX_ORDER; order++) {
+    mm->bitsets[order] = (void*)start;
+    memset((void*)start, 0, nchunks + 2);
+    start += nchunks + 2;
+    ilist_init(&mm->freelists[order]);
+  }
+
+  // dlog("bitset storage: %lx ... %lx (%zu B)",
+  //   start, start + net_bitset_size, net_bitset_size);
+
+  start = ALIGN2(start + net_bitset_size, PAGE_SIZE);
+  memsize = ALIGN2_FLOOR(memsize - net_bitset_size, PAGE_SIZE);
+
+  mm->start_addr = start;
+  mm->end_addr = start + memsize;
+  mm->free_size = (usize)(mm->end_addr - mm->start_addr);
+
+  memset(&mm->nalloc, 0, sizeof(mm->nalloc));
 
   dlog("mm range: %lx…%lx (%.0f MB in %lu pages)",
-    mm->start_addr, mm->end_addr, (double)(mm->end_addr - mm->start_addr)/1024.0/1024.0,
+    mm->start_addr, mm->end_addr,
+    (double)(mm->end_addr - mm->start_addr)/1024.0/1024.0,
     (mm->end_addr - mm->start_addr) / PAGE_SIZE);
 
-  return 0;
+  // TODO test & think more closely about this.
+  // I'm not at all confident this isn't buggy.
+  int max_order = 0;
+  usize npages = memsize / PAGE_SIZE;
+  while (npages) {
+    max_order++;
+    npages >>= 1;
+  }
+  ilist_append(&mm->freelists[max_order], (ilist_t*)start);
+
+  return mm;
 }
 
 
-void* nullable rmm_allocpages(rmm_t* mmp, usize npages) {
-  mm_t* mm = (mm_t*)mmp;
-  RHMutexLock(&mm->lock);
+static void* nullable rmm_allocpages1(rmm_t* mm, int order) {
+  usize size = (usize)PAGE_SIZE << order;
 
-  // recycle a page range
-  uintptr addr, endaddr = 0;
-  usize nfound = 1;
-  ilist_for_each_reverse(top, &mm->recycle) {
-    if ((uintptr)top != endaddr)
-      nfound = 0;
-    nfound++;
-    if (nfound == npages) {
-      // found a consecutive range of npages
-      dlog("recycling %zu pages %p ... %p",
-        nfound, top, (void*)top + (npages * PAGE_SIZE));
-      addr = (uintptr)top;
-      // TODO: remove top + rest from list
-      goto end;
-    }
-    endaddr = (uintptr)top - PAGE_SIZE;
-  }
+  if (order >= MAX_ORDER)
+    return NULL;
 
-  // allocate from unused address space
-  addr = mm->next_unused_addr;
-  endaddr = addr + (npages * PAGE_SIZE);
-  if UNLIKELY(endaddr > mm->end_addr) {
-    addr = 0; // not enough memory available
+  ilist_t* block;
+  ilist_t* freelist = &mm->freelists[order];
+
+  if (ilist_is_empty(freelist)) {
+    // No free blocks of requested order.
+    // Allocate a block of the next order and split it to create two buddies.
+    //dlog("split to create buddies");
+    block = rmm_allocpages1(mm, order + 1);
+    if UNLIKELY(block == NULL)
+      return NULL;
+    ilist_t* buddy = (void*)block + size;
+    ilist_prepend(freelist, buddy);
   } else {
-    mm->next_unused_addr = endaddr;
+    block = mm->freelists[order].prev;
+    assert(block != freelist);
+    ilist_del(block);
   }
 
-end:
-  RHMutexUnlock(&mm->lock);
-  return (void*)addr;
+  // TODO: shift instead of division?
+  usize bit = ((uintptr)block - (uintptr)(mm->start_addr)) / size;
+
+  dlog("using %zu %s block %p (bit %zu)",
+    size >= GiB ? size/GiB : size >= MiB ? size/MiB : size/kiB,
+    size >= GiB ? "GiB" : size >= MiB ? "MiB" : "kiB",
+    block, bit);
+
+  assert(!bit_get(mm->bitsets[order], bit));
+  bit_set(mm->bitsets[order], bit);
+  mm->nalloc[order]++;
+
+  return block;
 }
 
 
-void rmm_freepages(rmm_t* mmp, void* ptr, usize npages) {
-  mm_t* mm = (mm_t*)mmp;
+void* nullable rmm_allocpages(rmm_t* mm, usize npages) {
+  safecheckf(IS_POW2(npages), "can only allocate pow2(npages)");
 
+  // order for npages (order as in size=PAGE_SIZE<<order)
+  int order = 0;
+  while (npages && !(npages & 1)) {
+    order++;
+    npages >>= 1;
+  }
+
+  RHMutexLock(&mm->lock);
+  void* ptr = rmm_allocpages1(mm, order);
+  if LIKELY(ptr != NULL)
+    mm->free_size -= npages * PAGE_SIZE;
+  RHMutexUnlock(&mm->lock);
+  return ptr;
+}
+
+
+void rmm_freepages(rmm_t* mm, void* ptr, usize npages) {
   assert(IS_ALIGN2((uintptr)ptr, PAGE_SIZE));
-
-  RHMutexLock(&mm->lock);
-
-  assertf((uintptr)ptr >= mm->start_addr, "outside address %p", ptr);
-  //dlog("free %p ... %p (%zu pages)", ptr, ptr + (npages * PAGE_SIZE), npages);
-
-  // in case the pages at ptr are at the tail of next_unused_addr,
-  // simply decrement next_unused_addr instead of placing them on the recycle list.
-  usize tailaddr;
-  #if DEBUG
-  assert(!check_sub_overflow(mm->next_unused_addr, npages * PAGE_SIZE, &tailaddr));
-  #else
-  tailaddr = mm->next_unused_addr - (npages * PAGE_SIZE);
-  #endif
-  if (tailaddr == (uintptr)ptr) {
-    mm->next_unused_addr = tailaddr;
-    goto end;
-  }
-
-  // add pages to recycle list (sorted)
-  const uintptr max_recycle_addr = (uintptr)mm->recycle.prev;
-
-  // if the list is empty or if the largest page address in the list is smaller than ptr
-  // simply append the pages we are freeing to the end of the recycle list
-  if (ilist_is_empty(&mm->recycle) || max_recycle_addr < (uintptr)ptr) {
-    for (usize i = 0; i < npages; i++)
-      ilist_append(&mm->recycle, (ilist_t*)(ptr + (i * PAGE_SIZE)));
-    goto end;
-  }
-
-  // sorted insertion
-  const uintptr min_recycle_addr = (uintptr)mm->recycle.next;
-  const uintptr mid_recycle_addr = (max_recycle_addr + min_recycle_addr) / 2;
-  ilist_t* smaller_entry;
-
-  if (mid_recycle_addr > (uintptr)ptr) {
-    // ptr is closer to the smallest page address in recycle
-    // forward scan (small -> large)
-    ilist_for_each(cur, &mm->recycle) {
-      if ((uintptr)cur < (uintptr)ptr)
-        continue;
-      ilist_insert_before(cur, (ilist_t*)ptr);
-      goto insert_rest;
-    }
-    UNREACHABLE;
-  } else {
-    // ptr is closer to the largest page address in recycle
-    // reverse scan (small -> large)
-    ilist_for_each_reverse(cur, &mm->recycle) {
-      if ((uintptr)cur > (uintptr)ptr)
-        continue;
-      ilist_insert_after(cur, (ilist_t*)ptr);
-      goto insert_rest;
-    }
-    UNREACHABLE;
-  }
-
-insert_rest:
-  smaller_entry = (ilist_t*)ptr;
-  for (usize i = 1; i < npages; i++) {
-    ilist_t* ent = (ilist_t*)(ptr + (i * PAGE_SIZE));
-    ilist_insert_after(smaller_entry, ent);
-    smaller_entry = ent;
-  }
-
-end:
-  RHMutexUnlock(&mm->lock);
-}
-
-
-static void dlog_recycle_state(rmm_t* mmp) {
-  mm_t* mm = (mm_t*)mmp;
-  usize i = 0;
-  ilist_for_each(cur, &mm->recycle)
-    dlog("%p [%zu]", cur, i++);
+  dlog("TODO");
 }
 
 
@@ -168,36 +163,40 @@ static void rmm_test() {
   assert(memsize % mem_pagesize() == 0);
   void* memp = assertnotnull( osvmem_alloc(memsize) );
 
-  rmm_t mm;
-  rmm_init(&mm, memp, memsize);
+  rmm_t* mm = assertnotnull( rmm_emplace(memp, memsize) );
+  dlog("rmm_cap_bytes()  %10zu", rmm_cap_bytes(mm));
+  dlog("rmm_free_bytes() %10zu", rmm_free_bytes(mm));
 
   void* ptrs[16];
   for (usize i = 0; i < countof(ptrs); i++) {
-    ptrs[i] = assertnotnull(rmm_allocpages(&mm, 3));
+    ptrs[i] = assertnotnull(rmm_allocpages(mm, 4));
     dlog("ptrs[%zu] %p", i, ptrs[i]);
   }
   // allocate an extra page to avoid triggering the tail decrement opt in rmm_freepages
-  void* p2 = assertnotnull( rmm_allocpages(&mm, 1) ); dlog("p2 %p", p2);
+  void* p2 = assertnotnull( rmm_allocpages(mm, 1) ); dlog("p2 %p", p2);
 
   // free in tip-tap order (0, 15, 2, 13, 4, 11, 6, 9, 8, 7, 10, 5, 12, 3, 14, 1)
   // this tests the "scan forward or backwards" branches
   for (usize i = 0; i < countof(ptrs); i++) {
     if (i % 2) {
-      // dlog_recycle_state(&mm);
-      rmm_freepages(&mm, ptrs[countof(ptrs) - i], 3);
-      // dlog_recycle_state(&mm);
+      // dlog_recycle_state(mm);
+      rmm_freepages(mm, ptrs[countof(ptrs) - i], 4);
+      // dlog_recycle_state(mm);
     } else {
-      rmm_freepages(&mm, ptrs[i], 3);
+      rmm_freepages(mm, ptrs[i], 4);
     }
   }
 
-  dlog_recycle_state(&mm);
+  // dlog_recycle_state(mm);
 
-  assertnotnull( rmm_allocpages(&mm, 5) );
+  assertnotnull( rmm_allocpages(mm, 8) );
 
-  rmm_freepages(&mm, p2, 3);
-  // dlog_recycle_state(&mm);
-  void* p3 = assertnotnull( rmm_allocpages(&mm, 3) ); dlog("p3 %p", p3);
+  rmm_freepages(mm, p2, 4);
+  // dlog_recycle_state(mm);
+  void* p3 = assertnotnull( rmm_allocpages(mm, 4) ); dlog("p3 %p", p3);
+
+  dlog("rmm_cap_bytes()  %10zu", rmm_cap_bytes(mm));
+  dlog("rmm_free_bytes() %10zu", rmm_free_bytes(mm));
 
   osvmem_free(memp, memsize);
 }
@@ -212,5 +211,5 @@ rerror init_mm() {
     return rerr_invalid;
   }
   rmm_test();
-  return 0;
+  return rerr_canceled;
 }

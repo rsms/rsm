@@ -14,11 +14,9 @@ static_assert(PAGE_SIZE <= 65536,       "PAGE_SIZE too large");
 // mm - memory manager
 // The memory manager owns and manages all of the host memory with a PAGE_SIZE granule.
 
-typedef struct {
-  void* _internal[8];
-} rmm_t;
+typedef struct rmm_ rmm_t;
 
-rerror rmm_init(rmm_t* restrict mm, void* restrict memp, usize memsize);
+rmm_t* nullable rmm_emplace(void* memp, usize memsize);
 void* nullable rmm_allocpages(rmm_t*, usize npages);
 void rmm_freepages(rmm_t* restrict mm, void* restrict ptr, usize npages);
 

@@ -244,10 +244,14 @@ typedef unsigned long       usize;
 // T ALIGN2<T>(T x, anyuint a)       rounds up x to nearest a (a must be a power of two)
 // T ALIGN2_FLOOR<T>(T x, anyuint a) rounds down x to nearest a
 // bool IS_ALIGN2(T x, anyuint a)    true if x is aligned to a
-#define ALIGN2(x,a)           _ALIGN2_MASK(x, (__typeof__(x))(a) - 1)
+#define ALIGN2(x,a) ({ \
+  __typeof__(x) atmp__ = (__typeof__(x))(a) - 1; \
+  ( ((x) + atmp__) & ~atmp__ ); \
+})
+// #define ALIGN2(x,a)           _ALIGN2_MASK(x, (__typeof__(x))(a) - 1)
+// #define _ALIGN2_MASK(x, mask) ( ((x) + (mask)) & ~(mask) )
 #define ALIGN2_FLOOR(x, a)    ALIGN2((x) - ((a) - 1), (a))
 #define IS_ALIGN2(x, a)       ( ((x) & ((__typeof__(x))(a) - 1)) == 0 )
-#define _ALIGN2_MASK(x, mask) ( ((x) + (mask)) & ~(mask) )
 
 // ANYINT COND_BYTE_MASK(ANYINT flags, int flag, bool on)
 // branchless ( on ? (flags | flag) : (flags & ~flag) )
@@ -476,8 +480,8 @@ typedef __builtin_va_list va_list;
 
   #define assertnull(a)  assert((a) == NULL)
   #define assertnotnull(a) ({                                              \
-    __typeof__(a) val__ = (a);                                             \
-    UNUSED const void* valp__ = val__; /* build bug on non-pointer */ \
+    __typeof__(*(a))* nullable val__ = (a);                                \
+    UNUSED const void* valp__ = val__; /* build bug on non-pointer */      \
     if (UNLIKELY(val__ == NULL))                                           \
       _assertfail("%s != NULL", #a);                                       \
     val__; })

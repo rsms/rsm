@@ -273,7 +273,8 @@ typedef unsigned long       usize;
   i64:   __builtin_ctzll, u64:   __builtin_ctzll)(x)
 
 // int rsm_clz(ANYUINT x) returns the number of leading 0-bits in x,
-// starting at the most significant bit position. If x is 0, the result is undefined.
+// starting at the most significant bit position.
+// If x is 0, the result is undefined.
 #define rsm_clz(x) _Generic((x), \
   i8:    __builtin_clz,   u8:    __builtin_clz, \
   i16:   __builtin_clz,   u16:   __builtin_clz, \
@@ -306,10 +307,12 @@ static ALWAYS_INLINE int __fls32(unsigned int x) {
   return x ? (int)(sizeof(x) * 8) - __builtin_clz(x) : 0;
 }
 static ALWAYS_INLINE int __flsl(unsigned long x) {
-  return (int)(sizeof(x) * 8) - 1 - __builtin_clzl(x);
+  return x ? (int)(sizeof(x) * 8) - 1 - __builtin_clzl(x) : 0;
 }
 #if USIZE_MAX < 0xffffffffffffffff
   static ALWAYS_INLINE int __fls64(u64 x) {
+    if (x == 0)
+      return 0;
     u32 h = x >> 32;
     if (h)
       return __fls32(h) + 32;
@@ -317,9 +320,7 @@ static ALWAYS_INLINE int __flsl(unsigned long x) {
   }
 #else
   static ALWAYS_INLINE int __fls64(u64 x) {
-    if (x == 0)
-      return 0;
-    return __flsl(x) + 1;
+    return x ? __flsl(x) + 1 : 0;
   }
 #endif
 
@@ -331,14 +332,14 @@ static ALWAYS_INLINE int __flsl(unsigned long x) {
   rsm_fls(n) - 1 \
 )
 
-// ANYINT CEIL_POW2(ANYINT) rounds down n to nearest power of two.
+// ANYINT FLOOR_POW2(ANYINT) rounds down n to nearest power of two.
 // Result is undefined when n is 0.
 #define FLOOR_POW2(n) ( \
   __builtin_constant_p(n) ? ( \
     ((n) == 1) ? 1 : \
       ((__typeof__(n))1 << (ILOG2((n) - 1) + 1)) \
     ) : \
-  ((__typeof__(n))1 << rsm_fls(n - 1)) \
+  ((__typeof__(n))1 << rsm_fls((n) - 1)) \
 )
 
 // ANYINT CEIL_POW2(ANYINT n) rounds up n to nearest power of two.

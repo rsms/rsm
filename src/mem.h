@@ -12,20 +12,22 @@ static_assert(PAGE_SIZE <= 65536,       "PAGE_SIZE too large");
 
 //———————————————————————————————————————————————————————————————————————————————————————
 // mm - memory manager
-// The memory manager owns and manages all of the host memory with a PAGE_SIZE granule.
+// The memory manager owns and manages all of the host memory.
+// Allocations are limited to pages (PAGE_SIZE).
+// rmm_allocpages can only allocate a power-of-two number of pages per call.
 
 typedef struct rmm_ rmm_t;
 
 rmm_t* nullable rmm_emplace(void* memp, usize memsize);
 void* nullable rmm_allocpages(rmm_t*, usize npages);
-void rmm_freepages(rmm_t* restrict mm, void* restrict ptr, usize npages);
+void rmm_freepages(rmm_t* restrict mm, void* restrict ptr);
 
 inline static void* nullable rmm_allocpages_bytes(rmm_t* mm, usize minsize) {
   return rmm_allocpages(mm, ALIGN2(minsize, PAGE_SIZE) / PAGE_SIZE);
 }
-inline static void rmm_freepages_bytes(rmm_t* mm, void* ptr, usize minsize) {
-  rmm_freepages(mm, ptr, ALIGN2(minsize, PAGE_SIZE) / PAGE_SIZE);
-}
+
+usize rmm_cap_bytes(const rmm_t* mm); // total capacity
+usize rmm_avail_bytes(const rmm_t*); // number of bytes available to allocate
 
 
 RSM_ASSUME_NONNULL_END

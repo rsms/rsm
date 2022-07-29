@@ -46,6 +46,12 @@
 #define MAX_ORDER   19  /* 19=2GiB, 20=4GiB, 21=8GiB, 22=16GiB, ... */
 #define OBJ_MAXSIZE (1ul * GiB)
 
+// trace: comment out to enable logging a lot of info via dlog
+#define trace(...) ((void)0)
+#ifndef trace
+  #define trace(fmt, args...) dlog("[mm] " fmt, ##args)
+#endif
+
 typedef struct rmm_ {
   RHMutex lock;
   uintptr start_addr; // host address range start (PAGE_SIZE aligned, read-only)
@@ -66,16 +72,39 @@ usize rmm_avail_bytes(const rmm_t* mm) {
 }
 
 
+#if DEBUG
+UNUSED static void dlog_freelist(const rmm_t* mm, int order) {
+  const ilist_t* head = &mm->freelists[order];
+  trace("freelists[%d] %p", order, head);
+  usize i = 0; // expect ents[0] first
+  ilist_for_each(cur, head) {
+    if (cur->prev == head && cur->next == head) {
+      trace("  [%zu] %p (.prev HEAD, .next HEAD)", i, cur);
+    } else if (cur->prev == head) {
+      trace("  [%zu] %p (.prev HEAD, .next %p)", i, cur, cur->next);
+    } else if (cur->next == head) {
+      trace("  [%zu] %p (.prev %p, .next HEAD)", i, cur, cur->prev);
+    } else {
+      trace("  [%zu] %p (.prev %p, .next %p)", i, cur, cur->prev, cur->next);
+    }
+    i++;
+  }
+}
+#endif
+
+
 static uintptr rmm_allocpages1(rmm_t* mm, int order) {
   usize size = (usize)PAGE_SIZE << order;
 
   if (order >= MAX_ORDER)
     return UINTPTR_MAX;
 
-  ilist_t* freelist = &mm->freelists[order];
-  uintptr addr; // address offset relative to mm->start_addr
+  // try to dequeue a free block
+  uintptr addr = (uintptr)ilist_pop(&mm->freelists[order]);
 
-  if (ilist_is_empty(freelist)) {
+  if (addr) {
+    addr -= mm->start_addr;
+  } else {
     // No free blocks of requested order.
     // Allocate a block of the next order and split it to create two buddies.
     addr = rmm_allocpages1(mm, order + 1);
@@ -83,27 +112,24 @@ static uintptr rmm_allocpages1(rmm_t* mm, int order) {
       return UINTPTR_MAX;
     ilist_t* buddy1 = (ilist_t*)(addr + mm->start_addr);
     ilist_t* buddy2 = (void*)buddy1 + size;
-    ilist_prepend(freelist, buddy2);
+    trace("ilist_append %p", buddy2);
+    ilist_append(&mm->freelists[order], buddy2);
+    dlog_freelist(mm, order);
 
     #if DEBUG
     usize nextsize = (usize)PAGE_SIZE << (order + 1);
-    dlog("split block %d:%p (%zu %s) -> blocks %d:%p, %d:%p",
+    trace("split block %d:%p (%zu %s) -> blocks %d:%p, %d:%p",
       order, (void*)addr,
       nextsize >= GiB ? nextsize/GiB : nextsize >= MiB ? nextsize/MiB : nextsize/kiB,
       nextsize >= GiB ? "GiB" : nextsize >= MiB ? "MiB" : "kiB",
       order + 1, (void*)addr,
       order + 1, (void*)addr + size);
     #endif
-  } else {
-    ilist_t* buddy = mm->freelists[order].prev;
-    assert(buddy != freelist);
-    ilist_del(buddy);
-    addr = (uintptr)buddy - mm->start_addr;
   }
 
   usize bit = addr / size;
 
-  dlog("using block %d:%p (%zu %s, 0x%lx, bit %zu)",
+  trace("using block %d:%p (%zu %s, 0x%lx, bit %zu)",
     order, (void*)addr,
     size >= GiB ? size/GiB : size >= MiB ? size/MiB : size/kiB,
     size >= GiB ? "GiB" : size >= MiB ? "MiB" : "kiB",
@@ -140,28 +166,32 @@ static int rmm_freepages1(rmm_t* mm, uintptr addr, int order) {
     return -1;
 
   int bit = addr / ((uintptr)PAGE_SIZE << order);
-  dlog("rmm_freepages1 block %d:%p, bit %d", order, (void*)addr, bit);
+  trace("rmm_freepages1 block %d:%p, bit %d", order, (void*)addr, bit);
 
   if (!bit_get(mm->bitsets[order], bit))
     return rmm_freepages1(mm, addr, order + 1);
 
   uintptr buddy_addr = addr ^ ((uintptr)PAGE_SIZE << order);
   int buddy_bit = buddy_addr / ((uintptr)PAGE_SIZE << order);
-  bit_clear(mm->bitsets[order], bit);
+  bit_clear(mm->bitsets[order], bit); // no longer in use
 
-  dlog("  bit %d, buddy_bit %d, buddy %p", bit, buddy_bit, (void*)buddy_addr);
+  trace("  bit %d=0, buddy_bit %d=%d, buddy %p",
+    bit, buddy_bit, bit_get(mm->bitsets[order], buddy_bit), (void*)buddy_addr);
 
   if (!bit_get(mm->bitsets[order], buddy_bit)) {
-    dlog("  merge buddies");
+    // buddy is not in use -- merge
+    trace("  merge buddies %p + %p", (void*)addr, (void*)buddy_addr);
     ilist_t* buddy = (void*)(buddy_addr + mm->start_addr);
     assertnotnull(buddy->next); assert(buddy->next != buddy);
     assertnotnull(buddy->prev); assert(buddy->prev != buddy);
     ilist_del(buddy);
+    dlog_freelist(mm, order);
     rmm_freepages1(mm, buddy_addr > addr ? addr : buddy_addr, order + 1);
   } else {
-    dlog("  free block");
-    ilist_t* elem = (void*)(addr + mm->start_addr);
-    ilist_prepend(&mm->freelists[order], elem);
+    trace("  free block %p", (void*)addr);
+    ilist_t* block = (void*)(addr + mm->start_addr);
+    ilist_append(&mm->freelists[order], block);
+    dlog_freelist(mm, order);
   }
 
   //mm->nalloc[order]--;
@@ -171,7 +201,7 @@ static int rmm_freepages1(rmm_t* mm, uintptr addr, int order) {
 
 void rmm_freepages(rmm_t* mm, void* ptr) {
   assert(IS_ALIGN2((uintptr)ptr, PAGE_SIZE));
-  dlog("rmm_freepages %p", ptr);
+  trace("rmm_freepages %p", ptr);
   RHMutexLock(&mm->lock);
   int order = rmm_freepages1(mm, (uintptr)ptr - mm->start_addr, 0);
   if (order >= 0)
@@ -194,14 +224,14 @@ rmm_t* nullable rmm_emplace(void* memp, usize memsize) {
   memsize -= (usize)((start + sizeof(rmm_t)) - (uintptr)memp);
 
   // number of entries per bitmap
-  usize nchunks = (memsize / PAGE_SIZE) / 8; //dlog("nchunks %zu", nchunks);
+  usize nchunks = (memsize / PAGE_SIZE) / 8;
 
   // memory we will use for our bitsets
   usize net_bitset_size = (nchunks * 2) + (MAX_ORDER * 2);
 
   for (int order = 0; order < MAX_ORDER; order++) {
     mm->bitsets[order] = (void*)start;
-    memset((void*)start, 0, nchunks + 2);
+    memset((void*)start, 0, nchunks + 2); // set all bits to 0
     start += nchunks + 2;
     nchunks /= 2;
     ilist_init(&mm->freelists[order]);
@@ -214,7 +244,7 @@ rmm_t* nullable rmm_emplace(void* memp, usize memsize) {
   mm->end_addr = start + memsize;
   mm->free_size = (usize)(mm->end_addr - mm->start_addr);
 
-  dlog("mm using memory region %lx…%lx (%.0f MB in %lu pages)",
+  trace("mm using memory region %lx…%lx (%.0f MB in %lu pages)",
     mm->start_addr, mm->end_addr,
     (double)(mm->end_addr - mm->start_addr)/1024.0/1024.0,
     (mm->end_addr - mm->start_addr) / PAGE_SIZE);
@@ -225,17 +255,22 @@ rmm_t* nullable rmm_emplace(void* memp, usize memsize) {
   usize npages_total = memsize / PAGE_SIZE;
   while (npages_total) {
     usize npages = FLOOR_POW2(npages_total);
+
     npages_total -= npages;
-    int max_order = -1;
-    while (npages) {
-      max_order++;
-      npages >>= 1;
-    }
-    assert(max_order > -1);
-    dlog("initial free block %d:0x0 (%zu B)", max_order, (usize)PAGE_SIZE << max_order);
-    ilist_append(&mm->freelists[max_order], (ilist_t*)start);
+    int order = -1;
+    for (usize n = npages; n; n >>= 1)
+      order++;
+    assert(order > -1);
+    trace("initial free block %d:0x0 (%zu B)", order, (usize)PAGE_SIZE << order);
+
+    ilist_append(&mm->freelists[order], (ilist_t*)start);
+    //dlog_freelist(mm, order);
+
     // set buddy bit of (invalid, imaginary) "end buddy" of the largest block
-    bit_set(mm->bitsets[max_order], 1);
+    usize bit = (start - mm->start_addr) / ((usize)PAGE_SIZE << order);
+    bit_set(mm->bitsets[order], bit + 1);
+
+    start += (usize)PAGE_SIZE << order;
   }
 
   return mm;
@@ -249,7 +284,7 @@ static void rmm_test() {
   void* memp = assertnotnull( osvmem_alloc(memsize) );
 
   rmm_t* mm = assertnotnull( rmm_emplace(memp, memsize) );
-  dlog("rmm_cap_bytes()  %10zu", rmm_cap_bytes(mm));
+  dlog("rmm_cap_bytes()   %10zu", rmm_cap_bytes(mm));
   dlog("rmm_avail_bytes() %10zu", rmm_avail_bytes(mm));
 
   void* p = assertnotnull( rmm_allocpages(mm, 4) );
@@ -260,35 +295,35 @@ static void rmm_test() {
   dlog("rmm_allocpages(4) => %p", p);
   rmm_freepages(mm, p);
 
-  // void* ptrs[16];
-  // for (usize i = 0; i < countof(ptrs); i++) {
-  //   ptrs[i] = assertnotnull(rmm_allocpages(mm, 4));
-  //   dlog("ptrs[%zu] %p", i, ptrs[i]);
-  // }
-  // // allocate an extra page to avoid triggering the tail decrement opt in rmm_freepages
-  // void* p2 = assertnotnull( rmm_allocpages(mm, 1) ); dlog("p2 %p", p2);
+  void* ptrs[16];
+  for (usize i = 0; i < countof(ptrs); i++) {
+    ptrs[i] = assertnotnull(rmm_allocpages(mm, 4));
+    dlog("ptrs[%zu] %p", i, ptrs[i]);
+  }
+  // allocate an extra page to avoid triggering the tail decrement opt in rmm_freepages
+  void* p2 = assertnotnull( rmm_allocpages(mm, 1) ); dlog("p2 %p", p2);
 
-  // // free in tip-tap order (0, 15, 2, 13, 4, 11, 6, 9, 8, 7, 10, 5, 12, 3, 14, 1)
-  // // this tests the "scan forward or backwards" branches
-  // for (usize i = 0; i < countof(ptrs); i++) {
-  //   if (i % 2) {
-  //     // dlog_recycle_state(mm);
-  //     rmm_freepages(mm, ptrs[countof(ptrs) - i], 4);
-  //     // dlog_recycle_state(mm);
-  //   } else {
-  //     rmm_freepages(mm, ptrs[i], 4);
-  //   }
-  // }
+  // free in tip-tap order (0, 15, 2, 13, 4, 11, 6, 9, 8, 7, 10, 5, 12, 3, 14, 1)
+  // this tests the "scan forward or backwards" branches
+  for (usize i = 0; i < countof(ptrs); i++) {
+    if (i % 2) {
+      // dlog_recycle_state(mm);
+      rmm_freepages(mm, ptrs[countof(ptrs) - i]);
+      // dlog_recycle_state(mm);
+    } else {
+      rmm_freepages(mm, ptrs[i]);
+    }
+  }
 
   // // dlog_recycle_state(mm);
 
   // assertnotnull( rmm_allocpages(mm, 8) );
 
-  // rmm_freepages(mm, p2, 4);
+  rmm_freepages(mm, p2);
   // // dlog_recycle_state(mm);
   // void* p3 = assertnotnull( rmm_allocpages(mm, 4) ); dlog("p3 %p", p3);
 
-  dlog("rmm_cap_bytes()  %10zu", rmm_cap_bytes(mm));
+  dlog("rmm_cap_bytes()   %10zu", rmm_cap_bytes(mm));
   dlog("rmm_avail_bytes() %10zu", rmm_avail_bytes(mm));
 
   osvmem_free(memp, memsize);

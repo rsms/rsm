@@ -7,12 +7,11 @@ static const u8 kBitsetMaskFirst[8] = { 0xFF, 0xFE, 0xFC, 0xF8, 0xF0, 0xE0, 0xC0
 static const u8 kBitsetMaskLast[8] = { 0x00, 0x1, 0x3, 0x7, 0xF, 0x1F, 0x3F, 0x7F };
 
 
-void bitset_set_range(bitset_t* bset, usize start, usize len, bool on) {
+void bits_set_range(u8* bits, usize start, usize len, bool on) {
   assert(len > 0);
-  assert(start+len <= bset->len);
 
-  u8* first = &bset->data[start / 8];
-  u8* last = &bset->data[(start + len) / 8];
+  u8* first = &bits[start / 8];
+  u8* last = &bits[(start + len) / 8];
   u8 mask = kBitsetMaskFirst[start % 8];
 
   if (first == last) {

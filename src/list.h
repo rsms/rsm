@@ -41,6 +41,14 @@ inline static bool ilist_is_head(const ilist_t* head, const ilist_t* entry) {
 
 // _ilist_insert inserts newent in between prev and next
 inline static void _ilist_insert(ilist_t* newent, ilist_t* prev, ilist_t* next) {
+  //                     ┌────────────┐
+  //            ┏━[prev]━┥   newent   ┝━[next]━┓
+  //            ┃        └────────────┘        ┃
+  //            ▼             ▲   ▲            ▼
+  //    ┌────────────┐        ┃   ┃        ┌────────────┐
+  //... │    prev    ┝━[next]━┛   ┗━[prev]━┥    next    │ ...
+  //    └────────────┘                     └────────────┘
+  //
   next->prev = newent;
   newent->next = next;
   newent->prev = prev;
@@ -86,6 +94,17 @@ inline static void ilist_del_init(ilist_t* entry) {
 }
 
 
+// ilist_pop removes & returns the last entry from list "head".
+// Returns NULL if the list is empty.
+inline static ilist_t* nullable ilist_pop(ilist_t* head) {
+  ilist_t* last = head->prev;
+  if (head == last) // empty list
+    return NULL;
+  ilist_del(last);
+  return last;
+}
+
+
 // ilist_replace replaces one entry with another.
 // oldent is no longer in the list after this.
 inline static void ilist_replace(ilist_t* oldent, ilist_t* newent) {
@@ -111,17 +130,6 @@ inline static void ilist_swap(ilist_t* entry1, ilist_t* entry2) {
 inline static void ilist_move(ilist_t* src_entry, ilist_t* dst_head) {
   ilist_del(src_entry);
   ilist_insert_after(dst_head, src_entry);
-}
-
-
-// ilist_pop removes & returns the last entry from list "head".
-// Returns NULL if the list is empty.
-inline static ilist_t* nullable ilist_pop(ilist_t* head) {
-  ilist_t* last = head->prev;
-  if (head == last) // empty list
-    return NULL;
-  ilist_del(last);
-  return last;
 }
 
 

@@ -16,6 +16,7 @@ inline static void bit_clear(void* bits, usize bit) {
   ((u8*)bits)[bit / 8] &= ~(1 << (bit % 8));
 }
 
+void bits_set_range(u8* bits, usize start, usize len, bool on);
 
 // set of bits
 typedef struct {
@@ -34,7 +35,10 @@ inline static bool bitset_get(const bitset_t* bset, usize index) {
   return bit_get(bset->data, index);
 }
 
-void bitset_set_range(bitset_t* bset, usize start, usize len, bool on);
+inline static void bitset_set_range(bitset_t* bset, usize start, usize len, bool on) {
+  assert(start + len <= bset->len);
+  bits_set_range(bset->data, start, len, on);
+}
 
 // bitset_find_unset_range searches for a contiguous region of unset bits.
 //   start: #bit to start the search at.

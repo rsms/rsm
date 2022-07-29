@@ -5,6 +5,7 @@
 #define ILIST_TEST_IMPL
 #include "list.h"
 #include "bits.h"
+#include "mem.h"
 
 #define PAGE_SIZE 4096u
 
@@ -19,16 +20,18 @@
 //———————————————————————————————————————————————————————————————————————————————————
 // API
 
-void* nullable kmem_alloc(usize size)
-  __attribute__((malloc, alloc_size(1)));
+typedef struct kmem_ kmem_t;
 
-void* nullable kmem_allocx(usize* size_in_out, usize alignment) // returns actual size
-  __attribute__((malloc, alloc_align(2)));
+void* nullable kmem_alloc(kmem_t*, usize size)
+  __attribute__((malloc, alloc_size(2)));
 
-void* nullable kmem_alloc_aligned(usize size, usize alignment)
-  __attribute__((malloc, alloc_size(1), alloc_align(2)));
+void* nullable kmem_allocx(kmem_t*, usize* size_in_out, usize alignment) // returns actual size
+  __attribute__((malloc, alloc_align(3)));
 
-void kmem_free(void* ptr);
+void* nullable kmem_alloc_aligned(kmem_t*, usize size, usize alignment)
+  __attribute__((malloc, alloc_size(2), alloc_align(3)));
+
+void kmem_free(kmem_t*, void* ptr);
 
 // TODO
 // void* nullable kmem_resize(void* oldptr, usize oldsize, usize newsize)
@@ -46,23 +49,6 @@ usize kmem_alloc_size(usize);
 // heap is allocated and added to the subheaps list.
 //
 
-// CHUNK_SIZE: allocation chunk size, in bytes (must be a power of two)
-// All allocations are at least CHUNK_SIZE large.
-// All allocations are aligned to CHUNK_SIZE addresses.
-#if UINTPTR_MAX < 0xffffffffffffffff
-  #define CHUNK_SIZE 32u
-#else
-  #define CHUNK_SIZE 64u
-#endif
-
-#define KMALLOC_INIT_SIZE (2u * MiB)
-static_assert(KMALLOC_INIT_SIZE % PAGE_SIZE == 0, "");
-
-// BEST_FIT_THRESHOLD: if the number of allocation chunks required are at least
-// these many, use a "best fit" search instead of a "first fit" search.
-// Used by kmem_alloc.
-#define BEST_FIT_THRESHOLD 128u
-
 
 typedef struct {
   usize nchunks; // there are nchunks*CHUNK_SIZE bytes at data
@@ -76,25 +62,61 @@ typedef struct {
   bitset_t chunk_use; // a set bit means that chunk is in use; is allocated
 } heap_t;
 
-typedef struct subheap subheap_t;
-struct subheap {
+typedef struct {
   ilist_t list_entry;
   heap_t  allocator;
-};
+} subheap_t;
+
+// typedef struct {
+//   usize   size;
+//   ilist_t free;
+//   ilist_t used;
+// } slabheap_t;
+
+typedef struct kmem_ {
+  rmm_t*  mm;
+  RHMutex lock;
+  ilist_t subheaps;
+  //slabheap_t slabheaps[6] = {{16},{32},{64},{128},{256},{512}}; // TODO
+  bool    expansion_in_progress;
+} allocator_t;
+
+
 static_assert(sizeof(subheap_t) <= PAGE_SIZE, "");
+
+
+// CHUNK_SIZE: allocation chunk size, in bytes (must be a power of two)
+// All allocations are at least CHUNK_SIZE large.
+// All allocations are aligned to CHUNK_SIZE addresses.
+#if UINTPTR_MAX < 0xffffffffffffffff
+  #define CHUNK_SIZE 32u
+#else
+  #define CHUNK_SIZE 64u
+#endif
+
+
+// BEST_FIT_THRESHOLD: if the number of allocation chunks required are at least
+// these many, use a "best fit" search instead of a "first fit" search.
+// Used by kmem_alloc.
+#define BEST_FIT_THRESHOLD 128u
+
+
+// KMEM_TRACE: uncomment to enable logging a lot of info via dlog
+#define KMEM_TRACE
+//
+#if defined(KMEM_TRACE) && defined(DEBUG)
+  #define trace(fmt, args...) dlog("[kmem] " fmt, ##args)
+#else
+  #ifdef KMEM_TRACE
+    #warning KMEM_TRACE has no effect unless DEBUG is enabled
+    #undef KMEM_TRACE
+  #endif
+  #define trace(...) ((void)0)
+#endif
+
 
 // allochead_t* ALLOCHEAD(void* ptr) accesses the allochead_t of an allocation
 #define ALLOCHEAD(ptr)  ((allochead_t*)( (((u8*)ptr) - sizeof(allochead_t)) ))
-
-#define trace(fmt, args...) dlog("[kmalloc] " fmt, ##args)
-
-
-// kmalloc global state
-static u8 g_init_mem[KMALLOC_INIT_SIZE] __attribute__((aligned(PAGE_SIZE)));
-static RHMutex g_lock;
-static ilist_t g_subheaps = ILIST_INIT_HEAD(g_subheaps);
-//static slabheap_t g_slabheaps[6] = {{16},{32},{64},{128},{256},{512}}; // TODO
-static bool    g_expansion_in_progress = false;
 
 
 // heap_init initializes heap h with memory at p of size bytes
@@ -231,7 +253,7 @@ static void* nullable heap_alloc(heap_t* h, usize* sizep, usize alignment) {
   if (KMEM_ALLOC_SCRUB_BYTE)
     memset(ptr, KMEM_ALLOC_SCRUB_BYTE, *sizep);
 
-  dlog("[heap] allocating %p (%zu B) in %zu chunks [%zu…%zu)",
+  trace("[heap] allocating %p (%zu B) in %zu chunks [%zu…%zu)",
     ptr, *sizep, clen, ci, ci+clen);
 
   return ptr;
@@ -342,23 +364,23 @@ inline static bool subheap_try_free(subheap_t* sh, void* ptr) {
 }
 
 
-static void kmem_add_subheap(void* storage, usize size) {
+static void kmem_add_subheap(allocator_t* a, void* storage, usize size) {
   trace("add subheap %p (%zu B)", storage, size);
-  assert(size >= PAGE_SIZE*2);
+  assert(size > PAGE_SIZE);
   // place subheap struct in first page and give it the rest to use for its memory
   subheap_t* sh = storage;
   subheap_init(sh, storage + PAGE_SIZE, size - PAGE_SIZE);
-  ilist_append(&g_subheaps, &sh->list_entry);
+  ilist_append(&a->subheaps, &sh->list_entry);
 }
 
 
 #if DEBUG
   UNUSED static void kmem_debug_dump_state(
-    void* nullable highlight_p, usize highlight_size)
+    allocator_t* a, void* nullable highlight_p, usize highlight_size)
   {
-    RHMutexLock(&g_lock);
+    RHMutexLock(&a->lock);
     usize i = 0;
-    ilist_for_each(lent, &g_subheaps) {
+    ilist_for_each(lent, &a->subheaps) {
       subheap_t* sh = ilist_entry(lent, subheap_t, list_entry);
       heap_t* h = &sh->allocator;
       uintptr start_addr = (uintptr)h->chunks;
@@ -371,26 +393,26 @@ static void kmem_add_subheap(void* storage, usize size) {
         h->chunk_len);
       heap_debug_dump_state(h, highlight_p, highlight_size);
     }
-    RHMutexUnlock(&g_lock);
+    RHMutexUnlock(&a->lock);
   }
 #endif
 
 
 // kmem_allocx attempts to allocate *size bytes.
 // On success, *size is updated to its actual size.
-void* nullable kmem_allocx(usize* size, usize alignment) {
+void* nullable kmem_allocx(allocator_t* a, usize* size, usize alignment) {
   assertf(IS_POW2(alignment), "alignment %zu is not a power-of-two", alignment);
   assert(alignment <= PAGE_SIZE);
 
   void* ptr = NULL;
 
-  RHMutexLock(&g_lock);
-  assert(!g_expansion_in_progress);
+  RHMutexLock(&a->lock);
+  assert(!a->expansion_in_progress);
 
   // TODO: g_slabheaps
 
   // attempt to allocate space in a subheap
-  ilist_for_each(lent, &g_subheaps) {
+  ilist_for_each(lent, &a->subheaps) {
     subheap_t* sh = ilist_entry(lent, subheap_t, list_entry);
     if ((ptr = subheap_alloc(sh, size, alignment)))
       goto end;
@@ -399,27 +421,27 @@ void* nullable kmem_allocx(usize* size, usize alignment) {
   panic("TODO expand memory");
 
 end:
-  RHMutexUnlock(&g_lock);
+  RHMutexUnlock(&a->lock);
   return ptr;
 }
 
 
-void* nullable kmem_alloc(usize size) {
-  return kmem_allocx(&size, 1);
+void* nullable kmem_alloc(allocator_t* a, usize size) {
+  return kmem_allocx(a, &size, 1);
 }
 
-void* nullable kmem_alloc_aligned(usize size, usize alignment) {
-  return kmem_allocx(&size, alignment);
+void* nullable kmem_alloc_aligned(allocator_t* a, usize size, usize alignment) {
+  return kmem_allocx(a, &size, alignment);
 }
 
 
-void kmem_free(void* ptr) {
+void kmem_free(allocator_t* a, void* ptr) {
   assertnotnull(ptr);
 
-  RHMutexLock(&g_lock);
-  assert(!g_expansion_in_progress);
+  RHMutexLock(&a->lock);
+  assert(!a->expansion_in_progress);
 
-  ilist_for_each(lent, &g_subheaps) {
+  ilist_for_each(lent, &a->subheaps) {
     subheap_t* sh = ilist_entry(lent, subheap_t, list_entry);
     if (subheap_try_free(sh, ptr))
       goto end;
@@ -427,7 +449,7 @@ void kmem_free(void* ptr) {
 
   safecheckf(0, "kmem_free: invalid address %p", ptr);
 end:
-  RHMutexUnlock(&g_lock);
+  RHMutexUnlock(&a->lock);
 }
 
 
@@ -437,72 +459,96 @@ usize kmem_alloc_size(usize size) {
 }
 
 
+#define ALLOCATOR_SIZE  ALIGN2(sizeof(allocator_t), PAGE_SIZE)
+
+
+void* nullable allocator_create(rmm_t* mm, usize min_initmem) {
+  usize nbyte = CEIL_POW2(ALLOCATOR_SIZE + min_initmem);
+  dlog("allocating %zu pages (%zu kiB)", nbyte / PAGE_SIZE, nbyte / kiB);
+  void* p = rmm_allocpages(mm, nbyte / PAGE_SIZE);
+  if (!p)
+    return NULL;
+
+  allocator_t* a = p;
+  memset(a, 0, sizeof(*a));
+  a->mm = mm;
+  ilist_init(&a->subheaps);
+  if (!RHMutexInit(&a->lock))
+    return NULL;
+
+  // use the rest of the memory allocated for the allocator struct as a subheap
+  // TODO: consider using this as a slabheap instead (when we have slabheaps)
+  kmem_add_subheap(a, p + ALLOCATOR_SIZE, nbyte - ALLOCATOR_SIZE);
+
+  return a;
+}
+
+
+void allocator_dispose(allocator_t* a) {
+  // TODO: free subheaps (except the initial subheap at a+ALLOCATOR_SIZE)
+  rmm_freepages(a->mm, a);
+}
+
+
 rerror kmem_init() {
   ilist_test();
-  safecheckexpr( RHMutexInit(&g_lock) , true);
 
-  memset(g_init_mem, 0, sizeof(g_init_mem));
-  kmem_add_subheap(g_init_mem, sizeof(g_init_mem));
+  // create a memory manager
+  rmm_t* mm = rmm_emplace(assertnotnull( osvmem_alloc(16 * MiB) ), 16 * MiB);
 
-  assertf(
-    (uintptr)g_init_mem == ALIGN2((uintptr)g_init_mem, PAGE_SIZE),
-    "g_init_mem %p is not aligned to PAGE_SIZE (%u); expected %p",
-    g_init_mem, PAGE_SIZE, (void*)ALIGN2((uintptr)g_init_mem, PAGE_SIZE));
+  allocator_t* a = assertnotnull( allocator_create(mm, 4 * MiB) );
 
   usize z = kmem_alloc_size(123);
   dlog("kmem_alloc_size(123) => %zu", z);
 
   void* p1, *p2, *p3, *p4, *p5;
 
-  p1 = kmem_alloc(z - 3);
+  p1 = kmem_alloc(a, z - 3);
   dlog("kmem_alloc(%zu) => %p", z, p1);
 
   usize size2 = 100;
-  p2 = kmem_allocx(&size2, 512);
+  p2 = kmem_allocx(a, &size2, 512);
   dlog("kmem_alloc_aligned(100,512) => %p (%p) %zu B",
     p2, (void*)ALIGN2((uintptr)p2,512), size2 );
 
-  kmem_free(p1);
-  kmem_free(p2);
+  kmem_free(a, p1);
+  kmem_free(a, p2);
 
-  p3 = kmem_alloc(800);
+  p3 = kmem_alloc(a, 800);
   dlog("kmem_alloc(800) => %p", p3);
-  kmem_free(p3);
+  kmem_free(a, p3);
 
-  p1 = kmem_alloc(CHUNK_SIZE*(BEST_FIT_THRESHOLD-2));
-  p1 = kmem_alloc(CHUNK_SIZE);   // 0-2
-  p2 = kmem_alloc(CHUNK_SIZE*3); // 2-6
-  p3 = kmem_alloc(CHUNK_SIZE);   // 6-8
-  p4 = kmem_alloc(CHUNK_SIZE);   // 8-10
-  p5 = kmem_alloc(CHUNK_SIZE*3); // 10-14
-  kmem_free(p2);
-  kmem_free(p4);
-  kmem_debug_dump_state(NULL, 0);
+  p1 = kmem_alloc(a, CHUNK_SIZE*(BEST_FIT_THRESHOLD-2));
+  p1 = kmem_alloc(a, CHUNK_SIZE);   // 0-2
+  p2 = kmem_alloc(a, CHUNK_SIZE*3); // 2-6
+  p3 = kmem_alloc(a, CHUNK_SIZE);   // 6-8
+  p4 = kmem_alloc(a, CHUNK_SIZE);   // 8-10
+  p5 = kmem_alloc(a, CHUNK_SIZE*3); // 10-14
+  kmem_free(a, p2);
+  kmem_free(a, p4);
+  kmem_debug_dump_state(a, NULL, 0);
   // now, for a CHUNK_SIZE allocation,
   // the "best fit" allocation strategy should select chunks 8-10, and
   // the "first fit" allocation strategy should select chunks 2-4.
 
   g_heap_alloc_force_best_fit = true;
   dlog("best fit");
-  p2 = kmem_alloc(CHUNK_SIZE);
-  kmem_debug_dump_state(p2, CHUNK_SIZE);
-  kmem_free(p2);
+  p2 = kmem_alloc(a, CHUNK_SIZE);
+  kmem_debug_dump_state(a, p2, CHUNK_SIZE);
+  kmem_free(a, p2);
 
   g_heap_alloc_force_best_fit = false;
   dlog("first fit");
-  p2 = kmem_alloc(CHUNK_SIZE);
-  kmem_debug_dump_state(p2, CHUNK_SIZE);
-  kmem_free(p2);
+  p2 = kmem_alloc(a, CHUNK_SIZE);
+  kmem_debug_dump_state(a, p2, CHUNK_SIZE);
+  kmem_free(a, p2);
 
 
-  kmem_free(p5);
-  kmem_free(p3);
-  kmem_free(p1);
+  kmem_free(a, p5);
+  kmem_free(a, p3);
+  kmem_free(a, p1);
 
-  // rangealloc_t a = {0};
-
-  // // allocate 1 MiB of memory pages
-  // void* p = assertnotnull( osvmem_alloc(1024*1024) );
+  allocator_dispose(a);
 
   log("——————————————————");
   return rerr_canceled;

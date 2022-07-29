@@ -46,11 +46,12 @@
 #define MAX_ORDER   19  /* 19=2GiB, 20=4GiB, 21=8GiB, 22=16GiB, ... */
 #define OBJ_MAXSIZE (1ul * GiB)
 
-// trace: comment out to enable logging a lot of info via dlog
-#define trace(...) ((void)0)
-#ifndef trace
-  #define trace(fmt, args...) dlog("[mm] " fmt, ##args)
-#endif
+// RMM_TRACE: uncomment to enable logging a lot of info via dlog
+//#define RMM_TRACE
+
+// RMM_RUN_TEST_ON_INIT: uncomment to run tests during init_mm
+//#define RMM_RUN_TEST_ON_INIT
+
 
 typedef struct rmm_ {
   RHMutex lock;
@@ -61,6 +62,17 @@ typedef struct rmm_ {
   ilist_t freelists[MAX_ORDER + 1];
   //usize nalloc[MAX_ORDER + 1]; // number of allocations per order
 } rmm_t;
+
+
+#if defined(RMM_TRACE) && defined(DEBUG)
+  #define trace(fmt, args...) dlog("[mm] " fmt, ##args)
+#else
+  #ifdef RMM_TRACE
+    #warning RMM_TRACE has no effect unless DEBUG is enabled
+    #undef RMM_TRACE
+  #endif
+  #define trace(...) ((void)0)
+#endif
 
 
 usize rmm_cap_bytes(const rmm_t* mm) {
@@ -116,7 +128,7 @@ static uintptr rmm_allocpages1(rmm_t* mm, int order) {
     ilist_append(&mm->freelists[order], buddy2);
     dlog_freelist(mm, order);
 
-    #if DEBUG
+    #if RMM_TRACE
     usize nextsize = (usize)PAGE_SIZE << (order + 1);
     trace("split block %d:%p (%zu %s) -> blocks %d:%p, %d:%p",
       order, (void*)addr,
@@ -277,7 +289,9 @@ rmm_t* nullable rmm_emplace(void* memp, usize memsize) {
 }
 
 
+#ifdef RMM_RUN_TEST_ON_INIT
 static void rmm_test() {
+  dlog("—————— %s begin ——————", __FUNCTION__);
   // since RSM runs as a regular host OS process, we get our host memory from the
   // host's virtual memory system via mmap, rather than physical memory as in a kernel.
   usize memsize = 10 * MiB;
@@ -307,27 +321,21 @@ static void rmm_test() {
   // this tests the "scan forward or backwards" branches
   for (usize i = 0; i < countof(ptrs); i++) {
     if (i % 2) {
-      // dlog_recycle_state(mm);
       rmm_freepages(mm, ptrs[countof(ptrs) - i]);
-      // dlog_recycle_state(mm);
     } else {
       rmm_freepages(mm, ptrs[i]);
     }
   }
 
-  // // dlog_recycle_state(mm);
-
-  // assertnotnull( rmm_allocpages(mm, 8) );
-
   rmm_freepages(mm, p2);
-  // // dlog_recycle_state(mm);
-  // void* p3 = assertnotnull( rmm_allocpages(mm, 4) ); dlog("p3 %p", p3);
 
   dlog("rmm_cap_bytes()   %10zu", rmm_cap_bytes(mm));
   dlog("rmm_avail_bytes() %10zu", rmm_avail_bytes(mm));
 
   osvmem_free(memp, memsize);
+  dlog("—————— %s end ——————", __FUNCTION__);
 }
+#endif // RMM_RUN_TEST_ON_INIT
 
 
 rerror init_mm() {
@@ -338,6 +346,8 @@ rerror init_mm() {
       PAGE_SIZE, host_pagesize);
     return rerr_invalid;
   }
+  #ifdef RMM_RUN_TEST_ON_INIT
   rmm_test();
-  return rerr_canceled;
+  #endif
+  return 0;
 }

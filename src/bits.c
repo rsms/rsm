@@ -3,6 +3,23 @@
 #include "rsmimpl.h"
 #include "bits.h"
 
+// BITS_TRACE: uncomment to enable logging a lot of info via dlog
+//#define BITS_TRACE
+
+// BITS_RUN_TEST_ON_INIT: uncomment to run tests during exe init in DEBUG builds
+#define BITS_RUN_TEST_ON_INIT
+
+#if defined(BITS_TRACE) && defined(DEBUG)
+  #define trace(fmt, args...) dlog("[bits] " fmt, ##args)
+#else
+  #ifdef BITS_TRACE
+    #warning BITS_TRACE has no effect unless DEBUG is enabled
+    #undef BITS_TRACE
+  #endif
+  #define trace(...) ((void)0)
+#endif
+
+
 static const u8 kBitsetMaskFirst[8] = { 0xFF, 0xFE, 0xFC, 0xF8, 0xF0, 0xE0, 0xC0, 0x80 };
 static const u8 kBitsetMaskLast[8] = { 0x00, 0x1, 0x3, 0x7, 0xF, 0x1F, 0x3F, 0x7F };
 
@@ -34,7 +51,7 @@ void bits_set_range(u8* bits, usize start, usize len, bool on) {
 
 
 usize bitset_find_unset_range(
-  bitset_t* bset, usize* startp, usize minlen, usize maxlen)
+  bitset_t* bset, usize* startp, usize minlen, usize maxlen, usize stride)
 {
   // First fit implementation
   //
@@ -55,52 +72,69 @@ usize bitset_find_unset_range(
   // range. Finally, if bset->len-start is not aligned to bucket_bits, we scan the
   // "trailing bits" for a free range.
 
+  assert(stride > 0);
+  assert(minlen > 0);
   assert(maxlen >= minlen);
 
-  // We'll work with a register sized granule ("bucket") over the bitset
-  usize bucket_bits = 8 * sizeof(usize); // bit size of one "bucket"
-  usize* buckets = (usize*)bset->data;
+  trace("start         %4zu", *startp);
+
+  // We'll work at a register-sized granule ("bucket") over the bitset
+  const usize bucket_bits = 8 * sizeof(usize); // bit size of one "bucket"
+  usize bucket_stride = IDIV_CEIL(stride, bucket_bits);
+  trace("bucket_bits   %4zu", bucket_bits);
+  trace("bucket_stride %4zu", bucket_stride);
 
   const usize start_bucket = (usize)(uintptr)*startp / bucket_bits;
-  const usize end_bucket = bset->len / bucket_bits; // bucket index to stop before
-  //dlog("start_bucket startp=%zu => %zu", *startp, start_bucket);
+  // const usize start_bucket = (usize)(uintptr)IDIV_CEIL(*startp, bucket_bits);
+  const usize end_bucket = bset->len / bucket_bits;
+  trace("end_bucket    %4zu (bset.len %zu)", end_bucket, bset->len);
+  trace("start_bucket  %4zu (startp %zu)", start_bucket, *startp);
 
-  u8 start_bitoffs = (u8)(*startp % bucket_bits); // bit index to start at
+  u8 start_bit = (u8)(*startp % bucket_bits); // bit index to start at
+  trace("start_bit     %4u", start_bit);
 
   usize freelen = 0; // current "free range" length
+  usize* buckets = (usize*)bset->data;
 
-  for (usize bucket = start_bucket; bucket < end_bucket; bucket++) {
-    //dlog("** bucket %zu %zx", bucket, buckets[bucket]);
+  for (usize bucket = start_bucket; bucket < end_bucket; bucket += bucket_stride) {
+
 
     // if bucket is full
     if (buckets[bucket] == USIZE_MAX) {
+      trace("** buckets[%zu] = %zx  FULL", bucket, buckets[bucket]);
       if (freelen >= minlen)
         goto found;
       freelen = 0; // reset start of free range
-      start_bitoffs = 0; // reset start bit
+      start_bit = 0; // reset start bit
       continue;
     }
 
     // if bucket is empty
     if (buckets[bucket] == 0lu) {
-      if (freelen == 0)
-        *startp = bucket * bucket_bits;
-      freelen += bucket_bits - start_bitoffs;
+      trace("** buckets[%zu] = %zx  EMPTY", bucket, buckets[bucket]);
+      if (freelen == 0) {
+        *startp = (bucket * bucket_bits) + start_bit;
+        trace("   set startp = %zu", *startp);
+      }
+      freelen += bucket_bits - start_bit;
+      trace("   freelen %zu", freelen);
       if (freelen >= maxlen) {
-        //dlog("-> %zu", maxlen);
-        *startp += start_bitoffs;
+        // *startp += start_bit;
+        // trace("     set startp = %zu", *startp);
+        trace("   -> %zu", maxlen);
         return maxlen;
       }
-      start_bitoffs = 0; // reset start bit
+      start_bit = 0;
       continue;
     }
 
     // else: bucket has some free space; scan its bits
+    trace("** buckets[%zu] = %zx  PARTIAL", bucket, buckets[bucket]);
     usize bucket_val = buckets[bucket];
-    u8 nbits = start_bitoffs; // number of bits we've looked at
+    u8 nbits = start_bit; // number of bits we've looked at
     u32 tz = 0; // number of trailing zeroes
     bucket_val >>= nbits;
-    start_bitoffs = 0;
+    start_bit = 0;
 
     // visit each bit
     while (nbits < bucket_bits) {
@@ -151,20 +185,19 @@ usize bitset_find_unset_range(
   // no free range found that satisfies freelen >= minlen
   freelen = 0;
 found:
-  //dlog("-> MIN(%zu, %zu) = %zu", freelen, maxlen, MIN(freelen, maxlen));
+  trace("-> %zu (= MIN(%zu, %zu))", MIN(freelen, maxlen), freelen, maxlen);
   return MIN(freelen, maxlen);
 }
 
 
 // bitset_find_best_fit searches for the smallest hole that is >=minlen large
-usize bitset_find_best_fit(bitset_t* bset, usize* startp, usize minlen) {
+usize bitset_find_best_fit(bitset_t* bset, usize* startp, usize minlen, usize stride) {
   usize start = *startp;
   usize best_start = 0;
   usize best_len = bset->len + 1;
   usize found = 0;
-  //dlog("bitset_find_best_fit minlen=%zu", minlen);
   for (;;) {
-    usize rangelen = bitset_find_unset_range(bset, &start, minlen, best_len);
+    usize rangelen = bitset_find_unset_range(bset, &start, minlen, best_len, stride);
     //dlog(">> bitset_find_unset_range => start=%zu len=%zu", start, rangelen);
     if (best_len > rangelen || !found) {
       if (!rangelen)
@@ -174,8 +207,56 @@ usize bitset_find_best_fit(bitset_t* bset, usize* startp, usize minlen) {
       best_len = rangelen;
       found = USIZE_MAX;
     }
-    start += rangelen;
+    // TODO: this needs more testing.
+    // Is stride correctly calculated here? Do we need to include *startp?
+    start += ALIGN_CEIL(rangelen, stride);
   }
   *startp = best_start & found;
   return minlen & found;
 }
+
+
+#if defined(BITS_RUN_TEST_ON_INIT) && defined(DEBUG)
+__attribute__((constructor)) static void test_bits() {
+  dlog("test_bits");
+  void* data[128]; // = 8192 bits
+  memset(data, 0, sizeof(data));
+  bitset_t bset = { .data = (u8*)data, .len = sizeof(data)*8 };
+
+  usize region_minlen = 8;
+  usize region_maxlen = region_minlen;
+  usize stride = 1;
+  usize region_start = 0; // bit to start searching
+  usize region_len; // number of bits found
+
+  // since all bits are 0, we should immediately find a range
+  region_len = bitset_find_unset_range(
+    &bset, &region_start, region_minlen, region_maxlen, stride);
+  assert(region_start == 0);
+  assert(region_len == region_minlen);
+
+  // since all bits are 0, we should immediately find a range (stride differs)
+  stride = 32;
+  region_start = stride - 1;
+  region_len = bitset_find_unset_range(
+    &bset, &region_start, region_minlen, region_maxlen, stride);
+  assert(region_len == region_minlen);
+  assert(region_start == stride - 1);
+
+  stride = 1024;
+  region_start = stride - 1;
+  region_minlen = region_maxlen = 100;
+  region_len = bitset_find_unset_range(
+    &bset, &region_start, region_minlen, region_maxlen, stride);
+  assertf(region_len == region_minlen, "region_len=%zu", region_len);
+  assertf(region_start == stride - 1, "region_start=%zu", region_start);
+
+  // stride = 1024;
+  // region_start = 114687;
+  // region_len = bitset_find_unset_range(
+  //   &bset, &region_start, region_minlen, region_maxlen, stride);
+  // assertf(region_len == region_minlen, "region_len=%zu", region_len);
+  // assertf(region_start == stride - 1, "region_start=%zu", region_start);
+}
+#endif
+

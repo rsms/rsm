@@ -226,6 +226,9 @@ rmm_t* nullable rmm_emplace(void* memp, usize memsize) {
   uintptr start = ALIGN2((uintptr)memp, _Alignof(rmm_t));
   uintptr end_addr = (uintptr)memp + memsize;
 
+  // TODO: change the placement of rmm_t to the end of memp to increase alignment
+  // efficiency
+
   if (start + sizeof(rmm_t) >= end_addr) // TODO: coalesce these checks
     return NULL;
 

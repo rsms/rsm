@@ -230,12 +230,12 @@ typedef unsigned long       usize;
 #define rsm_same_type(a, b) __builtin_types_compatible_p(__typeof__(a), __typeof__(b))
 
 #define MAX(a,b) ({__typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a > _b ? _a : _b; })
-  // turns into CMP + CMOV{L,G} on x86_64
-  // turns into CMP + CSEL on arm64
-
 #define MIN(a,b) ({__typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a < _b ? _a : _b; })
   // turns into CMP + CMOV{L,G} on x86_64
   // turns into CMP + CSEL on arm64
+
+#define XMAX(a,b) ((a) > (b) ? (a) : (b))
+#define XMIN(a,b) ((a) < (b) ? (a) : (b))
 
 // T IDIV_CEIL(T x, ANY divisor) divides x by divisor, rounding up.
 // If x is zero, returns max value of x (wraps.)
@@ -248,10 +248,22 @@ typedef unsigned long       usize;
   __typeof__(x) atmp__ = (__typeof__(x))(a) - 1; \
   ( ((x) + atmp__) & ~atmp__ ); \
 })
-// #define ALIGN2(x,a)           _ALIGN2_MASK(x, (__typeof__(x))(a) - 1)
-// #define _ALIGN2_MASK(x, mask) ( ((x) + (mask)) & ~(mask) )
-#define ALIGN2_FLOOR(x, a)    ALIGN2((x) - ((a) - 1), (a))
-#define IS_ALIGN2(x, a)       ( ((x) & ((__typeof__(x))(a) - 1)) == 0 )
+#define ALIGN2_FLOOR(x, a)  ALIGN2((x) - ((a) - 1), (a))
+#define IS_ALIGN2(x, a)     ( ((x) & ((__typeof__(x))(a) - 1)) == 0 )
+
+// T ALIGN_CEIL(T x, T a) rounds x up to nearest multiple of a.
+// e.g. ALIGN_CEIL(11, 5) => 15
+#define ALIGN_CEIL(x, a) ({ \
+  const __typeof__(x) atmp__ = (__typeof__(x))(a); \
+  (((x) + atmp__ - 1) / atmp__) * atmp__; \
+})
+
+// T ALIGN_FLOOR(T x, T a) rounds x down to nearest multiple of a.
+// e.g. ALIGN_FLOOR(11, 5) => 10
+#define ALIGN_FLOOR(x, a) ({ \
+  const __typeof__(x) atmp__ = (__typeof__(x))(a); \
+  ((x) / atmp__) * atmp__; \
+})
 
 // ANYINT COND_BYTE_MASK(ANYINT flags, int flag, bool on)
 // branchless ( on ? (flags | flag) : (flags & ~flag) )
@@ -327,7 +339,7 @@ static ALWAYS_INLINE int __flsl(unsigned long x) {
 // int ILOG2(ANYINT n) calculates the log of base 2
 #define ILOG2(n) ( \
   __builtin_constant_p(n) ? ( \
-    (n) < 2 ? 0 : 63 - rsm_clz(n) \
+    (n) < (__typeof__(n))2 ? 0 : 63 - rsm_clz(n) \
   ) : \
   rsm_fls(n) - 1 \
 )

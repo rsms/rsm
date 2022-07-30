@@ -64,19 +64,6 @@ static_assert(IS_ALIGN2(SLABHEAP_BLOCK_SIZE, PAGE_SIZE), "");
 #define HEAP_MAX_ALIGN  XMAX(PAGE_SIZE, SLABHEAP_BLOCK_SIZE)
 static_assert(IS_POW2(HEAP_MAX_ALIGN), "");
 
-
-typedef struct {
-  // There are nchunks*CHUNK_SIZE bytes at data.
-  //   We only need 46 bits to represent the largest possible allocation
-  //   i.e. bits_needed = log2(pow(2, addressable_bits) / CHUNK_SIZE)
-  //   e.g. log2(pow(2,52) / 64) = 46
-  //   So, we could use the other 18 bits for additional data at no extra cost:
-  //   usize nchunks : 46;
-  //   usize foo : 18;
-  usize nchunks;
-  u8    data[0];
-} allocmeta_t;
-
 typedef struct {
   usize    chunk_cap; // total_chunks
   usize    chunk_len; // number of used (allocated) chunks
@@ -111,6 +98,7 @@ typedef struct kmem_ {
   rmm_t*     mm;
   RHMutex    lock;
   ilist_t    subheaps;
+  void*      mem_origin;
   #ifdef KMEM_ENABLE_SLABHEAPS
   slabheap_t slabheaps[4];
   #endif
@@ -147,10 +135,6 @@ static_assert(sizeof(subheap_t) <= PAGE_SIZE, "");
   #define trace(...) ((void)0)
 #endif
 
-
-// allocmeta_t* ALLOCHEAD(void* ptr) accesses the allocmeta_t of an allocation
-#define ALLOCHEAD(ptr) \
-  ((allocmeta_t*)( ((uintptr)(ptr) - sizeof(allocmeta_t)) & CHUNK_MASK ))
 
 #define CHUNK_MASK  (~((uintptr)CHUNK_SIZE - 1))
 
@@ -205,13 +189,9 @@ static void heap_init(heap_t* h, u8* p, usize size) {
 
 
 // heap_contains returns true if h is the owner of allocation at ptr
-// Note that ptr must be a pointer previously returned by heap_alloc;
-// it must not be a pointer into an arbitrary address of the heap.
-static bool heap_contains(const heap_t* h, void const* ptr) {
-  const allocmeta_t* a = ALLOCHEAD(ptr);
-  uintptr endaddr = (uintptr)h->chunks + (h->chunk_cap * CHUNK_SIZE);
-  // in range [startaddr, endaddr) ?
-  return ((uintptr)a >= (uintptr)h->chunks) & ((uintptr)ptr < endaddr);
+static bool heap_contains(const heap_t* h, void const* ptr, usize size) {
+  uintptr max_addr = (uintptr)h->chunks + (h->chunk_cap * CHUNK_SIZE);
+  return ((uintptr)ptr >= (uintptr)h->chunks) & ((uintptr)ptr + size <= max_addr);
 }
 
 
@@ -219,82 +199,22 @@ static bool heap_contains(const heap_t* h, void const* ptr) {
 // Returns NULL if there's no space, otherwise it returns a pointer to the allocated
 // region and updates *sizep to the effective byte size of the region.
 static void* nullable heap_alloc(heap_t* h, usize* sizep, usize alignment) {
-  // Our goal is to find enough chunks to hold sizeof(allocmeta_t)+(*sizep) bytes.
-  //
-  // Alignment is a little tricky. A few considerations:
-  // - Alignment is always a power-of-two (1 2 4 8 16 32 64 128 256 ...)
-  // - Each chunk is aligned to CHUNK_SIZE address (but no other guarantees)
-  // - The head of the first chunk will contain the allocmeta_t struct,
-  //   so our starting address is offset by sizeof(allocmeta_t)
-  // - allocmeta_t is just one address wide so most of the space of a chunk is
-  //   free to return to the caller
-  // - When alignment is less than CHUNK_SIZE, we should use the first chunk if
-  //   we can, rather than just allocating a second one (else we waste space.)
-  // - We need to know the number of chunks we need before we know the address
-  //   of the first chunk, meaning that for large alignment constraints we need
-  //   allocate more chunks than we actually need.
-  //   *However* we have a trick up our sleves: since we know that chunk#0 is
-  //   PAGE_SIZE aligned, we can figure out the chunk alignment needed and
-  //   search chunks ranges starting at this alignment.
-  //
-  // Example of 16B alignment, where we add 8B padding to get a 16B aligned address:
-  //
-  //   ┌───────────────┬───────────────┬───────────────────────────────┬───────
-  //   │byte           │    1 1 1 1 1 1│1 1 1 1 2 2 2 2 2 2 2 2 2 2 3 3 3 3 3 3
-  //   │0 1 2 3 4 5 6 7│8 9 0 1 2 3 4 5│6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
-  //   ├───────────────┼───────────────┼───────────────────────────────────────
-  //   │allocmeta_t    │  padding      │ user data
-  //   ├───────────────┼───────────────┼───────────────────────────────┬───────
-  //   64 aligned      8 aligned       16 aligned                      32 aligned
-  //
-  dlog("—————————————————————————————————————");
-
-  // align_rem: The remainder of alignment after "taking away" CHUNK_SIZE
-  // align_big: The chunk-sized portion of alignment
-  usize align_rem = alignment % CHUNK_SIZE;
-  usize align_big = alignment - align_rem;
-
-  // Since we will use align_rem with the ALIGN2 function which doesn't support
-  // a value of zero, clamp align_rem to [1 (i.e. align_rem += align_rem == 0 ? 1 : 0)
-  align_rem += !align_rem;
-
-  // head_size: size needed for allocmeta AND padding
-  const usize head_size = ALIGN2(sizeof(allocmeta_t), align_rem);
-
   // nchunks: the number of chunks we need.
   // We add an extra once since integer division rounds down but we need
-  // the "ceiling", enough chunks to fit head_size and *sizep.
-  usize nchunks = (head_size + (*sizep) + CHUNK_SIZE - 1) / CHUNK_SIZE;
-
-  // nchunks_extra: In case the alignment factor is >=CHUNK_SIZE, we'll need
-  // additional chunks so that we can adjust the address in case the first chunk's
-  // address has a lesser alignment. Again, we divide to get the "ceiling".
-  // Note that align_big is 0 if alignment < CHUNK_SIZE.
-  usize nchunks_extra = (align_big + CHUNK_SIZE - 1) / CHUNK_SIZE;
+  // the "ceiling", enough chunks to fit meta_size and *sizep.
+  usize nchunks = (*sizep + CHUNK_SIZE - 1) / CHUNK_SIZE;
 
   // chunks_align: alignment requirement of chunk range
-  // usize chunks_align = (alignment + CHUNK_SIZE - 1) / CHUNK_SIZE;
   usize chunks_align = alignment / CHUNK_SIZE;
+  chunks_align += !chunks_align; // branchless "if (x==0) x = 1"
 
-  dlog("alignment     %5zu", alignment);
-  dlog("size          %5zu", *sizep);
-  dlog("  align_rem   %5zu", align_rem);
-  dlog("  align_big   %5zu", align_big);
-  dlog("head_size     %5zu", head_size);
-  dlog("nchunks       %5zu", nchunks);
-  dlog("nchunks_extra %5zu", nchunks_extra);
-  dlog("chunks_align  %5zu", chunks_align);
+  // dlog("size          %5zu", *sizep);
+  // dlog("alignment     %5zu", alignment);
+  // dlog("nchunks       %5zu", nchunks);
+  // dlog("chunks_align  %5zu", chunks_align);
 
-  // Now we will search for a free range in the "chunks in use" bitset h->chunk_use.
-
-  // chunk_index is the chunk we start searching.
-  // When the search completes, chunk_index holds the index of the first chunk
-  // in the free range.
-  usize chunk_index = chunks_align;
-  if (chunks_align > 1) {
-    chunk_index = chunks_align - 1;
-    nchunks++;
-  }
+  // chunk_index is the chunk we start searching
+  usize chunk_index = 0;
 
   // Before we go look for a range of free chunks,
   // exit early if the number of available chunks are less than what's needed
@@ -304,22 +224,12 @@ static void* nullable heap_alloc(heap_t* h, usize* sizep, usize alignment) {
   // chunk_len will contain the number of consecutive chunks found
   usize chunk_len;
 
-  // search_stride is the step size used while searching for a free range of blocks.
-  // "x+!x" has the effect of "if (x==0) x = 1".
-  usize search_stride = chunks_align + !chunks_align;
-
-  dlog("chunk_index   %5zu", chunk_index);
+  // Now we will search for a free range in the "chunks in use" bitset h->chunk_use
   if (nchunks < BEST_FIT_THRESHOLD) {
-    dlog(">> bitset_find_first_fit");
-    chunk_len = bitset_find_first_fit(
-      &h->chunk_use, &chunk_index, nchunks, search_stride);
+    chunk_len = bitset_find_first_fit(&h->chunk_use, &chunk_index, nchunks, chunks_align);
   } else {
-    dlog(">> bitset_find_best_fit");
-    chunk_len = bitset_find_best_fit(&h->chunk_use, &chunk_index, nchunks, search_stride);
+    chunk_len = bitset_find_best_fit(&h->chunk_use, &chunk_index, nchunks, chunks_align);
   }
-
-  dlog("chunk_index   %5zu", chunk_index);
-  dlog("chunk_len     %5zu", chunk_len);
 
   // Give up if we didn't find a range of chunks large enough
   if (chunk_len == 0)
@@ -333,73 +243,50 @@ static void* nullable heap_alloc(heap_t* h, usize* sizep, usize alignment) {
   h->chunk_len += chunk_len;
 
   // chunk1 is the address of the first chunk.
-  void* chunk1 = h->chunks + (chunk_index * CHUNK_SIZE);
-  assert(IS_ALIGN2((uintptr)chunk1, CHUNK_SIZE));
-  dlog("chunk1     %p", chunk1);
-
-  // Put the allocation header at the beginning of the first chunk
-  allocmeta_t* header = chunk1;
-  header->nchunks = chunk_len;
-
-  // start_addr is the address returned to the caller, a pointer to usable memory
-  uintptr start_addr = (
-    chunks_align ? (uintptr)chunk1 + CHUNK_SIZE
-                 : (uintptr)chunk1 + head_size );
-  assertf(IS_ALIGN2(start_addr, alignment),
-    "bug in %s (start_addr 0x%lx, alignment %zu)", __FUNCTION__, start_addr, alignment);
-
-  // end_addr is the end of the address range
-  uintptr end_addr = (uintptr)chunk1 + (chunk_len * CHUNK_SIZE);
+  void* ptr = h->chunks + (chunk_index * CHUNK_SIZE);
+  assertf(IS_ALIGN2((uintptr)ptr, alignment),
+    "bug in %s (ptr %p, alignment %zu)", __FUNCTION__, ptr, alignment);
 
   // Return back to the caller the actual usable size of the allocation
-  usize req_size = *sizep;
-  *sizep = (usize)(end_addr - start_addr);
-
-  dlog("req. size     %5zu", req_size);
-  dlog("usable size   %5zu", *sizep);
-  assert(req_size <= *sizep);
-
-  dlog("start_addr %p", (void*)start_addr);
-  dlog("end_addr   %p", (void*)end_addr);
-
-  // Make sure our ALLOCHEAD macro works as expected
-  assert(ALLOCHEAD(start_addr) == header);
+  // dlog("req. size     %5zu", *sizep);
+  // dlog("usable size   %5zu", chunk_len * CHUNK_SIZE);
+  assert(chunk_len * CHUNK_SIZE >= *sizep);
+  *sizep = chunk_len * CHUNK_SIZE;
 
   // fill allocated memory with scrub bytes (if enabled)
   if (KMEM_ALLOC_SCRUB_BYTE)
-    memset((void*)start_addr, KMEM_ALLOC_SCRUB_BYTE, *sizep);
+    memset(ptr, KMEM_ALLOC_SCRUB_BYTE, chunk_len * CHUNK_SIZE);
 
   trace("[heap] allocating %p (%zu B) in %zu chunks [%zu…%zu)",
-    (void*)start_addr, *sizep, chunk_len, chunk_index, chunk_index + chunk_len);
-  dlog("—————————————————————————————————————");
+    ptr, *sizep, chunk_len, chunk_index, chunk_index + chunk_len);
 
-  return (void*)start_addr;
+  return ptr;
 }
 
 
 static void heap_free(heap_t* h, void* ptr, usize size) {
-  assert(heap_contains(h, ptr));
-
-  allocmeta_t* a = ALLOCHEAD(size > CHUNK_SIZE ? ptr - CHUNK_SIZE : ptr);
-
-  assertf(size <= a->nchunks * CHUNK_SIZE,
-    "freeing %p of smaller size (%zu) than expected (%zu)",
-    ptr, a->nchunks * CHUNK_SIZE, size);
+  assert(heap_contains(h, ptr, size));
 
   // calculate chunk index for the allocation
-  uintptr ci = ((uintptr)a - (uintptr)h->chunks) / CHUNK_SIZE;
+  uintptr chunk_addr = (uintptr)ptr & CHUNK_MASK;
+  uintptr chunk_index = (chunk_addr - (uintptr)h->chunks) / CHUNK_SIZE;
+  usize chunk_len = size / CHUNK_SIZE;
 
-  assertf(bitset_get(&h->chunk_use, ci),
-    "trying to free segment starting at %zu that is already free (ptr=%p)", ci, ptr);
+  trace("[heap] freeing chunk %p (%zu B) in %zu chunks [%zu…%zu)",
+    ptr, size, chunk_len, chunk_index, chunk_index + chunk_len);
 
-  bitset_set_range(&h->chunk_use, ci, a->nchunks, false);
+  assertf(bitset_get(&h->chunk_use, chunk_index),
+    "trying to free segment starting at %zu that is already free (ptr=%p)",
+    chunk_index, ptr);
 
-  assert(h->chunk_len >= a->nchunks);
-  h->chunk_len -= a->nchunks;
+  bitset_set_range(&h->chunk_use, chunk_index, chunk_len, false);
+
+  assert(h->chunk_len >= chunk_len);
+  h->chunk_len -= chunk_len;
 
   // fill freed memory with scrub bytes, if enabled
   if (KMEM_FREE_SCRUB_BYTE)
-    memset(a, KMEM_FREE_SCRUB_BYTE, a->nchunks * CHUNK_SIZE);
+    memset(ptr, KMEM_FREE_SCRUB_BYTE, size);
 }
 
 
@@ -438,7 +325,6 @@ static void heap_free(heap_t* h, void* ptr, usize size) {
       , stderr);
     uintptr page_addr, chunk_idx;
 
-    highlight_size += sizeof(allocmeta_t);
     uintptr highlight_start_addr = ALIGN2_FLOOR((uintptr)highlight_p, CHUNK_SIZE);
     uintptr highlight_end_addr = highlight_start_addr + ALIGN2(highlight_size, CHUNK_SIZE);
 
@@ -560,7 +446,7 @@ static void* nullable slabheap_alloc(allocator_t* a, slabheap_t* sh) {
   slabblock_t* block = sh->usable;
 
   if UNLIKELY(block == NULL) {
-    trace("[slabheap %zu] grow", sh->size);
+    trace("[slab %zu] grow", sh->size);
     usize size = SLABHEAP_BLOCK_SIZE;
     static_assert(_Alignof(slabblock_t) <= SLABHEAP_MIN_SIZE, "");
     for (;;) {
@@ -569,7 +455,7 @@ static void* nullable slabheap_alloc(allocator_t* a, slabheap_t* sh) {
       if UNLIKELY(!kmem_expand(a, size))
         return NULL;
     }
-    trace("[slabheap %zu] allocated new block %p", sh->size, block);
+    trace("[slab %zu] allocated backing block %p", sh->size, block);
     assertf((uintptr)block % SLABHEAP_BLOCK_SIZE == 0,
       "misaligned address %p returned by kmem_heapalloc", block);
     block->cap = SLABHEAP_BLOCK_SIZE / sh->size;
@@ -600,7 +486,7 @@ static void* nullable slabheap_alloc(allocator_t* a, slabheap_t* sh) {
   // if the recycle list is empty and all chunks are allocated, the block is full
   // and we need to move the block to the sh->full list
   if (chunk->next == NULL && block->len == block->cap) {
-    trace("[slabheap %zu] mark block %p as full", sh->size, block);
+    trace("[slab %zu] mark block %p as full", sh->size, block);
     sh->usable = block->next;
     block->next = sh->full;
     sh->full = block;
@@ -608,7 +494,7 @@ static void* nullable slabheap_alloc(allocator_t* a, slabheap_t* sh) {
 
   #ifdef KMEM_TRACE
   uintptr data_addr = ALIGN2((uintptr)block + sizeof(slabblock_t), sh->size);
-  trace("[slabheap %zu] allocating chunk %zu %p from block %p",
+  trace("[slab %zu] allocating chunk %zu %p from block %p",
     sh->size, ((uintptr)chunk - data_addr) / sh->size, chunk, block);
   #endif
 
@@ -634,14 +520,14 @@ static void slabheap_free(allocator_t* a, slabheap_t* sh, void* ptr) {
 
   #ifdef KMEM_TRACE
   uintptr data_addr = ALIGN2((uintptr)block + sizeof(slabblock_t), sh->size);
-  trace("[slabheap %zu] freeing chunk %zu %p from block %p",
+  trace("[slab %zu] freeing chunk %zu %p from block %p",
     sh->size, ((uintptr)ptr - data_addr) / sh->size, ptr, block);
   #endif
 
   // If the block was fully used, it no longer is and we need to
   // move it from the "full" list to the "usable" list.
   if (block_full) {
-    trace("[slabheap %zu] mark block %p as usable", sh->size, block);
+    trace("[slab %zu] mark block %p as usable", sh->size, block);
     sh->full = block->next;
     block->next = sh->usable;
     sh->usable = block;
@@ -726,7 +612,7 @@ void kmem_free(allocator_t* a, void* ptr, usize size) {
 
   ilist_for_each(lent, &a->subheaps) {
     subheap_t* sh = ilist_entry(lent, subheap_t, list_entry);
-    if (!heap_contains(&sh->allocator, ptr))
+    if (!heap_contains(&sh->allocator, ptr, size))
       continue;
     heap_free(&sh->allocator, ptr, size);
     goto end;
@@ -740,7 +626,7 @@ end:
 
 usize kmem_alloc_size(usize size) {
   assert(size > 0);
-  return ALIGN2(size + sizeof(allocmeta_t), CHUNK_SIZE) - sizeof(allocmeta_t);
+  return ALIGN2(size, CHUNK_SIZE);
 }
 
 
@@ -761,6 +647,7 @@ void* nullable allocator_create(rmm_t* mm, usize min_initmem) {
   allocator_t* a = (void*)( ((uintptr)p + nbyte) - allocator_size );
   memset(a, 0, sizeof(*a));
   a->mm = mm;
+  a->mem_origin = p;
   ilist_init(&a->subheaps);
   if (!RHMutexInit(&a->lock))
     return NULL;
@@ -785,8 +672,9 @@ void* nullable allocator_create(rmm_t* mm, usize min_initmem) {
 
 
 void allocator_dispose(allocator_t* a) {
-  // TODO: free subheaps (except the initial subheap which a is embedded into)
-  rmm_freepages(a->mm, a);
+  // TODO: free slabheaps
+  // TODO: free additional subheaps
+  rmm_freepages(a->mm, a->mem_origin);
 }
 
 
@@ -837,13 +725,13 @@ rerror kmem_init() {
   p5 = kmem_alloc(a, CHUNK_SIZE*3); // 10-14
   kmem_free(a, p2, CHUNK_SIZE*3);
   kmem_free(a, p4, CHUNK_SIZE);
-  kmem_debug_dump_state(a, NULL, 0);
+  // kmem_debug_dump_state(a, NULL, 0);
   // now, for a CHUNK_SIZE allocation,
   // the "best fit" allocation strategy should select chunks 8-10, and
   // the "first fit" allocation strategy should select chunks 2-4.
 
   p2 = kmem_alloc(a, CHUNK_SIZE);
-  kmem_debug_dump_state(a, p2, CHUNK_SIZE);
+  // kmem_debug_dump_state(a, p2, CHUNK_SIZE);
   kmem_free(a, p2, CHUNK_SIZE);
 
   kmem_free(a, p5, CHUNK_SIZE*3);

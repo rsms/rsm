@@ -91,7 +91,9 @@ usize bitset_find_unset_range(
   trace("start_bucket  %4zu (startp %zu)", start_bucket, *startp);
 
   u8 start_bit = (u8)(*startp % bucket_bits); // bit index to start at
+  u8 bit_align = stride % bucket_bits;
   trace("start_bit     %4u", start_bit);
+  trace("bit_align     %4u (stride %zu)", bit_align, stride);
 
   usize freelen = 0; // current "free range" length
   usize* buckets = (usize*)bset->data;
@@ -138,9 +140,12 @@ usize bitset_find_unset_range(
 
     // visit each bit
     while (nbits < bucket_bits) {
+      trace("  nbits %u", nbits);
       if (bucket_val == 0) {
+        // rest of bucket is free
+        trace("    bucket_val = 0");
         if (freelen == 0)
-          *startp = bucket * bucket_bits + nbits;
+          *startp = ALIGN_CEIL(bucket * bucket_bits + nbits, bit_align);
         freelen += bucket_bits - nbits;
         nbits = bucket_bits;
       } else {
@@ -148,7 +153,7 @@ usize bitset_find_unset_range(
         bucket_val >>= tz;
 
         if (freelen == 0)
-          *startp = bucket * bucket_bits + nbits;
+          *startp = ALIGN_CEIL(bucket * bucket_bits + nbits, bit_align);
         freelen += tz;
         nbits += tz;
 
@@ -229,27 +234,37 @@ __attribute__((constructor)) static void test_bits() {
   usize region_start = 0; // bit to start searching
   usize region_len; // number of bits found
 
-  // since all bits are 0, we should immediately find a range
-  region_len = bitset_find_unset_range(
-    &bset, &region_start, region_minlen, region_maxlen, stride);
-  assert(region_start == 0);
-  assert(region_len == region_minlen);
+  // // since all bits are 0, we should immediately find a range
+  // region_len = bitset_find_unset_range(
+  //   &bset, &region_start, region_minlen, region_maxlen, stride);
+  // assert(region_start == 0);
+  // assert(region_len == region_minlen);
 
-  // since all bits are 0, we should immediately find a range (stride differs)
-  stride = 32;
-  region_start = stride - 1;
-  region_len = bitset_find_unset_range(
-    &bset, &region_start, region_minlen, region_maxlen, stride);
-  assert(region_len == region_minlen);
-  assert(region_start == stride - 1);
+  // // since all bits are 0, we should immediately find a range (stride differs)
+  // stride = 32;
+  // region_start = stride - 1;
+  // region_len = bitset_find_unset_range(
+  //   &bset, &region_start, region_minlen, region_maxlen, stride);
+  // assert(region_len == region_minlen);
+  // assert(region_start == stride - 1);
 
-  stride = 1024;
-  region_start = stride - 1;
-  region_minlen = region_maxlen = 100;
+  // stride = 1024;
+  // region_start = stride - 1;
+  // region_minlen = region_maxlen = 100;
+  // region_len = bitset_find_unset_range(
+  //   &bset, &region_start, region_minlen, region_maxlen, stride);
+  // assertf(region_len == region_minlen, "region_len=%zu", region_len);
+  // assertf(region_start == stride - 1, "region_start=%zu", region_start);
+
+  // bug 1: stride fails when first three bits are set (does not respect stride)
+  bitset_set_range(&bset, 0, 3, true);
+  stride = 8;
+  region_start = 0;
+  region_minlen = region_maxlen = 2;
   region_len = bitset_find_unset_range(
     &bset, &region_start, region_minlen, region_maxlen, stride);
   assertf(region_len == region_minlen, "region_len=%zu", region_len);
-  assertf(region_start == stride - 1, "region_start=%zu", region_start);
+  assertf(region_start == stride, "region_start=%zu", region_start);
 
   // stride = 1024;
   // region_start = 114687;

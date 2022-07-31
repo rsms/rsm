@@ -239,17 +239,20 @@ typedef unsigned long       usize;
 
 // T IDIV_CEIL(T x, ANY divisor) divides x by divisor, rounding up.
 // If x is zero, returns max value of x (wraps.)
-#define IDIV_CEIL(x, divisor) ( (__typeof__(x))1 + ( ((x) - 1) / (divisor) ) )
+#define IDIV_CEIL(x, divisor)  ( (__typeof__(x))1 + ( ((x) - 1) / (divisor) ) )
 
 // T ALIGN2<T>(T x, anyuint a)       rounds up x to nearest a (a must be a power of two)
 // T ALIGN2_FLOOR<T>(T x, anyuint a) rounds down x to nearest a
 // bool IS_ALIGN2(T x, anyuint a)    true if x is aligned to a
 #define ALIGN2(x,a) ({ \
   __typeof__(x) atmp__ = (__typeof__(x))(a) - 1; \
-  ( ((x) + atmp__) & ~atmp__ ); \
+  ( (x) + atmp__ ) & ~atmp__; \
 })
-#define ALIGN2_FLOOR(x, a)  ALIGN2((x) - ((a) - 1), (a))
-#define IS_ALIGN2(x, a)     ( ((x) & ((__typeof__(x))(a) - 1)) == 0 )
+#define ALIGN2_FLOOR(x, a) ({ \
+  __typeof__(x) atmp__ = (__typeof__(x))(a) - 1; \
+  ( ((x) - (atmp__ - 1)) + atmp__ ) & ~atmp__; \
+})
+#define IS_ALIGN2(x, a)  ( ((x) & ((__typeof__(x))(a) - 1)) == 0 )
 
 // T ALIGN_CEIL(T x, T a) rounds x up to nearest multiple of a.
 // e.g. ALIGN_CEIL(11, 5) => 15

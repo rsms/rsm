@@ -749,7 +749,7 @@ void* memmove(void* dest, const void* src, usize n) {
 // one-time initialization of global state
 rerror time_init();
 rerror init_mm();
-rerror kmem_init();
+rerror init_rmem_allocator();
 rerror init_vmem();
 rerror parse_init();
 
@@ -770,8 +770,8 @@ bool rsm_init() {
   // memory manager
   CHECK_ERR(init_mm(), "init_mm");
 
-  // fragment memory allocator
-  CHECK_ERR(kmem_init(), "kmem_init");
+  // memory allocator
+  CHECK_ERR(init_rmem_allocator(), "init_rmem_allocator");
 
   // virtual memory manager
   CHECK_ERR(init_vmem(), "init_vmem");

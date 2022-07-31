@@ -196,7 +196,8 @@ static void vmem_test() {
   dlog("PT_BITS:         %5u", PT_BITS);
 
   // create a memory manager
-  rmm_t* mm = rmm_emplace(assertnotnull( osvmem_alloc(16 * MiB) ), 16 * MiB);
+  usize memsize = 16 * MiB;
+  rmm_t* mm = rmm_create(assertnotnull( osvmem_alloc(memsize) ), memsize);
 
   // create a page directory, with a reference to the MM
   mpagedir_t* pagedir = assertnotnull( mpagedir_create(mm) );
@@ -211,6 +212,9 @@ static void vmem_test() {
     //   PTE_FMTARGS(pte), hpage, haddr);
     dlog("vaddr 0x%llx => host address 0x%lx (page 0x%lx)", vaddr, haddr, hpage);
   }
+
+  osvmem_free((void*)rmm_startaddr(mm), memsize);
+  rmm_dispose(mm);
 }
 
 

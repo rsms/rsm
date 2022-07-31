@@ -234,27 +234,27 @@ __attribute__((constructor)) static void test_bits() {
   usize region_start = 0; // bit to start searching
   usize region_len; // number of bits found
 
-  // // since all bits are 0, we should immediately find a range
-  // region_len = bitset_find_unset_range(
-  //   &bset, &region_start, region_minlen, region_maxlen, stride);
-  // assert(region_start == 0);
-  // assert(region_len == region_minlen);
+  // since all bits are 0, we should immediately find a range
+  region_len = bitset_find_unset_range(
+    &bset, &region_start, region_minlen, region_maxlen, stride);
+  assert(region_start == 0);
+  assert(region_len == region_minlen);
 
-  // // since all bits are 0, we should immediately find a range (stride differs)
-  // stride = 32;
-  // region_start = stride - 1;
-  // region_len = bitset_find_unset_range(
-  //   &bset, &region_start, region_minlen, region_maxlen, stride);
-  // assert(region_len == region_minlen);
-  // assert(region_start == stride - 1);
+  // since all bits are 0, we should immediately find a range (stride differs)
+  stride = 32;
+  region_start = stride - 1;
+  region_len = bitset_find_unset_range(
+    &bset, &region_start, region_minlen, region_maxlen, stride);
+  assert(region_len == region_minlen);
+  assert(region_start == stride - 1);
 
-  // stride = 1024;
-  // region_start = stride - 1;
-  // region_minlen = region_maxlen = 100;
-  // region_len = bitset_find_unset_range(
-  //   &bset, &region_start, region_minlen, region_maxlen, stride);
-  // assertf(region_len == region_minlen, "region_len=%zu", region_len);
-  // assertf(region_start == stride - 1, "region_start=%zu", region_start);
+  stride = 1024;
+  region_start = stride - 1;
+  region_minlen = region_maxlen = 100;
+  region_len = bitset_find_unset_range(
+    &bset, &region_start, region_minlen, region_maxlen, stride);
+  assertf(region_len == region_minlen, "region_len=%zu", region_len);
+  assertf(region_start == stride - 1, "region_start=%zu", region_start);
 
   // bug 1: stride fails when first three bits are set (does not respect stride)
   bitset_set_range(&bset, 0, 3, true);
@@ -265,13 +265,6 @@ __attribute__((constructor)) static void test_bits() {
     &bset, &region_start, region_minlen, region_maxlen, stride);
   assertf(region_len == region_minlen, "region_len=%zu", region_len);
   assertf(region_start == stride, "region_start=%zu", region_start);
-
-  // stride = 1024;
-  // region_start = 114687;
-  // region_len = bitset_find_unset_range(
-  //   &bset, &region_start, region_minlen, region_maxlen, stride);
-  // assertf(region_len == region_minlen, "region_len=%zu", region_len);
-  // assertf(region_start == stride - 1, "region_start=%zu", region_start);
 }
 #endif
 

@@ -50,7 +50,7 @@
 //#define RMM_TRACE
 
 // RMM_RUN_TEST_ON_INIT: uncomment to run tests during init_mm
-//#define RMM_RUN_TEST_ON_INIT
+#define RMM_RUN_TEST_ON_INIT
 
 
 typedef struct rmm_ {
@@ -75,12 +75,12 @@ typedef struct rmm_ {
 #endif
 
 
-usize rmm_cap_bytes(const rmm_t* mm) {
-  return (usize)(mm->end_addr - mm->start_addr);
+usize rmm_cap(const rmm_t* mm) {
+  return (usize)(mm->end_addr - mm->start_addr) / PAGE_SIZE;
 }
 
-usize rmm_avail_bytes(const rmm_t* mm) {
-  return mm->free_size;
+usize rmm_avail(const rmm_t* mm) {
+  return mm->free_size / PAGE_SIZE;
 }
 
 
@@ -128,7 +128,7 @@ static uintptr rmm_allocpages1(rmm_t* mm, int order) {
     ilist_append(&mm->freelists[order], buddy2);
     dlog_freelist(mm, order);
 
-    #if RMM_TRACE
+    #ifdef RMM_TRACE
     usize nextsize = (usize)PAGE_SIZE << (order + 1);
     trace("split block %d:%p (%zu %s) -> blocks %d:%p, %d:%p",
       order, (void*)addr,
@@ -156,6 +156,8 @@ static uintptr rmm_allocpages1(rmm_t* mm, int order) {
 
 
 void* nullable rmm_allocpages(rmm_t* mm, usize npages) {
+  if (npages == 0)
+    return 0;
   safecheckf(IS_POW2(npages), "can only allocate pow2(npages)");
   int order = 0;
   for (usize n = npages; n && !(n & 1); n >>= 1)
@@ -222,46 +224,77 @@ void rmm_freepages(rmm_t* mm, void* ptr) {
 }
 
 
-rmm_t* nullable rmm_emplace(void* memp, usize memsize) {
-  uintptr start = ALIGN2((uintptr)memp, _Alignof(rmm_t));
-  uintptr end_addr = (uintptr)memp + memsize;
+rmm_t* nullable rmm_create(void* memp, usize memsize) {
+  // Align the start address to our minimum requirement,
+  // compute the end address and adjust memsize.
+  uintptr start = ALIGN2((uintptr)memp, PAGE_SIZE);
+  uintptr end = (uintptr)memp + memsize;
+  memsize = (usize)(end - start);
+  trace("total      %p … %p (%zu kiB)",
+    (void*)start, (void*)end, memsize / kiB);
 
-  // TODO: change the placement of rmm_t to the end of memp to increase alignment
-  // efficiency
+  // Place the mm struct at the end of memory to increase alignment efficiency,
+  // assuming that in most cases start has a large alignment.
+  // (The kmem allocator will allocate 64k-aligned chunks immediately, for its slabs.)
+  //
+  //   ┌───────────────────────────────┬──────────┬──────────┬──────────┬───────┐
+  //   │ memory                        │ bitset 1 │ bitset … │ bitset N │ rmm_t │
+  //   ├───────────────────────────────┼──────────┴──────────┴──────────┴───────┘
+  // start                            end
+  //
+  rmm_t* mm = (rmm_t*)ALIGN2_FLOOR(end - sizeof(rmm_t), _Alignof(rmm_t));
+  trace("mm at      %p … %p (%zu B)", mm, (void*)mm + sizeof(rmm_t), sizeof(rmm_t));
 
-  if (start + sizeof(rmm_t) >= end_addr) // TODO: coalesce these checks
-    return NULL;
-
-  rmm_t* mm = (rmm_t*)start;
-  //memset(&mm->nalloc, 0, sizeof(mm->nalloc));
-
-  start += sizeof(rmm_t);
-  memsize -= (usize)((start + sizeof(rmm_t)) - (uintptr)memp);
+  // adjust memsize to the usable space at start (memsize = mm - start)
+  if (check_sub_overflow((uintptr)mm, start, &memsize))
+    goto out_of_memory;
 
   // number of entries per bitmap
   usize nchunks = (memsize / PAGE_SIZE) / 8;
 
-  // memory we will use for our bitsets
-  usize net_bitset_size = (nchunks * 2) + (MAX_ORDER * 2);
+  // (over) estimate memory needed for bitset data
+  //usize bitsets_size = (nchunks * 2) + (MAX_ORDER * 2);
 
+  // calculate memory needed for bitsets
+  usize bitsets_size = 0;
+  usize n = nchunks;
   for (int order = 0; order < MAX_ORDER; order++) {
-    mm->bitsets[order] = (void*)start;
-    memset((void*)start, 0, nchunks + 2); // set all bits to 0
-    start += nchunks + 2;
-    nchunks /= 2;
-    ilist_init(&mm->freelists[order]);
+    bitsets_size += n + 2;
+    n /= 2;
   }
 
-  start = ALIGN2(start + net_bitset_size, PAGE_SIZE);
-  memsize = ALIGN2_FLOOR(memsize - net_bitset_size, PAGE_SIZE);
+  // Adjust memsize to the usable space at start (memsize -= bitsets_size + PAGE_SIZE)
+  // We need at least one page of free memory in addition to bitset storage.
+  if (check_sub_overflow(memsize, bitsets_size + PAGE_SIZE, &memsize))
+    goto out_of_memory;
 
+  // calculate start of bitset data
+  void* bitset_start = (void*)(uintptr)mm - bitsets_size;
+  trace("bitsets at %p … %p (%zu B)",
+    bitset_start, bitset_start + bitsets_size, bitsets_size);
+
+  // initialize per-order data (bitsets and freelists)
+  for (int order = 0; order < MAX_ORDER; order++) {
+    ilist_init(&mm->freelists[order]);
+    mm->bitsets[order] = bitset_start;
+    memset(bitset_start, 0, nchunks + 2); // set all bits to 0
+    bitset_start += nchunks + 2;
+    nchunks /= 2;
+  }
+
+  // align memsize to page boundary
+  memsize = ALIGN2_FLOOR(memsize, PAGE_SIZE);
+  if UNLIKELY(memsize == 0)
+    goto out_of_memory;
+
+  // set usable memory
   mm->start_addr = start;
   mm->end_addr = start + memsize;
   mm->free_size = (usize)(mm->end_addr - mm->start_addr);
 
-  trace("mm using memory region %lx…%lx (%.0f MB in %lu pages)",
-    mm->start_addr, mm->end_addr,
-    (double)(mm->end_addr - mm->start_addr)/1024.0/1024.0,
+  trace("memory at  %p … %p (%zu kiB in %zu pages)",
+    (void*)mm->start_addr, (void*)mm->end_addr,
+    (mm->end_addr - mm->start_addr) / kiB,
     (mm->end_addr - mm->start_addr) / PAGE_SIZE);
 
   // Now we need to put initially-free blocks of memory into the free lists.
@@ -270,55 +303,88 @@ rmm_t* nullable rmm_emplace(void* memp, usize memsize) {
   usize npages_total = memsize / PAGE_SIZE;
   while (npages_total) {
     usize npages = FLOOR_POW2(npages_total);
-
+    assert(npages > 0);
     npages_total -= npages;
+
     int order = -1;
     for (usize n = npages; n; n >>= 1)
       order++;
-    assert(order > -1);
-    trace("initial free block %d:0x0 (%zu B)", order, (usize)PAGE_SIZE << order);
 
+    // memory used by this block
+    usize block_size = (usize)PAGE_SIZE << order;
+
+    trace("initial free block %d:%p  %p … %p (%zu kiB)",
+      order, (void*)(start - mm->start_addr),
+      (void*)start, (void*)start + block_size,
+      block_size / kiB);
+
+    // add the block to its order's freelist
     ilist_append(&mm->freelists[order], (ilist_t*)start);
     //dlog_freelist(mm, order);
 
-    // set buddy bit of (invalid, imaginary) "end buddy" of the largest block
-    usize bit = (start - mm->start_addr) / ((usize)PAGE_SIZE << order);
+    // calculate bit for the block
+    usize bit = (start - mm->start_addr) / block_size;
+
+    // Clear block bit to mark the block as "free".
+    // This is needed even though we memset(0) the bitset earlier since we may end
+    // up with up to three pages for the 0th order, and since we set the buddy bit
+    // after clearing the block bit, the 2nd and 3rd page's bits would not be cleared
+    // unless we do this.
+    bit_clear(mm->bitsets[order], bit);
+
+    // Set buddy bit of (invalid, imaginary) "end buddy" of the largest block
     bit_set(mm->bitsets[order], bit + 1);
 
-    start += (usize)PAGE_SIZE << order;
+    start += block_size;
   }
 
   return mm;
+
+out_of_memory:
+  dlog("[%s] not enough memory (%lu B)", __FUNCTION__, (end - (uintptr)memp));
+  return NULL;
 }
 
 
-#ifdef RMM_RUN_TEST_ON_INIT
+void rmm_dispose(rmm_t* mm) {
+  // nothing to do, but maybe in the future
+}
+
+
+uintptr rmm_startaddr(const rmm_t* mm) {
+  return mm->start_addr;
+}
+
+
+#if defined(RMM_RUN_TEST_ON_INIT) && DEBUG
 static void rmm_test() {
-  dlog("—————— %s begin ——————", __FUNCTION__);
+  dlog("%s", __FUNCTION__);
   // since RSM runs as a regular host OS process, we get our host memory from the
   // host's virtual memory system via mmap, rather than physical memory as in a kernel.
   usize memsize = 10 * MiB;
   void* memp = assertnotnull( osvmem_alloc(memsize) );
 
-  rmm_t* mm = assertnotnull( rmm_emplace(memp, memsize) );
-  dlog("rmm_cap_bytes()   %10zu", rmm_cap_bytes(mm));
-  dlog("rmm_avail_bytes() %10zu", rmm_avail_bytes(mm));
+  rmm_t* mm = assertnotnull( rmm_create(memp, memsize) );
+  trace("rmm_cap()   %10zu", rmm_cap(mm));
+  trace("rmm_avail() %10zu", rmm_avail(mm));
+
+  assertnull(rmm_allocpages(mm, 0));
 
   void* p = assertnotnull( rmm_allocpages(mm, 4) );
-  dlog("rmm_allocpages(4) => %p", p);
+  trace("rmm_allocpages(4) => %p", p);
   rmm_freepages(mm, p);
 
   p = assertnotnull( rmm_allocpages(mm, 4) );
-  dlog("rmm_allocpages(4) => %p", p);
+  trace("rmm_allocpages(4) => %p", p);
   rmm_freepages(mm, p);
 
   void* ptrs[16];
   for (usize i = 0; i < countof(ptrs); i++) {
     ptrs[i] = assertnotnull(rmm_allocpages(mm, 4));
-    dlog("ptrs[%zu] %p", i, ptrs[i]);
+    trace("ptrs[%zu] %p", i, ptrs[i]);
   }
   // allocate an extra page to avoid triggering the tail decrement opt in rmm_freepages
-  void* p2 = assertnotnull( rmm_allocpages(mm, 1) ); dlog("p2 %p", p2);
+  void* p2 = assertnotnull( rmm_allocpages(mm, 1) ); trace("p2 %p", p2);
 
   // free in tip-tap order (0, 15, 2, 13, 4, 11, 6, 9, 8, 7, 10, 5, 12, 3, 14, 1)
   // this tests the "scan forward or backwards" branches
@@ -332,11 +398,12 @@ static void rmm_test() {
 
   rmm_freepages(mm, p2);
 
-  dlog("rmm_cap_bytes()   %10zu", rmm_cap_bytes(mm));
-  dlog("rmm_avail_bytes() %10zu", rmm_avail_bytes(mm));
+  trace("rmm_cap()   %10zu", rmm_cap(mm));
+  trace("rmm_avail() %10zu", rmm_avail(mm));
 
+  rmm_dispose(mm);
   osvmem_free(memp, memsize);
-  dlog("—————— %s end ——————", __FUNCTION__);
+  trace("—————— %s end ——————", __FUNCTION__);
 }
 #endif // RMM_RUN_TEST_ON_INIT
 
@@ -349,8 +416,10 @@ rerror init_mm() {
       PAGE_SIZE, host_pagesize);
     return rerr_invalid;
   }
-  #ifdef RMM_RUN_TEST_ON_INIT
+
+  #if defined(RMM_RUN_TEST_ON_INIT) && DEBUG
   rmm_test();
   #endif
+
   return 0;
 }

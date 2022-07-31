@@ -223,7 +223,7 @@ UNUSED static void ilist_test_dump(const ilist_t* head) {
   }
 }
 
-static void ilist_test() {
+__attribute__((constructor)) static void test_ilist() {
   ilist_test_ent_t ents[] = { {.a=0}, {.a=1}, {.a=2}, {.a=3} };
 
   ilist_test_t list_ = {0};
@@ -380,6 +380,6 @@ static void ilist_test() {
 
 }
 
-#endif
+#endif // ILIST_TEST_IMPL
 
 RSM_ASSUME_NONNULL_END

@@ -18,7 +18,7 @@
 //
 
 // KMEM_TRACE: uncomment to enable logging a lot of info via dlog
-#define KMEM_TRACE
+//#define KMEM_TRACE
 
 // KMEM_RUN_TEST_ON_INIT: uncomment to run tests during exe init in DEBUG builds
 #define KMEM_RUN_TEST_ON_INIT
@@ -68,8 +68,8 @@ static_assert(IS_POW2(HEAP_MAX_ALIGN), "");
   #define DEBUG_ID_FIELD(NAME)
   #define DEBUG_ID_PARAM
   #define DEBUG_ID_ARG
-  #define DEBUG_ID_GEN_ARG(gen)  ((void)0)
-  #define DEBUG_ID_ASSIGN(dst)   ((void)0)
+  #define DEBUG_ID_GEN_ARG(gen)
+  #define DEBUG_ID_ASSIGN(dst)               ((void)0)
   #define DEBUG_ID_INIT(ptr, FIELD, initval) ((void)0)
 #endif
 
@@ -905,8 +905,8 @@ usize kmem_cap(rmemalloc_t* a) {
 #if defined(KMEM_RUN_TEST_ON_INIT) && defined(DEBUG)
 static void test_kmem() {
   // verbose?
-  #define tlog dlog
-  // #define tlog(...) ((void)0)
+  // #define tlog dlog
+  #define tlog(...) ((void)0)
 
   // test "not enough memory to create allocator"
   {

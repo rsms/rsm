@@ -904,6 +904,8 @@ usize kmem_cap(rmemalloc_t* a) {
 
 #if defined(KMEM_RUN_TEST_ON_INIT) && defined(DEBUG)
 static void test_kmem() {
+  dlog("%s", __FUNCTION__);
+
   // verbose?
   // #define tlog dlog
   #define tlog(...) ((void)0)

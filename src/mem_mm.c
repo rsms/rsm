@@ -395,7 +395,7 @@ uintptr rmm_startaddr(const rmm_t* mm) {
 
 
 #if defined(RMM_RUN_TEST_ON_INIT) && DEBUG
-static void rmm_test() {
+static void test_rmm() {
   dlog("%s", __FUNCTION__);
   // since RSM runs as a regular host OS process, we get our host memory from the
   // host's virtual memory system via mmap, rather than physical memory as in a kernel.
@@ -458,7 +458,7 @@ rerror init_mm() {
   }
 
   #if defined(RMM_RUN_TEST_ON_INIT) && DEBUG
-  rmm_test();
+  test_rmm();
   #endif
 
   return 0;

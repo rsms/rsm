@@ -58,7 +58,7 @@
 // the following slabheaps: 8, 16, 32, 64, 128, 256  (bytes). And so on.
 #define SLABHEAP_COUNT       4
 #define SLABHEAP_MIN_SIZE    sizeof(void*) /* must be pow2 */
-#define SLABHEAP_MAX_SIZE    ((SLABHEAP_COUNT - 1) + ILOG2(SLABHEAP_MIN_SIZE))
+#define SLABHEAP_MAX_SIZE    ((usize)(SLABHEAP_COUNT - 1) + ILOG2(SLABHEAP_MIN_SIZE))
 #define SLABHEAP_BLOCK_SIZE  ((usize)(PAGE_SIZE * 16lu))
 #define SLABHEAP_BLOCK_MASK  (~(SLABHEAP_BLOCK_SIZE - 1))
 #define SLABHEAP_MAX_BLOCKS  (SLABHEAP_BLOCK_SIZE / SLABHEAP_MIN_SIZE)
@@ -558,7 +558,9 @@ static slabblock_t* nullable slabheap_grow(rmemalloc_t* a, slabheap_t* sh) {
   assertf((uintptr)block % SLABHEAP_BLOCK_SIZE == 0,
     "misaligned address %p returned by kmem_heapalloc", block);
 
-  block->cap = SLABHEAP_BLOCK_SIZE / sh->size;
+  usize block_align = CEIL_POW2(MAX(sh->size, _Alignof(slabblock_t)));
+  usize block_size = ALIGN2(sizeof(slabblock_t), block_align);
+  block->cap = (SLABHEAP_BLOCK_SIZE - block_size) / sh->size;
   block->len = 0;
   block->recycle = NULL;
   block->next = NULL;
@@ -1049,8 +1051,8 @@ static void test_kmem() {
   rmem2_t p1, p2, p3, p4, p5;
 
   // slabheap
-  // rmem2_t regions[SLABHEAP_BLOCK_SIZE / 64];
-  rmem2_t regions[4];
+  rmem2_t regions[SLABHEAP_BLOCK_SIZE / 64];
+  // rmem2_t regions[4];
   for (usize i = 0; i < countof(regions); i++)
     regions[i] = kmem_alloc(a, 64);
   for (usize i = 0; i < countof(regions); i++)

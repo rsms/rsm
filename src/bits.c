@@ -86,7 +86,7 @@ usize bitset_find_unset_range(
 
   const usize start_bucket = (usize)(uintptr)*startp / bucket_bits;
   // const usize start_bucket = (usize)(uintptr)IDIV_CEIL(*startp, bucket_bits);
-  const usize end_bucket = bset->len / bucket_bits;
+  const usize end_bucket = (bset->len / bucket_bits) + 1;
   trace("end_bucket    %4zu (bset.len %zu)", end_bucket, bset->len);
   trace("start_bucket  %4zu (startp %zu)", start_bucket, *startp);
 
@@ -97,9 +97,9 @@ usize bitset_find_unset_range(
 
   usize freelen = 0; // current "free range" length
   usize* buckets = (usize*)bset->data;
+  usize bucket = start_bucket;
 
-  for (usize bucket = start_bucket; bucket < end_bucket; bucket += bucket_stride) {
-
+  for (; bucket < end_bucket; ) {
 
     // if bucket is full
     if (buckets[bucket] == USIZE_MAX) {
@@ -108,6 +108,7 @@ usize bitset_find_unset_range(
         goto found;
       freelen = 0; // reset start of free range
       start_bit = 0; // reset start bit
+      bucket = ALIGN_CEIL(bucket + 1, bucket_stride);
       continue;
     }
 
@@ -121,12 +122,11 @@ usize bitset_find_unset_range(
       freelen += bucket_bits - start_bit;
       trace("   freelen %zu", freelen);
       if (freelen >= maxlen) {
-        // *startp += start_bit;
-        // trace("     set startp = %zu", *startp);
         trace("   -> %zu", maxlen);
         return maxlen;
       }
       start_bit = 0;
+      bucket++;
       continue;
     }
 
@@ -167,11 +167,14 @@ usize bitset_find_unset_range(
         freelen = 0;
       }
     }
+
+    bucket = ALIGN_CEIL(bucket + 1, bucket_stride);
   }
 
   if (freelen >= minlen)
     goto found;
 
+  trace("** scan tail bits");
   usize ftb = (bset->len / bucket_bits) * bucket_bits; // first trailing #bit
   usize trailing_bits = bset->len % bucket_bits;
   for (usize i = 0; i < trailing_bits; ++i) {
@@ -186,11 +189,13 @@ usize bitset_find_unset_range(
     if (freelen >= minlen)
       goto found;
   }
+  trace("   not enough consecutive bits set");
 
   // no free range found that satisfies freelen >= minlen
   freelen = 0;
 found:
-  trace("-> %zu (= MIN(%zu, %zu))", MIN(freelen, maxlen), freelen, maxlen);
+  trace("-> %zu (= MIN(freelen(%zu), maxlen(%zu)))",
+    MIN(freelen, maxlen), freelen, maxlen);
   return MIN(freelen, maxlen);
 }
 

@@ -79,8 +79,23 @@ usize rmm_cap(const rmm_t* mm) {
   return (usize)(mm->end_addr - mm->start_addr) / PAGE_SIZE;
 }
 
-usize rmm_avail(const rmm_t* mm) {
-  return mm->free_size / PAGE_SIZE;
+usize rmm_avail_total(rmm_t* mm) {
+  RHMutexLock(&mm->lock);
+  usize npages = mm->free_size / PAGE_SIZE;
+  RHMutexUnlock(&mm->lock);
+  return npages;
+}
+
+usize rmm_avail_maxregion(rmm_t* mm) {
+  usize npages = 0;
+  RHMutexLock(&mm->lock);
+  for (int order = 0; order < MAX_ORDER; order++) {
+    usize n = ilist_count(&mm->freelists[order]) * (1lu << order);
+    if (n > npages)
+      npages = n;
+  }
+  RHMutexUnlock(&mm->lock);
+  return npages;
 }
 
 
@@ -158,11 +173,15 @@ static uintptr rmm_allocpages1(rmm_t* mm, int order) {
 void* nullable rmm_allocpages(rmm_t* mm, usize npages) {
   if (npages == 0)
     return 0;
+
   safecheckf(IS_POW2(npages), "can only allocate pow2(npages)");
+
   int order = 0;
   for (usize n = npages; n && !(n & 1); n >>= 1)
     order++;
+
   RHMutexLock(&mm->lock);
+
   uintptr addr = rmm_allocpages1(mm, order);
   if UNLIKELY(addr == UINTPTR_MAX) {
     addr = 0;
@@ -170,8 +189,27 @@ void* nullable rmm_allocpages(rmm_t* mm, usize npages) {
     addr += mm->start_addr;
     mm->free_size -= npages * PAGE_SIZE;
   }
+
   RHMutexUnlock(&mm->lock);
   return (void*)addr;
+}
+
+
+void* nullable rmm_allocpages_min(rmm_t* mm, usize* req_npages, usize min_npages) {
+  usize npages = *req_npages;
+  npages = CEIL_POW2(npages);
+  if (min_npages == 0)
+    min_npages = 1;
+  for (;;) {
+    void* p = rmm_allocpages(mm, npages);
+    if (p) {
+      *req_npages = npages;
+      return p;
+    }
+    if (npages == min_npages)
+      return NULL;
+    npages >>= 1;
+  }
 }
 
 
@@ -365,8 +403,9 @@ static void rmm_test() {
   void* memp = assertnotnull( osvmem_alloc(memsize) );
 
   rmm_t* mm = assertnotnull( rmm_create(memp, memsize) );
-  trace("rmm_cap()   %10zu", rmm_cap(mm));
-  trace("rmm_avail() %10zu", rmm_avail(mm));
+  trace("rmm_cap()             %10zu", rmm_cap(mm));
+  trace("rmm_avail_total()     %10zu", rmm_avail_total(mm));
+  trace("rmm_avail_maxregion() %10zu", rmm_avail_maxregion(mm));
 
   assertnull(rmm_allocpages(mm, 0));
 
@@ -398,8 +437,9 @@ static void rmm_test() {
 
   rmm_freepages(mm, p2);
 
-  trace("rmm_cap()   %10zu", rmm_cap(mm));
-  trace("rmm_avail() %10zu", rmm_avail(mm));
+  trace("rmm_cap()             %10zu", rmm_cap(mm));
+  trace("rmm_avail_total()     %10zu", rmm_avail_total(mm));
+  trace("rmm_avail_maxregion() %10zu", rmm_avail_maxregion(mm));
 
   rmm_dispose(mm);
   osvmem_free(memp, memsize);

@@ -167,6 +167,14 @@ inline static void ilist_move(ilist_t* src_entry, ilist_t* dst_head) {
     ilist_next_entry(cursor_ptr, entstruct_member))
 
 
+// ilist_count counts the entries in a list
+#define ilist_count(head) ({ \
+  usize count__ = 0; \
+  for (ilist_t* n = (head)->next; !ilist_is_head((head), n); n = n->next) \
+    count__++; \
+  count__; \
+})
+
 // ilist_for_each iterates over a list
 #define ilist_for_each(CUR, head) \
   for (ilist_t* CUR = (head)->next; !ilist_is_head((head), CUR); CUR = CUR->next)

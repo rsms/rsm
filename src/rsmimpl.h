@@ -416,6 +416,16 @@ static inline RSM_WARN_UNUSED_RESULT bool __must_check_unlikely(bool unlikely) {
   __builtin_mul_overflow(a__, b__, dst__); \
 }))
 
+// bool check_align_ceil_overflow(ANYINT x, ANYINT a, ANYINT* dst)
+// Attempts to align x to a, returning true if the operation overflowed.
+#define check_align_ceil_overflow(x, a, dst) ({ \
+  __typeof__(x) x__ = (x); \
+  __typeof__(x) align__ = (a); \
+  __typeof__(x) rem__ = x__ % align__; \
+  __typeof__(dst) dst1__ = (dst); \
+  rem__ ? check_add_overflow(x__, align__ - rem__, dst1__) : (*dst1__ = x, false); \
+})
+
 typedef __builtin_va_list va_list;
 #ifndef va_start
   #define va_start __builtin_va_start

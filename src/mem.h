@@ -25,7 +25,21 @@ void* nullable rmm_allocpages(rmm_t*, usize npages);
 void rmm_freepages(rmm_t* restrict mm, void* restrict ptr);
 uintptr rmm_startaddr(const rmm_t*);
 usize rmm_cap(const rmm_t* mm); // total capacity (number of pages)
-usize rmm_avail(const rmm_t*); // number of pages available to allocate
+
+// rmm_avail_total returns the total number of pages available to allocate
+usize rmm_avail_total(rmm_t*);
+
+// rmm_avail_maxregion returns the number of pages of the largest, free region
+// of contiguous pages.
+usize rmm_avail_maxregion(rmm_t*);
+
+// rmm_allocpages_min performs a best-effort allocation; it attempts to allocate
+// req_npages and if there's no contiguous region of that many pages, it tries to
+// allocate one order less (req_npages << 1).
+// min_npages is the smallest number of pages it will attempt to allocate.
+// On success, req_npages is updated with the actual number of pages allocated.
+void* nullable rmm_allocpages_min(rmm_t* mm, usize* req_npages, usize min_npages);
+
 // DEPRECATED (use rmemalloc_t); TODO remove
 inline static void* nullable rmm_allocpages_bytes(rmm_t* mm, usize minsize) {
   return rmm_allocpages(mm, ALIGN2(minsize, PAGE_SIZE) / PAGE_SIZE);
@@ -48,10 +62,12 @@ typedef struct {
   (region).start, ((region).start + (region).size), (region).size
 
 // kmem_allocator_create creates a new allocator that sources memory from mm.
-// min_initmem is the minimum initial memory and can be zero.
-// min_initmem is rounded up to nearest min(CHUNK_SIZE, pow2(min_initmem)) size
-// where CHUNK_SIZE = sizeof(void*) * 8.
-rmemalloc_t* nullable kmem_allocator_create(rmm_t* mm, usize min_initmem);
+// initsize is the desired initial memory and can be zero.
+// initsize is rounded up to nearest min(CHUNK_SIZE, pow2(initsize)) size
+// where CHUNK_SIZE = sizeof(void*) * 8. Since backing memory has alignment
+// requirements, the actual memory available may be different than the requested
+// initsize; use kmem_cap to get the actual capacity.
+rmemalloc_t* nullable kmem_allocator_create(rmm_t* mm, usize initsize);
 
 // kmem_allocator_free disposes of an allocator.
 // The allocator is invalid after this call.

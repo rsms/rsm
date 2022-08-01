@@ -734,6 +734,12 @@ end:
 }
 
 
+bool kmem_resize(rmemalloc_t* a, rmem2_t* m, usize newsize) {
+  panic("%s not implemented", __FUNCTION__);
+  return false;
+}
+
+
 // kmem_expand attempts to expand the available memory to allocate.
 // Returns true if expansion succeeded; the caller should try again to allocate.
 static bool kmem_expand(rmemalloc_t* a, usize minsize) {

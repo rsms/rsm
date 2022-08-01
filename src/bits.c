@@ -77,6 +77,8 @@ usize bitset_find_unset_range(
   assert(maxlen >= minlen);
 
   trace("start         %4zu", *startp);
+  trace("min-maxlen    %4zu–%4zu", minlen, maxlen);
+  trace("stride        %4zu", stride);
 
   // We'll work at a register-sized granule ("bucket") over the bitset
   const usize bucket_bits = 8 * sizeof(usize); // bit size of one "bucket"
@@ -90,10 +92,15 @@ usize bitset_find_unset_range(
   trace("end_bucket    %4zu (bset.len %zu)", end_bucket, bset->len);
   trace("start_bucket  %4zu (startp %zu)", start_bucket, *startp);
 
-  u8 start_bit = (u8)(*startp % bucket_bits); // bit index to start at
-  u8 bit_align = stride % bucket_bits;
+  // bit index to start at
+  u8 start_bit = (u8)(*startp % bucket_bits);
   trace("start_bit     %4u", start_bit);
-  trace("bit_align     %4u (stride %zu)", bit_align, stride);
+
+  // bitwise stride
+  usize stride2 = stride % bucket_bits; // remainder after "removing" bucket_stride
+  stride2 += stride * (stride2 == 0); // if (stride2 == 0) stride2 = stride
+  stride = stride2;
+  trace("stride        %4zu (remainder)", stride);
 
   usize freelen = 0; // current "free range" length
   usize* buckets = (usize*)bset->data;
@@ -145,7 +152,7 @@ usize bitset_find_unset_range(
         // rest of bucket is free
         trace("    bucket_val = 0");
         if (freelen == 0)
-          *startp = ALIGN_CEIL(bucket * bucket_bits + nbits, bit_align);
+          *startp = ALIGN_CEIL(bucket * bucket_bits + nbits, stride);
         freelen += bucket_bits - nbits;
         nbits = bucket_bits;
       } else {
@@ -153,7 +160,7 @@ usize bitset_find_unset_range(
         bucket_val >>= tz;
 
         if (freelen == 0)
-          *startp = ALIGN_CEIL(bucket * bucket_bits + nbits, bit_align);
+          *startp = ALIGN_CEIL(bucket * bucket_bits + nbits, stride);
         freelen += tz;
         nbits += tz;
 
@@ -270,6 +277,18 @@ __attribute__((constructor)) static void test_bits() {
     &bset, &region_start, region_minlen, region_maxlen, stride);
   assertf(region_len == region_minlen, "region_len=%zu", region_len);
   assertf(region_start == stride, "region_start=%zu", region_start);
+
+  // bug 2
+  bitset_set_range(&bset, 0, 3, true);
+  stride = 1024;
+  region_start = 0;
+  region_minlen = region_maxlen = 1024;
+  region_len = bitset_find_unset_range(
+    &bset, &region_start, region_minlen, region_maxlen, stride);
+  assertf(region_len == region_minlen,
+    "region_len (%zu) != %zu", region_len, region_minlen);
+  assertf(region_start == stride,
+    "region_start (%zu) != %zu", region_start, stride);
 }
 #endif
 

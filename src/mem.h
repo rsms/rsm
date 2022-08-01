@@ -61,6 +61,12 @@ typedef struct {
 #define RMEM_FMT_ARGS(region) \
   (region).start, ((region).start + (region).size), (region).size
 
+// RMEM_IS_VALID returns true if region has a non-NULL address and a non-zero size
+#define RMEM_IS_VALID(region)     (!RMEM_IS_NULL(region) & !RMEM_IS_OVERFLOW(region))
+#define RMEM_IS_NULL(region)      (!(uintptr)(region).start | !(uintptr)(region).size)
+#define RMEM_IS_OVERFLOW(region) \
+  (((uintptr)(region).start + (uintptr)(region).size) < (uintptr)(region).start)
+
 // TODO: throw away old shitty rmem allocator,
 // replace all uses with this one and rename this one to rmem.
 

@@ -1,15 +1,16 @@
 // kernel-style memory allocator
 // SPDX-License-Identifier: Apache-2.0
 
+#define ILIST_TEST_IMPL /* define ilist test in this translation unit */
 #include "rsmimpl.h"
-#define ILIST_TEST_IMPL
 #include "list.h"
 #include "bits.h"
 #include "mem.h"
 
 //
 // This implements a universal heap allocator backed by a few small-size slabs
-// and one or more subheaps, which are in turn backed by pages from a memory manager.
+// and one or more subheaps. subheaps are in turn backed by pages from a
+// memory manager (rmm_t).
 //
 // When no space is found for an allocation request that fits in a slab, a new slab is
 // allocated from a subheap.
@@ -28,13 +29,27 @@
 // This is useful for debugging memory management issues, like use after free, since
 // memory managed by this allocator is not subject to host memory protection.
 // Set to zero to disable scrubbing.
-#define KMEM_ALLOC_SCRUB_BYTE 0xbb
-#define KMEM_FREE_SCRUB_BYTE  0xaa
+#if RSM_SAFE
+  #ifndef KMEM_ALLOC_SCRUB_BYTE
+    #define KMEM_ALLOC_SCRUB_BYTE 0xbb
+  #endif
+  #ifndef KMEM_FREE_SCRUB_BYTE
+    #define KMEM_FREE_SCRUB_BYTE  0xaa
+  #endif
+#else
+  #ifndef KMEM_ALLOC_SCRUB_BYTE
+    #define KMEM_ALLOC_SCRUB_BYTE 0
+  #endif
+  #ifndef KMEM_FREE_SCRUB_BYTE
+    #define KMEM_FREE_SCRUB_BYTE  0
+  #endif
+#endif
 
 // KMEM_SLABHEAP_ENABLE: define to enable use of slabheaps; speeds up small allocations
 #define KMEM_SLABHEAP_ENABLE
 
 // KMEM_SLABHEAP_ENABLE_EAGER_ALLOC: define to allocate slab space up front
+// Note: test_kmem assumes expects this to NOT be defined.
 //#define KMEM_SLABHEAP_ENABLE_EAGER_ALLOC
 
 // SLABHEAP_COUNT dictates the slabheap size classes in increasing pow2, starting
@@ -56,7 +71,7 @@ static_assert(SLABHEAP_COUNT > 0, "undef KMEM_SLABHEAP_ENABLE instead");
 #define HEAP_MAX_ALIGN  XMAX(PAGE_SIZE, SLABHEAP_BLOCK_SIZE)
 static_assert(IS_POW2(HEAP_MAX_ALIGN), "");
 
-
+// debug_id
 #ifdef KMEM_TRACE
   #define DEBUG_ID_FIELD(NAME)   usize NAME;
   #define DEBUG_ID_PARAM         , usize debug_id

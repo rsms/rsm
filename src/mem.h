@@ -61,6 +61,9 @@ typedef struct {
 #define RMEM_FMT_ARGS(region) \
   (region).start, ((region).start + (region).size), (region).size
 
+// TODO: throw away old shitty rmem allocator,
+// replace all uses with this one and rename this one to rmem.
+
 // kmem_allocator_create creates a new allocator that sources memory from mm.
 // initsize is the desired initial memory and can be zero.
 // initsize is rounded up to nearest min(CHUNK_SIZE, pow2(initsize)) size

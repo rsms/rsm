@@ -251,7 +251,7 @@ int main(int argc, char*const* argv) {
   }
 
   // memory allocator for compiler and for buffering stdin
-  rmem mem = rmem_mkvmalloc(0);
+  rmem mem = rmem_mkvmalloc(128 * 1024 * 1024); // 128 MiB
   if (mem.state == NULL) {
     errmsg("failed to allocate virtual memory");
     return 1;

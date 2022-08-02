@@ -1250,7 +1250,7 @@ static void test_kmem() {
 #endif // KMEM_RUN_TEST_ON_INIT
 
 
-rerror init_rmem_allocator() {
+rerror init_rmem() {
   #if defined(KMEM_RUN_TEST_ON_INIT) && defined(DEBUG)
   test_kmem();
   #endif

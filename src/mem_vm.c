@@ -219,6 +219,6 @@ static void vmem_test() {
 
 
 rerror init_vmem() {
-  vmem_test();
-  return rerr_canceled;
+  // vmem_test(); return rerr_canceled;
+  return 0;
 }

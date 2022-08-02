@@ -179,10 +179,6 @@ static const char* gnamedtype_name(gnamedtype t) {
 static bool check_named_ref(
   gstate* g, rnode* referrer, u32 referreri, grefflag flags, gnamed* target)
 {
-  #if DEBUG
-    const char* scrubcheck = rmem_scrubcheck(target, sizeof(*target));
-    assertf(scrubcheck[0] == 'o', "scrubcheck(target) => %s", scrubcheck);
-  #endif
   rop op = RSM_GET_OP(*rarray_at(rinstr, &g->iv, referreri));
   const char* expected;
   switch (op) {
@@ -208,7 +204,7 @@ static bool check_named_ref(
     default:
       return true;
   }
-  /*const char**/ scrubcheck = rmem_scrubcheck(target, sizeof(*target));
+  const char* scrubcheck = rmem_scrubcheck(target, sizeof(*target));
   ERRN(referrer, "expected %s, got %s (0x%x, name \"%.*s\", scrubcheck: %s)",
     expected, gnamedtype_name(target->namedtype), target->namedtype,
     target->namelen >= 0xbb ? 0 : (int)target->namelen, target->name,
@@ -439,11 +435,6 @@ largeval:
 
 // resolves pending PC arguments (jumps, calls and branch targets) pointing to b
 static void gpostresolve_pc(gstate* g, rarray* refs, gbhead* b) {
-  #if DEBUG
-    const char* scrubcheck = rmem_scrubcheck(&b->namedtype, sizeof(b->namedtype));
-    assertf(scrubcheck[0] == 'o', "scrubcheck(b->namedtype) => %s", scrubcheck);
-  #endif
-
   for (u32 i = refs->len; i-- ; ) {
     gref* ref = rarray_at(gref, refs, i);
     assert(assertnotnull(ref->n)->t == RT_NAME);

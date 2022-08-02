@@ -1162,7 +1162,7 @@ const char* rmem_scrubcheck(void* ptr, usize size) {
 }
 
 
-#if defined(RMEM_RUN_TEST_ON_INIT) && defined(DEBUG)
+#if defined(RMEM_RUN_TEST_ON_INIT) && DEBUG
 static void test_rmem() {
   // verbose?
   //#define tlog dlog
@@ -1444,7 +1444,7 @@ static void test_rmem() {
 
 
 rerror init_rmem() {
-  #if defined(RMEM_RUN_TEST_ON_INIT) && defined(DEBUG)
+  #if defined(RMEM_RUN_TEST_ON_INIT) && DEBUG
   test_rmem();
   #endif
   // currently nothing to initialize

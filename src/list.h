@@ -211,7 +211,7 @@ inline static void ilist_move(ilist_t* src_entry, ilist_t* dst_head) {
 
 
 //——————————————————————————————————————————————————————————————————————————————————————
-#ifdef ILIST_TEST_IMPL
+#if defined(ILIST_TEST_IMPL) && DEBUG
 
 typedef struct {
   int x;

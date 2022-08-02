@@ -22,6 +22,9 @@
 #define PTE_FMT          "(0x%llx)"
 #define PTE_FMTARGS(pte) (pte).outaddr
 
+// VMEM_RUN_TEST_ON_INIT: uncomment to run tests during exe init in DEBUG builds
+//#define VMEM_RUN_TEST_ON_INIT
+
 
 //———————————————————————————————————————————————————————————————————————————————————————
 
@@ -185,7 +188,8 @@ static mpte_t mpagedir_lookup_pte(mpagedir_t* pagedir, u64 vfn) {
 //   return host_page + (uintptr)vaddr_offs(vaddr);
 // }
 
-static void vmem_test() {
+#if defined(VMEM_RUN_TEST_ON_INIT) && DEBUG
+static void test_vmem() {
 
   dlog("host pagesize:   %5u", (u32)mem_pagesize());
   dlog("PAGE_SIZE:       %5u", PAGE_SIZE);
@@ -216,9 +220,13 @@ static void vmem_test() {
   osvmem_free((void*)rmm_startaddr(mm), memsize);
   rmm_dispose(mm);
 }
+#endif // VMEM_RUN_TEST_ON_INIT
 
 
 rerror init_vmem() {
-  // vmem_test(); return rerr_canceled;
+  #if defined(VMEM_RUN_TEST_ON_INIT) && DEBUG
+  test_vmem();
+  #endif
+
   return 0;
 }

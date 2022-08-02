@@ -108,23 +108,25 @@ usize rmm_avail_maxregion(rmm_t* mm) {
 
 
 #if DEBUG
-UNUSED static void dlog_freelist(const rmm_t* mm, int order) {
-  const ilist_t* head = &mm->freelists[order];
-  trace("freelists[%d] %p", order, head);
-  usize i = 0; // expect ents[0] first
-  ilist_for_each(cur, head) {
-    if (cur->prev == head && cur->next == head) {
-      trace("  [%zu] %p (.prev HEAD, .next HEAD)", i, cur);
-    } else if (cur->prev == head) {
-      trace("  [%zu] %p (.prev HEAD, .next %p)", i, cur, cur->next);
-    } else if (cur->next == head) {
-      trace("  [%zu] %p (.prev %p, .next HEAD)", i, cur, cur->prev);
-    } else {
-      trace("  [%zu] %p (.prev %p, .next %p)", i, cur, cur->prev, cur->next);
+  UNUSED static void dlog_freelist(const rmm_t* mm, int order) {
+    const ilist_t* head = &mm->freelists[order];
+    trace("freelists[%d] %p", order, head);
+    usize i = 0; // expect ents[0] first
+    ilist_for_each(cur, head) {
+      if (cur->prev == head && cur->next == head) {
+        trace("  [%zu] %p (.prev HEAD, .next HEAD)", i, cur);
+      } else if (cur->prev == head) {
+        trace("  [%zu] %p (.prev HEAD, .next %p)", i, cur, cur->next);
+      } else if (cur->next == head) {
+        trace("  [%zu] %p (.prev %p, .next HEAD)", i, cur, cur->prev);
+      } else {
+        trace("  [%zu] %p (.prev %p, .next %p)", i, cur, cur->prev, cur->next);
+      }
+      i++;
     }
-    i++;
   }
-}
+#else
+  #define dlog_freelist(...) ((void)0)
 #endif
 
 

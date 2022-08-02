@@ -426,17 +426,18 @@ u64 _rsm_floor_pow2_64(u64 x);
 // ANYINT CEIL_POW2(ANYINT x) rounds up x to nearest power of two.
 // Returns 1 when x is 0.
 #define CEIL_POW2(x)  ( \
-  /*__builtin_constant_p(x) ? CEIL_POW2_X(x) :*/ ({ \
+  /*__builtin_constant_p(x) ? CEIL_POW2_X(x) : [disabled: clang-14 bug] */ ({ \
     __typeof__(x) xtmp__ = (x); \
-    xtmp__ += !xtmp__; /* branchless "if (x == 0) x = 1" */ \
-    ( xtmp__ > (xtmp__ << 1) ) ? \
-      ~(__typeof__(x))0 : \
-      (__typeof__(x))1 << ((__typeof__(x))(sizeof(x)*8) - rsm_clz(xtmp__ - 1)); \
+    ( xtmp__ <= 1 ) ? \
+      (__typeof__(x))1 : \
+      ( xtmp__ > (xtmp__ << 1) ) ? \
+        ~(__typeof__(x))0 : \
+        (__typeof__(x))1 << ((__typeof__(x))(sizeof(x)*8) - rsm_clz(xtmp__ - 1)); \
   }) \
 )
 // CEIL_POW2_X is a constant-expression implementation of CEIL_POW2
 #define CEIL_POW2_X(x) ( \
-  ( ((x) == 0) | ((x) == 1) ) ? \
+  ( ((x) <= 1) ) ? \
     (__typeof__(x))1 : \
     ( (x) > ((x) << 1) ) ? \
       ~(__typeof__(x))0 : \

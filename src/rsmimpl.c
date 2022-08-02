@@ -179,6 +179,11 @@ static_assert(FLOOR_POW2_X(512llu) == 512, "");
 static_assert(FLOOR_POW2_X(600llu) == 512, "");
 
 
+static_assert(IS_POW2(PAGE_SIZE),       "PAGE_SIZE is not a power-of-two");
+static_assert(PAGE_SIZE >= sizeof(u64), "PAGE_SIZE too small");
+static_assert(PAGE_SIZE <= 65536,       "PAGE_SIZE too large");
+
+
 char abuf_zeroc = 0;
 
 
@@ -246,7 +251,7 @@ const char* rop_name(rop op) {
 }
 
 
-rerror mmapfile(const char* filename, void** p_put, usize* len_out) {
+rerror mmapfile(const char* filename, rmem_t* data_out) {
   #ifdef RSM_NO_LIBC
     return rerr_not_supported;
   #else
@@ -260,48 +265,49 @@ rerror mmapfile(const char* filename, void** p_put, usize* len_out) {
       close(fd);
       return err;
     }
-    *len_out = (usize)st.st_size;
 
     void* p = mmap(0, (usize)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
     if (p == MAP_FAILED)
       return rerr_nomem;
 
-    *p_put = p;
+    data_out->p = p;
+    data_out->size = (usize)st.st_size;
     return 0;
   #endif
 }
 
-void unmapfile(void* p, usize len) {
+void unmapfile(rmem_t m) {
   #ifndef RSM_NO_LIBC
-    munmap(p, len);
+    munmap(m.p, m.size);
   #endif
 }
 
-rerror read_stdin_data(rmem m, usize maxlen, void** p_put, usize* len_out) {
-  *len_out = 0;
+rerror read_stdin_data(rmemalloc_t* ma, usize maxlen, rmem_t* data_out) {
   #ifdef RSM_NO_LIBC
     return rerr_not_supported;
   #else
     if (isatty(0))
       return rerr_badfd;
-    usize cap = 4096;
     usize len = 0;
-    void* dst = rmem_alloc(m, cap, 1);
+    rmem_t dst = rmem_alloc(ma, PAGE_SIZE);
+    if (!dst.p)
+      return rerr_nomem;
     for (;;) {
-      if (!dst)
-        return rerr_nomem;
-      isize n = read(0, dst + len, cap - len);
-      if (n < 0)
+      isize n = read(0, dst.p + len, dst.size - len);
+      if (n < 0) {
+        rmem_free(ma, dst);
         return rerror_errno(errno);
+      }
       len += (usize)n;
-      if ((usize)n < cap - len)
+      if ((usize)n < dst.size - len)
         break;
-      dst = rmem_resize(m, dst, cap, cap*2, 1);
-      cap *= 2;
+      if (!rmem_resize(ma, &dst, dst.size * 2)) {
+        rmem_free(ma, dst);
+        return rerr_nomem;
+      }
     }
-    *p_put = dst;
-    *len_out = len;
+    *data_out = dst;
     return 0;
   #endif
 }
@@ -392,18 +398,34 @@ rerror parseu64(const char* src, usize srclen, int base, u64* result, u64 cutoff
 
 // logbin is a little debug/development function which logs a number
 // in binary, unsigned decimal and signed decimal.
-void logbin(u32 v) {
+void logbin32(u32 v) {
   char buf[32];
   usize n = stru64(buf, v, 2);
-  log("\e[2mbit   3322222222221111111111          \e[22m\n"
-      "\e[2m      10987654321098765432109876543210\e[22m\n"
-      "\e[2mbin   %.*s\e[22m%.*s\n"
-      "\e[2mdec u \e[22m%u (0x%x)\n"
-      "\e[2mdec s \e[22m%d",
-      (int)(32-n), "00000000000000000000000000000000",
-      (int)n, buf,
-      v, v,
-      (int)v);
+  log(
+    "\e[2mbit   3322222222221111111111          \e[22m\n"
+    "\e[2m      10987654321098765432109876543210\e[22m\n"
+    "\e[2mbin   %.*s\e[22m%.*s\n"
+    "\e[2mdec u \e[22m%u (0x%x)\n"
+    "\e[2mdec s \e[22m%d",
+    (int)(32-n), "00000000000000000000000000000000",
+    (int)n, buf,
+    v, v,
+    (i32)v);
+}
+
+void logbin64(u64 v) {
+  char buf[64];
+  usize n = stru64(buf, v, 2);
+  log(
+    "\e[2mbit   666655555555554444444444333333333322222222221111111111          \e[22m\n"
+    "\e[2m      3210987654321098765432109876543210987654321098765432109876543210\e[22m\n"
+    "\e[2mbin   %.*s\e[22m%.*s\n"
+    "\e[2mdec u \e[22m%llu (0x%llx)\n"
+    "\e[2mdec s \e[22m%lld",
+    (int)(64-n), "0000000000000000000000000000000000000000000000000000000000000000",
+    (int)n, buf,
+    v, v,
+    (i64)v);
 }
 
 // --- abuf functions ---
@@ -713,24 +735,25 @@ void _rarray_remove(rarray* a, u32 elemsize, u32 start, u32 len) {
   a->len -= len;
 }
 
-bool rarray_grow(rarray* a, rmem m, usize elemsize, u32 addl) {
+bool rarray_grow(rarray* a, rmemalloc_t* ma, u32 elemsize, u32 addl) {
   u32 newcap = a->cap ? (u32)MIN((u64)a->cap * 2, U32_MAX) : MAX(addl, 4);
   usize newsize;
-  if (check_mul_overflow((usize)newcap, elemsize, &newsize))
+  if (check_mul_overflow((usize)newcap, (usize)elemsize, &newsize))
     return false;
-  void* p2 = rmem_resize(m, a->v, a->cap*elemsize, newsize, elemsize);
-  if UNLIKELY(!p2)
+  rmem_t m = { a->v, (usize)(a->cap * elemsize) };
+  if UNLIKELY(!rmem_resize(ma, &m, newsize))
     return false;
-  a->v = p2;
-  a->cap = newcap;
+  assertf(m.size/(usize)elemsize >= newcap, "bug in rmem_resize %u", a->cap * elemsize);
+  a->v = m.p;
+  a->cap = (u32)(m.size / (usize)elemsize);
   return true;
 }
 
-bool _rarray_reserve(rarray* a, rmem m, usize elemsize, u32 addl) {
+bool _rarray_reserve(rarray* a, rmemalloc_t* ma, u32 elemsize, u32 addl) {
   u32 len;
   if (check_add_overflow(a->len, addl, &len))
     return false;
-  if (len >= a->cap && UNLIKELY(!rarray_grow(a, m, elemsize, addl)))
+  if (len >= a->cap && UNLIKELY(!rarray_grow(a, ma, elemsize, addl)))
     return false;
   return true;
 }
@@ -1166,12 +1189,12 @@ void rasm_dispose(rasm* a) {
   #endif
 }
 
-rerror rsm_loadfile(const char* filename, void** p, usize* size) {
-  return mmapfile(filename, p, size);
+rerror rsm_loadfile(const char* filename, rmem_t* data_out) {
+  return mmapfile(filename, data_out);
 }
 
-void rsm_unloadfile(void* p, usize size) {
-  unmapfile(p, size);
+void rsm_unloadfile(rmem_t m) {
+  unmapfile(m);
 }
 
 // ————————————————————————————————————————
@@ -1207,7 +1230,7 @@ static bufslab* bufslab_insertbefore(bufslab* s, bufslab* next) {
   return s;
 }
 
-static void* nullable bufslab_alloc_more(bufslabs* slabs, rmem mem, u32 len) {
+static void* nullable bufslab_alloc_more(bufslabs* slabs, rmemalloc_t* ma, u32 len) {
   // try to find a free slab of adequate size:
   bufslab* free = slabs->tail->next;
   for (; free; free = free->next) {
@@ -1224,10 +1247,11 @@ static void* nullable bufslab_alloc_more(bufslabs* slabs, rmem mem, u32 len) {
   }
   // no free space found -- allocate new slab
   u32 cap = MAX(BUFSLAB_MIN_CAP, ALIGN2(len, 16));
-  free = rmem_alloc(mem, sizeof(bufslab) + cap, _Alignof(bufslab));
-  if UNLIKELY(free == NULL)
+  rmem_t m = rmem_alloc_aligned(ma, sizeof(bufslab) + cap, _Alignof(bufslab));
+  if UNLIKELY(!m.p)
     return NULL;
-  free->cap = cap;
+  free = m.p;
+  free->cap = m.size - sizeof(bufslab);
 finalize:
   // retire slabs->tail and make the free slab the new "partial" slabs->tail
   slabs->tail = bufslab_insertafter(free, slabs->tail);
@@ -1235,9 +1259,9 @@ finalize:
   return free->data;
 }
 
-void* nullable bufslab_alloc(bufslabs* slabs, rmem mem, usize nbyte) {
+void* nullable bufslab_alloc(bufslabs* slabs, rmemalloc_t* ma, usize nbyte) {
   if UNLIKELY(slabs->tail->cap - slabs->tail->len < nbyte)
-    return bufslab_alloc_more(slabs, mem, nbyte);
+    return bufslab_alloc_more(slabs, ma, nbyte);
   void* ptr = slabs->tail->data + slabs->tail->len;
   slabs->tail->len += nbyte;
   return ptr;
@@ -1249,11 +1273,11 @@ void bufslabs_reset(bufslabs* slabs) {
   slabs->tail = slabs->head;
 }
 
-void bufslab_freerest(bufslab* s, rmem mem) {
+void bufslab_freerest(bufslab* s, rmemalloc_t* ma) {
   s = s->next;
   while (s) {
     bufslab* tmp = s->next;
-    rmem_free(mem, s, sizeof(bufslab) + s->cap);
+    rmem_free(ma, RMEM(s, sizeof(bufslab) + s->cap));
     s = tmp;
   }
 }

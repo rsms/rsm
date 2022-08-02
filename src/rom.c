@@ -194,7 +194,7 @@ static u8* build_CODE(rrombuild* rb, rrom* rom, u8* p, rerror* errp) {
 }
 
 
-rerror rom_build(rrombuild* rb, rmem mem, rrom* rom) {
+rerror rom_build(rrombuild* rb, rmemalloc_t* ma, rrom* rom) {
   memset(rom, 0, sizeof(rrom)); // in case of error
   rom->dataalign = 1;
 
@@ -230,7 +230,8 @@ rerror rom_build(rrombuild* rb, rmem mem, rrom* rom) {
   }
 
   // allocate memory
-  rromimg* img = rmem_alloc(mem, imgz, sizeof(void*)); // TODO: alignment
+  rmem_t imgmem = rmem_alloc_aligned(ma, imgz, sizeof(void*)); // TODO: alignment
+  rromimg* img = imgmem.p;
   if UNLIKELY(img == NULL)
     return rerr_nomem;
 
@@ -270,7 +271,10 @@ rerror rom_build(rrombuild* rb, rmem mem, rrom* rom) {
       case RSM_ROM_DATA: p = build_DATA(rb, rom, p, &err); break;
       case RSM_ROM_CODE: p = build_CODE(rb, rom, p, &err); break;
     }
-    if (err) return err;
+    if UNLIKELY(err) {
+      rmem_free(ma, imgmem);
+      return err;
+    }
 
     // check that the actual size is what we expect (note that headsize == padding)
     assert((usize)((void*)p-secstart) == sechsize[kind]+secbsize[kind]-headsize);
@@ -279,6 +283,7 @@ rerror rom_build(rrombuild* rb, rmem mem, rrom* rom) {
   // finalize rrom fields
   rom->img = img;
   rom->imgsize = (usize)((void*)p - base);
+  rom->imgmem = imgmem;
   dlog("final ROM image size: %zu B", rom->imgsize);
   return 0;
 }

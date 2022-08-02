@@ -16,6 +16,7 @@
 typedef struct pstate pstate;
 struct pstate {
   rasm*       a;          // compilation session/context
+  usize       memsize;    // size of pstate memory region
   const char* inp;        // source bytes cursor (source ends with 0x00)
   const char* inend;      // source bytes end
   const char* tokstart;   // soruce start offset of current token
@@ -64,6 +65,11 @@ enum ropres {
 };
 
 
+// make sure rnode can be allocated with a slabheap by rmemalloc
+#define SLABHEAP_MAX_SIZE  64 /* from rmemalloc impl */
+static_assert(sizeof(rnode) <= SLABHEAP_MAX_SIZE, "slabheap miss!");
+
+
 static smap kwmap = {0}; // keywords map
 
 
@@ -89,7 +95,7 @@ static rnode* appendchild(rnode* parent, rnode* child) {
 
 static rnode* setchildren2(rnode* parent, rnode* child1, rnode* nullable child2) {
   parent->children.head = child1;
-  parent->children.tail = child2;
+  parent->children.tail = child2 ? child2 : child1;
   child1->next = child2;
   assert(child2 == NULL || child2->next == NULL);
   return parent;
@@ -300,7 +306,7 @@ static void sstring_buffered(pstate* p, u32 extralen, bool ismultiline) {
   // allocate buffer
   if UNLIKELY(len == U32_MAX - extralen)
     return serr(p, "string literal too large");
-  char* dst = bufslab_alloc(&p->bufslabs, p->a->mem, len);
+  char* dst = bufslab_alloc(&p->bufslabs, p->a->memalloc, len);
   if UNLIKELY(!dst) {
     serr(p, "unable to allocate memory for string literal");
     return;
@@ -704,14 +710,14 @@ static bool nsigned(rnode* n) {
 void rasm_free_rnode(rasm* a, rnode* n) {
   for (rnode* cn = n->children.head; cn; cn = cn->next)
     rasm_free_rnode(a, cn);
-  rmem_free(a->mem, n, sizeof(rnode));
+  rmem_free(a->memalloc, RMEM(n, sizeof(rnode)));
 }
 
 static rnode last_resort_node = {0};
 
 // mk* functions makes new nodes
 static rnode* mknodet(pstate* p, rtok t) {
-  rnode* n = rmem_alloc(p->a->mem, sizeof(rnode), _Alignof(rnode));
+  rnode* n = rmem_alloc_aligned(p->a->memalloc, sizeof(rnode), _Alignof(rnode)).p;
   if UNLIKELY(n == NULL) {
     errf(p->a, (rposrange){0}, "out of memory");
     return &last_resort_node;
@@ -1175,20 +1181,17 @@ static rnode* pstmt(PPARAMS) {
 static usize fmtnode(char* buf, usize bufcap, rnode* n);
 #endif
 
-#ifndef alignof
-  #define alignof _Alignof
-#endif
 
-#define PSTATE_BUFSLAB0_OFFS ALIGN2(sizeof(pstate), alignof(bufslab))
+#define PSTATE_BUFSLAB0_OFFS ALIGN2(sizeof(pstate), _Alignof(bufslab))
 #define PSTATE_ALLOC_SIZE    (PSTATE_BUFSLAB0_OFFS + sizeof(bufslab) + BUFSLAB_MIN_CAP)
 
 void pstate_dispose(pstate* p) {
   // note: p->bufslabs.head is part of the pstate allocation
-  bufslab_freerest(p->bufslabs.head, p->a->mem);
+  bufslab_freerest(p->bufslabs.head, p->a->memalloc);
   #ifdef DEBUG
   memset(p, 0, PSTATE_BUFSLAB0_OFFS + sizeof(bufslab));
   #endif
-  rmem_free(p->a->mem, p, PSTATE_ALLOC_SIZE);
+  rmem_free(p->a->memalloc, RMEM(p, p->memsize));
 }
 
 rnode* nullable rasm_parse(rasm* a) {
@@ -1197,12 +1200,15 @@ rnode* nullable rasm_parse(rasm* a) {
 
   pstate* p = rasm_pstate(a);
   if (!p) {
-    p = rmem_alloc(a->mem, PSTATE_ALLOC_SIZE, _Alignof(pstate));
-    if (!p)
+    usize align = MAX(_Alignof(pstate), _Alignof(bufslab));
+    rmem_t m = rmem_alloc_aligned(a->memalloc, PSTATE_ALLOC_SIZE, align);
+    if (!m.p)
       return NULL;
+    p = m.p;
     memset(p, 0, sizeof(pstate));
     rasm_pstate_set(a, p);
     p->a = a;
+    p->memsize = m.size;
     p->bufslabs.head = (void*)p + PSTATE_BUFSLAB0_OFFS;
     p->bufslabs.head->next = NULL;
     p->bufslabs.head->len = 0;
@@ -1401,19 +1407,25 @@ enum {
 };
 
 rerror parse_init() {
+  // create kwmap
   #if USIZE_MAX >= 0xFFFFFFFFFFFFFFFFu
-    static void* memory[6176/sizeof(void*)];
+    static void* memory[IDIV_CEIL(768, sizeof(void*))] ATTR_ALIGNED(sizeof(void*));
   #else
-    static void* memory[1552/sizeof(void*)];
+    static u8 memory[1024*4] ATTR_ALIGNED(RMEM_ALLOC_ALIGN);
   #endif
-  rmem mem = rmem_mkbufalloc(memory, sizeof(memory));
-  smap* m = smap_make(&kwmap, mem, kwcount, MAPLF_2); // increase sizeof(memory)
+
+
+  static u8 membuf[PAGE_SIZE * 4] ATTR_ALIGNED(RMEM_ALLOC_ALIGN);
+  dlog("membuf %zu", sizeof(membuf));
+  rmemalloc_t* ma =
+    assertnotnull( rmem_allocator_create_buf(NULL, membuf, sizeof(membuf)) );
+
+  smap* m = smap_make(&kwmap, ma, kwcount, MAPLF_2);
   if UNLIKELY(m == NULL) {
-    #if DEBUG
-    panic("sizeof(memory) too small");
-    #endif
+    assertf(0, "sizeof(membuf) too small");
     return rerr_nomem;
   }
+
   m->hash0 = 0x89f025ba;
   uintptr* vp;
 
@@ -1431,8 +1443,9 @@ rerror parse_init() {
 
   #ifdef DEBUG
     // dlog("kwmap hash0 0x%lx", m->hash0);
-    void* p = rmem_alloc(mem, 1, 1);
-    if (p) dlog("kwmap uses only %zu B memory -- trim memory", (usize)(p - (void*)memory));
+    usize avail_bytes = rmem_avail(ma);
+    if (avail_bytes)
+      dlog("kwmap uses only %zu B memory -- trim 'memory'", avail_bytes);
   #endif
   print_keywords();
   return 0;

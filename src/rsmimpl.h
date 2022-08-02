@@ -100,6 +100,12 @@ typedef unsigned long       usize;
   #define NOINLINE
 #endif
 
+#if __has_attribute(aligned)
+  #define ATTR_ALIGNED(alignment) __attribute__((aligned(alignment)))
+#else
+  #define ATTR_ALIGNED(alignment)
+#endif
+
 #ifdef __wasm__
   #define WASM_EXPORT __attribute__((visibility("default")))
   #define WASM_IMPORT __attribute__((visibility("default")))
@@ -241,18 +247,27 @@ typedef unsigned long       usize;
 // If x is zero, returns max value of x (wraps.)
 #define IDIV_CEIL(x, divisor)  ( (__typeof__(x))1 + ( ((x) - 1) / (divisor) ) )
 
-// T ALIGN2<T>(T x, anyuint a)       rounds up x to nearest a (a must be a power of two)
-// T ALIGN2_FLOOR<T>(T x, anyuint a) rounds down x to nearest a
-// bool IS_ALIGN2(T x, anyuint a)    true if x is aligned to a
+// T ALIGN2<T>(T x, anyuint a) rounds up x to nearest a (a must be a power of two)
 #define ALIGN2(x,a) ({ \
   __typeof__(x) atmp__ = (__typeof__(x))(a) - 1; \
   ( (x) + atmp__ ) & ~atmp__; \
 })
+#define ALIGN2_X(x,a) ( \
+  ( (x) + ((__typeof__(x))(a) - 1) ) & ~((__typeof__(x))(a) - 1); \
+)
+
+// T ALIGN2_FLOOR<T>(T x, anyuint a) rounds down x to nearest a
 #define ALIGN2_FLOOR(x, a) ({ \
   __typeof__(x) atmp__ = (__typeof__(x))(a) - 1; \
   ( ((x) - (atmp__ - 1)) + atmp__ ) & ~atmp__; \
 })
-#define IS_ALIGN2(x, a)  ( ((x) & ((__typeof__(x))(a) - 1)) == 0 )
+#define ALIGN2_FLOOR_X(x, a) ( \
+  ( ((x) - (((__typeof__(x))(a) - 1) - 1)) + ((__typeof__(x))(a) - 1) ) & \
+  ~((__typeof__(x))(a) - 1); \
+)
+
+// bool IS_ALIGN2(T x, anyuint a) returns true if x is aligned to a
+#define IS_ALIGN2(x, a)  ( !((x) & ((__typeof__(x))(a) - 1)) )
 
 // T ALIGN_CEIL(T x, T a) rounds x up to nearest multiple of a.
 // e.g. ALIGN_CEIL(11, 5) => 15
@@ -313,8 +328,9 @@ typedef unsigned long       usize;
   ( (v) - (((v) >> 1) & (__typeof__(v))~(__typeof__(v))0/3) )
 
 
-// int rsm_ctz(ANYUINT x) returns the number of trailing 0-bits in x,
-// starting at the least significant bit position. If x is 0, the result is undefined.
+// int rsm_ctz(ANYUINT x) counts trailing zeroes in x,
+// starting at the least significant bit position.
+// If x is 0, the result is undefined.
 #define rsm_ctz(x) _Generic((x), \
   i8:    __builtin_ctz,   u8:    __builtin_ctz, \
   i16:   __builtin_ctz,   u16:   __builtin_ctz, \
@@ -322,7 +338,7 @@ typedef unsigned long       usize;
   isize: __builtin_ctzl,  usize: __builtin_ctzl, \
   i64:   __builtin_ctzll, u64:   __builtin_ctzll)(x)
 
-// int rsm_clz(ANYUINT x) returns the number of leading 0-bits in x,
+// int rsm_clz(ANYUINT x) counts leading zeroes in x,
 // starting at the most significant bit position.
 // If x is 0, the result is undefined.
 #define rsm_clz(x) ( \
@@ -700,7 +716,9 @@ void rsm_qsort(void* base, usize nmemb, usize size, rsm_qsort_cmp cmp, void* nul
 // --------------------------------------------------------------------------------------
 // internal utility functions, like a string buffer. Not namespaced. See util.c
 
-#define UTF8_SELF 0x80 // UTF-8 "self" byte constant
+#define PAGE_SIZE  RSM_PAGE_SIZE
+
+#define UTF8_SELF  0x80 // UTF-8 "self" byte constant
 
 // character classifiers
 #define isdigit(c)    ( ((u32)(c) - '0') < 10 )                 /* 0-9 */
@@ -718,17 +736,31 @@ void rsm_qsort(void* base, usize nmemb, usize size, rsm_qsort_cmp cmp, void* nul
 usize stru64(char buf[64], u64 v, u32 base);
 rerror parseu64(const char* src, usize srclen, int base, u64* result, u64 cutoff);
 
-void logbin(u32 v);
+void logbin32(u32 v);
+void logbin64(u64 v);
 
-rerror mmapfile(const char* filename, void** p_put, usize* len_out);
-void unmapfile(void* p, usize len);
-rerror read_stdin_data(rmem, usize maxlen, void** p_put, usize* len_out);
+rerror mmapfile(const char* filename, rmem_t* data_out);
+void unmapfile(rmem_t);
+rerror read_stdin_data(rmemalloc_t* ma, usize maxlen, rmem_t* data_out);
 rerror writefile(const char* filename, u32 mode, const void* data, usize size);
 
 rerror rerror_errno(int errnoval);
 
 noreturn void _panic(const char* file, int line, const char* fun, const char* fmt, ...)
   ATTR_FORMAT(printf, 4, 5);
+
+#define RMEM_SAFECHECK(region) \
+  safecheckf(RMEM_IS_VALID(region), \
+    "invalid memory region " RMEM_FMT, RMEM_FMT_ARGS(region))
+
+// rmem_scrubcheck is a memory-allocator debugging tool that checks if a memory region
+// is *probably* uninitialized or freed, by testing if all bytes at ptr is a
+// known "scrub" (aka "poison") byte, internal to the memory allocator.
+// Returns:
+//   "ok"      definitely not scrubbed
+//   "uninit"  possibly uninitialized memory (all )
+//   "freed"   possibly "use after free"
+const char* rmem_scrubcheck(void* ptr, usize size);
 
 usize mem_pagesize();
 void* nullable osvmem_alloc(usize nbytes);
@@ -760,15 +792,17 @@ struct rarray {
 #define rarray_push(T, a, m)               ((T*)_rarray_push((a),(m),sizeof(T)))
 #define rarray_remove(T, a, start, len)    _rarray_remove((a),sizeof(T),(start),(len))
 #define rarray_move(T, a, dst, start, end) _array_move(sizeof(T),(a)->v,(dst),(start),(end))
-#define rarray_free(T, a, m)   if ((a)->v)rmem_free((m),(a)->v,(usize)(a)->cap*sizeof(T))
 #define rarray_reserve(T, a, m, addl)      _rarray_reserve((a),(m),sizeof(T),(addl))
+#define rarray_free(T, a, ma) ( \
+  (a)->v ? rmem_free( (ma), RMEM((a)->v, (usize)(a)->cap * sizeof(T)) ) : ((void)0) \
+)
 
-bool rarray_grow(rarray* a, rmem, usize elemsize, u32 addl);
-bool _rarray_reserve(rarray* a, rmem, usize elemsize, u32 addl);
+bool rarray_grow(rarray* a, rmemalloc_t*, u32 elemsize, u32 addl);
+bool _rarray_reserve(rarray* a, rmemalloc_t*, u32 elemsize, u32 addl);
 void _rarray_remove(rarray* a, u32 elemsize, u32 start, u32 len);
 
-inline static void* nullable _rarray_push(rarray* a, rmem m, u32 elemsize) {
-  if (a->len == a->cap && UNLIKELY(!rarray_grow(a, m, (usize)elemsize, 1)))
+inline static void* nullable _rarray_push(rarray* a, rmemalloc_t* ma, u32 elemsize) {
+  if (a->len == a->cap && UNLIKELY(!rarray_grow(a, ma, elemsize, 1)))
     return NULL;
   return a->v + elemsize*(a->len++);
 }
@@ -844,13 +878,16 @@ struct smapent {
   uintptr              value;
 };
 struct smap {
-  u32      cap;  // capacity of entries
-  u32      len;  // number of items currently stored in the map (count)
-  u32      gcap; // growth watermark cap
-  maplf    lf;   // growth watermark load factor (shift value; 1|2|3|4)
-  hashcode hash0; // hash seed
-  smapent* entries;
-  rmem     mem;
+  u32          cap;  // capacity of entries
+  u32          len;  // number of items currently stored in the map (count)
+  u32          gcap; // growth watermark cap
+  maplf        lf;   // growth watermark load factor (shift value; 1|2|3|4)
+  hashcode     hash0; // hash seed
+  union {
+    smapent* entries;
+    rmem_t   entries_mem;
+  };
+  rmemalloc_t* memalloc;
 };
 enum maplf {
   MAPLF_1 = 1, // grow when 50% full; recommended for maps w/ balanced hit & miss lookups
@@ -862,7 +899,7 @@ enum maplf {
 // smap_make initializes a new map m.
 // hint can be 0 and provides a hint as to how many items will initially be stored.
 // Returns m on success, NULL on memory allocation failure or overflow from large hint.
-smap* nullable smap_make(smap* m, rmem, u32 hint, maplf);
+smap* nullable smap_make(smap* m, rmemalloc_t*, u32 hint, maplf);
 void smap_dispose(smap* m); // free m->entries. m is invalid; use smap_make to reuse
 void smap_clear(smap* m);   // removes all items. m remains valid
 
@@ -886,11 +923,11 @@ inline static const smapent* nullable smap_itstart(const smap* m) { return m->en
 bool smap_itnext(const smap* m, const smapent** ep);
 
 // smap_optimize tries to improve the key distribution of m by trying different
-// hash seeds. Returns the best smap_score or <0.0 if rmem_alloc(mem) failed,
+// hash seeds. Returns the best smap_score or <0.0 if rmem_alloc(ma) failed,
 // leaving m with at least as good key distribution as before the call.
 // mem is used to allocate temporary space for m's entries;
 // space needed is m->entries*sizeof(smapent). Applies smap_compact(m) before returning.
-double smap_optimize(smap* m, usize iterations, rmem mem);
+double smap_optimize(smap* m, usize iterations, rmemalloc_t* ma);
 
 // smap_cfmt prints C code for a constant static representation of m
 usize smap_cfmt(char* buf, usize bufcap, const smap* m, const char* name);
@@ -1014,7 +1051,7 @@ struct rrombuild {
   rerror(*filldata)(void* dst, void* userdata);
 };
 
-rerror rom_build(rrombuild* rb, rmem mem, rrom* rom);
+rerror rom_build(rrombuild* rb, rmemalloc_t* ma, rrom* rom);
 
 // ————————————————
 // bufslab
@@ -1045,9 +1082,9 @@ struct bufslab {
   u8    data[];
 };
 
-void* nullable bufslab_alloc(bufslabs* slabs, rmem mem, usize nbyte);
+void* nullable bufslab_alloc(bufslabs* slabs, rmemalloc_t*, usize nbyte);
 void bufslabs_reset(bufslabs* slabs); // set all slab->len=0 and set slabs->head=tail
-void bufslab_freerest(bufslab* s, rmem mem); // free all slabs after s
+void bufslab_freerest(bufslab* s, rmemalloc_t*); // free all slabs after s
 
 
 #endif // RSM_NO_ASM

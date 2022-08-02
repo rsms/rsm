@@ -13,6 +13,7 @@ static const char* outfile = NULL;
 static bool opt_run = false;
 static bool opt_print_asm = false;
 static bool opt_print_debug = false;
+static bool opt_newexec = false;
 static usize vm_ramsize = 1024*1024;
 
 #define errmsg(fmt, args...) fprintf(stderr, "%s: " fmt "\n", prog, ##args)
@@ -84,6 +85,7 @@ static void usage() {
     "  -r           Run the program (implied unless -o or -p are set)\n"
     "  -p           Print assembly on stdout\n"
     "  -d           Print timing and register state on stdout at end\n"
+    "  -X           Run new experimental execution engine\n"
     "  -R<N>=<val>  Initialize register R<N> to <val> (e.g. -R0=4, -R3=0xff)\n"
     "  -m <nbytes>  Set VM memory to <nbytes> (default: %zu)\n"
     "  -o <file>    Write compiled ROM to <file>\n"
@@ -109,11 +111,12 @@ static int parse_cli_opts(int argc, char*const* argv, u64* iregs) {
   extern char* optarg; // global state in libc... coolcoolcool
   extern int optind, optopt;
   int nerrs = 0;
-  for (int c; (c = getopt(argc, argv, ":hrpdR:o:m:")) != -1;) switch(c) {
+  for (int c; (c = getopt(argc, argv, ":hrpdXR:o:m:")) != -1;) switch(c) {
     case 'h': usage(); exit(0);
     case 'r': opt_run = true; break;
     case 'p': opt_print_asm = true; break;
     case 'd': opt_print_debug = true; break;
+    case 'X': opt_newexec = true; break;
     case 'R': nerrs += setreg(iregs, optarg); break;
     case 'o': outfile = optarg; break;
     case 'm': nerrs += parse_bytesize_opt(optopt, optarg, &vm_ramsize); break;
@@ -125,17 +128,20 @@ static int parse_cli_opts(int argc, char*const* argv, u64* iregs) {
   return optind;
 }
 
-static bool loadfile(rmem mem, const char* nullable infile, void** p, usize* size) {
+static bool loadfile(
+  rmemalloc_t* ma, const char* nullable infile, rmem_t* data_out)
+  // rmemalloc_t* ma, const char* nullable infile, void** p, usize* size)
+{
   if (infile) {
-    rerror err = rsm_loadfile(infile, p, size);
+    rerror err = rsm_loadfile(infile, data_out);
     if (err) {
       fprintf(stderr, "%s: %s\n", infile, rerror_str(err));
       return false;
     }
     return true;
   }
-  usize limit = 1024*1024; // 1MB
-  rerror err = read_stdin_data(mem, limit, p, size);
+  usize limit = 1024 * MiB;
+  rerror err = read_stdin_data(ma, limit, data_out);
   if (err == 0)
     return true;
   if (err == rerr_badfd) { // stdin is a tty
@@ -146,18 +152,16 @@ static bool loadfile(rmem mem, const char* nullable infile, void** p, usize* siz
   return false;
 }
 
-static void print_asm(rmem mem, const rinstr* iv, usize icount) {
-  const usize initcap = 4096;
-  char* buf = rmem_alloc(mem, initcap, 1);
-  if (!buf) panic("out of memory");
+static void print_asm(rmemalloc_t* ma, const rinstr* iv, usize icount) {
+  rmem_t m = rmem_must_alloc(ma, 4096);
   rfmtflag fl = isatty(1) ? RSM_FMT_COLOR : 0;
-  usize n = rsm_fmtprog(buf, initcap, iv, icount, fl);
-  if (n >= initcap) {
-    buf = rmem_resize(mem, buf, initcap, n + 1, 1);
-    if (!buf) panic("out of memory");
-    rsm_fmtprog(buf, n + 1, iv, icount, fl);
+  usize n = rsm_fmtprog(m.p, m.size, iv, icount, fl);
+  if (n >= m.size) {
+    rmem_must_resize(ma, &m, n + 1);
+    rsm_fmtprog(m.p, m.size, iv, icount, fl);
   }
-  fwrite(buf, n, 1, stdout); putc('\n', stdout);
+  fwrite(m.p, n, 1, stdout); putc('\n', stdout);
+  rmem_free(ma, m);
 }
 
 static void print_regstate(u64* iregs) {
@@ -194,16 +198,14 @@ static bool diaghandler(const rdiag* d, void* userdata) {
 }
 
 static bool compile(
-  rmem mem,
-  const char* nullable srcfile, void* srcdata, usize srclen,
-  rrom* rom)
+  rmemalloc_t* ma, const char* nullable srcfile, rmem_t srcdata, rrom* rom)
 {
   rasm a = {
-    .mem = mem,
+    .memalloc = ma,
     .diaghandler = diaghandler,
     .srcname = srcfile ? srcfile : "stdin",
-    .srcdata = srcdata,
-    .srclen = srclen,
+    .srcdata = srcdata.p,
+    .srclen = srcdata.size,
   };
 
   rnode* mod = rasm_parse(&a);
@@ -215,7 +217,7 @@ static bool compile(
   if (a.errcount) // note: errors have been reported by diaghandler
     return false;
 
-  rerror err = rasm_gen(&a, mod, mem, rom);
+  rerror err = rasm_gen(&a, mod, ma, rom);
   if (err) {
     errmsg("(rasm_gen) %s", rerror_str(err));
     return false;
@@ -231,7 +233,7 @@ static bool compile(
   }
 
   if (opt_print_asm)
-    print_asm(mem, rom->code, rom->codelen);
+    print_asm(ma, rom->code, rom->codelen);
   return true;
 }
 
@@ -250,63 +252,67 @@ int main(int argc, char*const* argv) {
       errmsg("ignoring %d extra command-line arguments", argc-1 - argi);
   }
 
-  // memory allocator for compiler and for buffering stdin
-  rmem mem = rmem_mkvmalloc(128 * 1024 * 1024); // 128 MiB
-  if (mem.state == NULL) {
-    errmsg("failed to allocate virtual memory");
+  // create a memory manager and a memory allocator
+  usize total_mem_size = 1 * GiB; // total memory from host
+  usize memalloc_size = 64 * MiB; // memory to use for allocator
+  // rest is used for runtime virtual memory
+  rmm_t* mm = assertnotnull( rmm_create_host_vmmap(total_mem_size) );
+  rmemalloc_t* ma = rmem_allocator_create(mm, memalloc_size);
+  if (!ma) {
+    errmsg("failed to create memory allocator");
     return 1;
   }
 
   // load input file or read stdin
-  void* indata; usize insize;
-  if (!loadfile(mem, infile, &indata, &insize))
+  rmem_t indata;
+  if (!loadfile(ma, infile, &indata))
     return 1;
 
   // input: load ROM or compile source
   rrom rom = {0};
-  if (insize > 4 && *(u32*)indata == RSM_ROM_MAGIC) {
-    rom.img = indata;
-    rom.imgsize = insize;
-  } else if (!compile(mem, infile, indata, insize, &rom)) {
+  if (indata.size > 4 && *(u32*)indata.p == RSM_ROM_MAGIC) {
+    rom.img = indata.p;
+    rom.imgsize = indata.size;
+  } else if (!compile(ma, infile, indata, &rom)) {
     return 1;
   }
 
   if (!opt_run)
     return 0;
 
-  // —————————————— vm v2 ——————————————
-
-  dlog("mem_pagesize() %zu", mem_pagesize());
-
-  rvm* vm2 = safechecknotnull( rvm_create(mem) );
-  rerror err2 = rvm_main(vm2, &rom);
-  rvm_dispose(vm2);
-  if (err2) {
-    errmsg("rvm_main: %s", rerror_str(err2));
-    return 1;
-  }
-
-  // —————————————— vm v1 ——————————————
-
-  // allocate memory and execute program
-  void* rambase = osvmem_alloc(vm_ramsize);
-  if UNLIKELY(rambase == NULL) {
-    errmsg("failed to allocate %zu B of memory", vm_ramsize);
-    return 1;
-  }
-
   u64 time = nanotime();
-  rvm vm = { .rambase=rambase, .ramsize=vm_ramsize };
-  rerror err = rsm_vmexec(&vm, &rom);
-  time = nanotime() - time;
-  if (err) {
-    errmsg("vmexec: %s", err == rerr_nomem ? "not enough memory" : rerror_str(err));
-    return 1;
-  }
+
+  // —————————————— new execution engine ——————————————
+  if (opt_newexec) {
+
+    rvm* vm2 = safechecknotnull( rvm_create(ma) );
+    rerror err2 = rvm_main(vm2, &rom);
+    rvm_dispose(vm2);
+    if (err2) {
+      errmsg("rvm_main: %s", rerror_str(err2));
+      return 1;
+    }
+
+  // —————————————— old execution engine ——————————————
+  } else {
+    // allocate memory and execute program
+    void* rambase = osvmem_alloc(vm_ramsize);
+    if UNLIKELY(rambase == NULL) {
+      errmsg("failed to allocate %zu B of memory", vm_ramsize);
+      return 1;
+    }
+
+    rvm vm = { .rambase=rambase, .ramsize=vm_ramsize };
+    rerror err = rsm_vmexec(&vm, &rom);
+    if (err) {
+      errmsg("vmexec: %s", err == rerr_nomem ? "not enough memory" : rerror_str(err));
+      return 1;
+    }
+  }// ——————————————
 
   if (opt_print_debug) {
     char duration[25];
-    fmtduration(duration, time);
+    fmtduration(duration, nanotime() - time);
     log("Execution finished in %s", duration);
     print_regstate(iregs);
   }

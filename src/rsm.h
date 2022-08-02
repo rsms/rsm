@@ -24,6 +24,13 @@
   typedef unsigned long long u64;
   typedef signed long        isize;
   typedef unsigned long      usize;
+  #ifdef __INTPTR_TYPE__
+    typedef __INTPTR_TYPE__   intptr;
+    typedef __UINTPTR_TYPE__  uintptr;
+  #else
+    typedef signed long       intptr;
+    typedef unsigned long     uintptr;
+  #endif
 #endif
 #ifndef __has_attribute
   #define __has_attribute(x)  0
@@ -285,6 +292,9 @@ _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
   #define RSM_ROM_MAGIC 0x004d5352 // "RSM\0"
 #endif
 
+// RSM_PAGE_SIZE is the size in bytes of one RSM virtual memory page
+#define RSM_PAGE_SIZE 4096u
+
 typedef u8 rop; // opcode
 enum rop {
   #define _(name, ...) rop_##name,
@@ -317,12 +327,146 @@ enum rerror {
   rerr_overflow      = -14, // value too large
 };
 
-// rmem: memory allocator
+//———————————————————————————————————————————————————————————————————————————————————————
+// rmem_t describes a memory region
 typedef struct {
-  void* nullable (*a)(
-    void* state, void* nullable p, usize oldsize, usize newsize, usize newalignment);
-  void* state;
-} rmem;
+  void* nullable p;    // start address
+  usize          size; // size in bytes
+} rmem_t;
+
+#define RMEM(p, size)  ((rmem_t){ p, size })
+
+// RMEM_FMT is used for printf formatting of a rmem_t
+#define RMEM_FMT              "{%p … %p %zu}"
+#define RMEM_FMT_ARGS(region) (region).p, ((region).p+(region).size), (region).size
+
+// RMEM_IS_VALID returns true if region has a non-NULL address and a non-zero size
+#define RMEM_IS_VALID(region)     (!RMEM_IS_NULL(region) & !RMEM_IS_OVERFLOW(region))
+#define RMEM_IS_NULL(region)      (!(uintptr)(region).p | !(uintptr)(region).size)
+#define RMEM_IS_OVERFLOW(region) \
+  (((uintptr)(region).p + (uintptr)(region).size) < (uintptr)(region).p)
+
+// rmem_fill fills memory with a byte value
+inline static void rmem_fill(rmem_t m, u8 byte) { __builtin_memset(m.p, byte, m.size); }
+
+// rmem_zerofill fills memory with zeroes
+inline static void rmem_zerofill(rmem_t m) { __builtin_memset(m.p, 0, m.size); }
+
+//———————————————————————————————————————————————————————————————————————————————————————
+// rmm_t is a Memory Manager.
+// The memory manager owns and manages all of the host memory.
+// Allocations are limited to pages (RSM_PAGE_SIZE).
+// rmm_allocpages can only allocate a power-of-two number of pages per call.
+typedef struct rmm_ rmm_t;
+
+#define RMM_MIN_SIZE 4096
+
+rmm_t* nullable rmm_create(void* memp, usize memsize);
+rmm_t* nullable rmm_create_host_vmmap(usize memsize);
+void rmm_dispose(rmm_t*);
+bool rmm_dispose_host_vmmap(rmm_t* mm);
+void* nullable rmm_allocpages(rmm_t*, usize npages);
+void rmm_freepages(rmm_t* restrict mm, void* restrict ptr);
+uintptr rmm_startaddr(const rmm_t*);
+usize rmm_cap(const rmm_t* mm); // total capacity (number of pages)
+
+// rmm_avail_total returns the total number of pages available to allocate
+usize rmm_avail_total(rmm_t*);
+
+// rmm_avail_maxregion returns the number of pages of the largest, free region
+// of contiguous pages.
+usize rmm_avail_maxregion(rmm_t*);
+
+// rmm_allocpages_min performs a best-effort allocation; it attempts to allocate
+// req_npages and if there's no contiguous region of that many pages, it tries to
+// allocate one order less (req_npages << 1).
+// min_npages is the smallest number of pages it will attempt to allocate.
+// On success, req_npages is updated with the actual number of pages allocated.
+void* nullable rmm_allocpages_min(rmm_t* mm, usize* req_npages, usize min_npages);
+
+//———————————————————————————————————————————————————————————————————————————————————————
+// rmemalloc_t is a generic memory allocator
+typedef struct rmemalloc_ rmemalloc_t;
+
+// Alignment for an allocator, used with rmem_allocator_create_buf.
+// RMEM_ALLOC_ALIGN_MIN is the minimum alignment required and may lead to disabling
+// of slab sub-allocators. RMEM_ALLOC_ALIGN is the ideal (but larger) alignment that
+// guarantees enabling of slab sub-allocators.
+#define RMEM_ALLOC_ALIGN     (sizeof(void*)*8)
+#define RMEM_ALLOC_ALIGN_MIN sizeof(void*)
+
+// rmem_allocator_create creates a new allocator that sources memory from mm.
+// initsize is the desired initial memory and can be zero.
+// initsize is rounded up to nearest min(CHUNK_SIZE, pow2(initsize)) size
+// where CHUNK_SIZE = sizeof(void*) * 8. Since backing memory has alignment
+// requirements, the actual memory available may be different than the requested
+// initsize; use rmem_cap to get the actual capacity.
+rmemalloc_t* nullable rmem_allocator_create(rmm_t* mm, usize initsize);
+
+// rmem_allocator_create_buf creates a new allocator in memory at buf.
+// If no memory manager is provided (mm is NULL), the allocator will
+// not have the ability to grow.
+// Returns NULL if (after alignment) bufsize is too small.
+rmemalloc_t* nullable rmem_allocator_create_buf(
+  rmm_t* nullable mm, void* buf, usize bufsize);
+
+// rmem_allocator_free disposes of an allocator.
+// The allocator is invalid after this call.
+void rmem_allocator_free(rmemalloc_t*);
+
+// rmem_alloc_aligned allocates size bytes with specific address alignment.
+// The returned address will have a _minimum_ alignment of 'alignment'.
+// Allocations less than CHUNK_SIZE are rounded up and aligned to nearest upper pow2.
+// Eg. size=24 is rounded up to 32 and has a minimum of 32B alignment.
+// Allocations >= CHUNK_SIZE are sized in CHUNK_SIZE steps with a minimum alignment
+// of CHUNK_SIZE. Eg. size=130,alignment=16 returns 256 bytes with CHUNK_SIZE alignment.
+// Returns .start==NULL if the allocator is out of memory.
+rmem_t rmem_alloc_aligned(rmemalloc_t*, usize size, usize alignment);
+
+// rmem_alloc allocates size bytes with sizeof(void*) alignment.
+// Returns .start==NULL if the allocator is out of memory.
+inline static rmem_t rmem_alloc(rmemalloc_t* a, usize size) {
+  return rmem_alloc_aligned(a, size, 1);
+}
+
+// rmem_alloc_array allocates an array of elements, checking for overflow
+rmem_t rmem_alloc_array(rmemalloc_t*, usize count, usize elemsize, usize alignment);
+
+// rmem_alloc_arrayt allocates an array of type T elements, checking for overflow
+// rmem_t rmem_alloc_arrayt(rmemalloc_t* m, usize count, TYPE T)
+#define rmem_alloc_arrayt(a, count, T) \
+  rmem_alloc_array((a), (count), sizeof(T), _Alignof(T))
+
+// rmem_free frees a memory region allocated by the same allocator
+void rmem_free(rmemalloc_t*, rmem_t);
+
+// rmem_resize grows or shrinks the size of an allocated memory region to newsize.
+// If resizing fails, false is returned and the region is unchanged; it is still valid.
+// Address alignment of new address is min(pow2(newsize),oldalignment).
+bool rmem_resize(rmemalloc_t*, rmem_t*, usize newsize);
+
+// rmem_must_* works like rmem_* but panics on failure
+rmem_t rmem_must_alloc(rmemalloc_t*, usize size);
+void rmem_must_resize(rmemalloc_t*, rmem_t*, usize newsize);
+
+// rmem_alloc_size returns the effective size of an allocation of that size.
+// E.g. rmem_alloc_size(size) == rmem_alloc(a, size).size
+usize rmem_alloc_size(usize);
+
+// rmem_avail returns the total number of bytes available to allocate
+usize rmem_avail(rmemalloc_t*);
+
+// rmem_cap returns the total number of bytes managed by the allocator
+usize rmem_cap(rmemalloc_t*);
+
+// OLD memory allocation interface
+// static void* nullable rmem_alloc(rmem m, usize size, usize alignment);
+// static void* nullable rmem_resize(
+//   rmem m, void* nullable p, usize oldsize, usize newsize, usize newalignment);
+// static void rmem_free(rmem m, void* p, usize size);
+
+
+//——————————————————————————————————————————————————————————————————————————————————————
 
 // rromimg: ROM image layout, a portable binary blob
 typedef struct {
@@ -336,6 +480,7 @@ typedef struct {
   // ROM image
   rromimg* img;
   usize    imgsize; // size of img, in bytes
+  rmem_t   imgmem;  // img memory region (for use with rmem_free)
 
   // fields populated on demand by rsm_loadrom
   const rinstr* code;      // vm instructions array (pointer into img)
@@ -369,7 +514,7 @@ typedef struct {
 RSMAPI bool rsm_init();
 
 // rvm_create creates a new VM instance
-rvm* nullable rvm_create(rmem mem);
+rvm* nullable rvm_create(rmemalloc_t*);
 
 // rvm_dispose frees a VM instance
 void rvm_dispose(rvm* vm);
@@ -399,38 +544,13 @@ RSMAPI usize rsm_fmtprog(
 RSMAPI usize rsm_fmtinstr(
   char* buf, usize bufcap, rinstr, u32* nullable pcaddp, rfmtflag);
 
-// RMEM_MK_MIN is the minimum size for rmem_mk*alloc functions
-#define RMEM_MK_MIN (sizeof(void*)*4)
-
-// rmem_mkbufalloc creates an allocator that uses size-RMEM_MK_MIN bytes from buf.
-// The address buf and size may be adjusted to pointer-size alignment.
-RSMAPI rmem rmem_mkbufalloc(void* buf, usize size);
-
-// rmem_initbufalloc initializes an allocator that uses size bytes from buf in astate.
-// The address buf and size may be adjusted to pointer-size alignment.
-RSMAPI rmem rmem_initbufalloc(void* astate[4], void* buf, usize size);
-
-// rmem_mkvmalloc creates an allocator backed by a slab of system-managed virtual memory.
-// If size=0, a very large allocation is created (~4GB).
-// On failure, the returned allocator is {NULL,NULL}.
-RSMAPI rmem rmem_mkvmalloc(usize size);
-
-// rmem_freealloc frees an allocator created with a rmem_mk*alloc function
-RSMAPI void rmem_freealloc(rmem m);
-
-// memory allocation interface
-static void* nullable rmem_alloc(rmem m, usize size, usize alignment);
-static void* nullable rmem_resize(
-  rmem m, void* nullable p, usize oldsize, usize newsize, usize newalignment);
-static void rmem_free(rmem m, void* p, usize size);
-
 // enum related functions
 RSMAPI const char* rop_name(rop);      // name of an opcode
 RSMAPI const char* rerror_str(rerror); // short description of an error
 
 // rsm_loadfile loads a file into memory
-rerror rsm_loadfile(const char* filename, void** p, usize* size);
-void rsm_unloadfile(void* p, usize size); // unload file loaded with rsm_loadfile
+rerror rsm_loadfile(const char* filename, rmem_t* data_out);
+void rsm_unloadfile(rmem_t); // unload file loaded with rsm_loadfile
 
 
 // --------------------------------------------------------------------------------------
@@ -520,7 +640,7 @@ struct rdiag {
 };
 
 struct rasm {
-  rmem           mem;         // memory allocator
+  rmemalloc_t*   memalloc;    // memory allocator
   const char*    srcdata;     // input source bytes
   usize          srclen;      // length of srcdata
   const char*    srcname;     // symbolic name of source (e.g. filename)
@@ -557,8 +677,9 @@ struct rnode {
 RSMAPI rnode* nullable rasm_parse(rasm* a);
 
 // rasm_gen builds VM code from AST.
-// Uses a->mem for temporary storage, allocates data for rom with rommem. a can be reused.
-RSMAPI rerror rasm_gen(rasm* a, rnode* module, rmem rommem, rrom* rom);
+// Uses a->mem for temporary storage, allocates data for rom with rommem.
+// a can be reused.
+RSMAPI rerror rasm_gen(rasm* a, rnode* module, rmemalloc_t* rommem, rrom* rom);
 
 // rasm_dispose frees resources of a
 RSMAPI void rasm_dispose(rasm* a);
@@ -567,26 +688,5 @@ RSMAPI void rasm_dispose(rasm* a);
 RSMAPI void rasm_free_rnode(rasm* a, rnode* n);
 
 #endif // RSM_NO_ASM
-// --------------------------------------------------------------------------------------
-// inline implementations
-
-RSM_ATTR_MALLOC RSM_WARN_UNUSED_RESULT
-inline static void* nullable rmem_alloc(rmem m, usize size, usize alignment) {
-  return m.a(m.state, NULL, 0, size, alignment);
-}
-
-RSM_ATTR_MALLOC RSM_WARN_UNUSED_RESULT
-inline static void* nullable rmem_resize(
-  rmem m, void* nullable p, usize oldsize, usize newsize, usize alignment)
-{
-  return m.a(m.state, p, oldsize, newsize, alignment);
-}
-
-inline static void rmem_free(rmem m, void* p, usize size) {
-  #if __has_attribute(unused)
-  __attribute__((unused))
-  #endif
-  void* _ = m.a(m.state, p, size, 0, 0);
-}
 
 RSM_ASSUME_NONNULL_END

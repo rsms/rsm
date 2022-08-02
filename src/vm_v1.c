@@ -21,9 +21,9 @@ static_assert(U64_MAX/M_SEG_COUNT > M_SEG_SIZE, "too many segments / M_SEG_SIZE 
 
 // vmstate: internal vm state
 typedef struct {
-  rvm   pub;   // public API
-  rmem  mem;   // memory allocator
-  usize inlen; // number of instructions at inv
+  rvm          pub;      // public API
+  rmemalloc_t* memalloc; // memory allocator
+  usize        inlen;    // number of instructions at inv
   union { usize datasize, stacktop; };  // aka
   union { usize heapbase, stackbase; }; // aka
   // memory segments

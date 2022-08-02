@@ -168,11 +168,11 @@ struct P {
 // };
 
 struct S {
-  rvm  pub;       // public API
-  rmem mem;       // memory allocator
-  M    m0;        // main M (bound to the OS thread which rvm_main is called on)
-  T*   t0;        // main task on m0
-  u32  maxmcount; // limit number of M's created (ie. OS thread limit)
+  rvm          pub;       // public API
+  rmemalloc_t* memalloc;  // memory allocator
+  M            m0;        // main M (bound to the OS thread which rvm_main is called on)
+  T*           t0;        // main task on m0
+  u32          maxmcount; // limit number of M's created (ie. OS thread limit)
 
   _Atomic(u64) tidgen; // T.id generator
   _Atomic(u32) midgen; // M.id generator
@@ -199,8 +199,8 @@ struct S {
   // } vmem;
 };
 
-// stackbase == address of T*
-#define TASK_STACKBASE(t) ((void*)(t))
+// stackbase for a task
+#define TASK_STACKBASE(t) ((void*)ALIGN2_FLOOR((uintptr)(t),STK_ALIGN))
 
 
 // t_get() and _g_t is thread-local storage of the current task on current OS thread
@@ -684,7 +684,7 @@ static inline void m_release(M* m) { m->locks--; }
 
 // static void t_free(T* task) {
 //   usize memsize = (usize)(((uintptr)task + (uintptr)sizeof(T)) - task->stacktop);
-//   rmem_free(task->s->mem, (void*)task->stacktop, memsize);
+//   rmem_free(task->s->memalloc, (void*)task->stacktop, memsize);
 // }
 
 
@@ -835,14 +835,13 @@ static rerror s_allt_add(S* s, T* t) {
   mtx_lock(&s->allt.lock);
 
   if (s->allt.len == s->allt.cap) {
-    s->allt.cap = s->allt.cap + 64;
-    s->allt.ptr = rmem_resize(
-      s->mem, s->allt.ptr, s->allt.len, s->allt.cap, _Alignof(void*));
-    if UNLIKELY(s->allt.ptr == NULL) {
+    rmem_t m = { s->allt.ptr, (usize)s->allt.cap * sizeof(void*) };
+    if UNLIKELY(!rmem_resize(s->memalloc, &m, (s->allt.cap + 64) * sizeof(void*))) {
       mtx_unlock(&s->allt.lock);
       return rerr_nomem;
     }
-    AtomicStore(&s->allt.ptr, s->allt.ptr, memory_order_release);
+    s->allt.cap = m.size / sizeof(void*);
+    AtomicStore(&s->allt.ptr, m.p, memory_order_release);
   }
 
   trace("set s.allt[%u] = T%llu", s->allt.len, t->id);
@@ -895,27 +894,24 @@ static T* nullable s_alloctask(S* s, usize stacksize) {
 
   usize alignment = MAX(_Alignof(T), STK_ALIGN);
   stacksize = ALIGN2(stacksize, alignment);
-  usize memsize = stacksize + sizeof(T);
 
-  void* stacktop = rmem_alloc(s->mem, memsize, alignment);
-  if UNLIKELY(!stacktop)
+  rmem_t stacktop = rmem_alloc_aligned(s->memalloc, stacksize + sizeof(T), alignment);
+  if UNLIKELY(!stacktop.p)
     return NULL;
-  memset(stacktop, 0, memsize);
-  assertf(IS_ALIGN2((uintptr)stacktop, (uintptr)alignment), "bug in rmem_alloc impl");
+  memset(stacktop.p, 0, stacktop.size);
+  assertf(IS_ALIGN2((uintptr)stacktop.p, (uintptr)alignment), "bug in rmem_alloc");
 
-  void* stackbase = stacktop + stacksize;
-
-  T* t = (T*)stackbase;
+  T* t = (T*)((uintptr)stacktop.p + stacktop.size - sizeof(T));
   t->s = s;
-  t->stacktop = (uintptr)stacktop;
-  t->sp = stackbase;
+  t->stacktop = (uintptr)stacktop.p;
+  t->sp = TASK_STACKBASE(t);
 
   // initialize tctx
-  tctx* ctx = (tctx*)(stackbase - sizeof(tctx));
+  tctx* ctx = (tctx*)(t->sp - sizeof(tctx));
   ctx->iregs[RSM_MAX_REG - RSM_NTMPREGS - 1] = (u64)(uintptr)t; // CTX
 
   // dlog("s_alloctask stack %p … %p (%lu B)",
-  //   stacktop, stackbase, (usize)((uintptr)stackbase - (uintptr)stacktop));
+  //   stacktop.p, t->sp, (usize)((uintptr)t->sp - (uintptr)stacktop.p));
 
   return t;
 }
@@ -1093,7 +1089,8 @@ static rerror s_init(S* s) {
   s->nprocs = nprocs;
   trace("s.nprocs=%u", nprocs);
   for (u32 pid = 0; pid < nprocs; pid++) {
-    P* p = rmem_alloc(s->mem, sizeof(P), _Alignof(P));
+    rmem_t mem = rmem_alloc_aligned(s->memalloc, sizeof(P), _Alignof(P));
+    P* p = mem.p;
     if (!p) // TODO: free other P's we allocated
       return rerr_nomem;
     memset(p, 0, sizeof(P));
@@ -1139,29 +1136,29 @@ rerror rvm_main(rvm* vm, rrom* rom) {
 }
 
 
-rvm* nullable rvm_create(rmem mem) {
-  S* s = rmem_alloc(mem, sizeof(S), _Alignof(S));
+rvm* nullable rvm_create(rmemalloc_t* ma) {
+  S* s = rmem_alloc_aligned(ma, sizeof(S), _Alignof(S)).p;
   if (!s)
     return NULL;
   memset(s, 0, sizeof(S));
 
   // allocate heap
   // TODO: vmem
-  s->heapsize = mem_pagesize() * 1024; // 4MB @ 4k page size
-  s->heapbase = rmem_alloc(mem, s->heapsize, sizeof(u64));
-  if UNLIKELY(!s->heapbase) {
-    rmem_free(mem, s, sizeof(S));
+  rmem_t heapmem = rmem_alloc(ma, 1024 * PAGE_SIZE); // 4MB @ 4k page size
+  if UNLIKELY(!heapmem.p) {
+    rmem_free(ma, RMEM(s, sizeof(S)));
     return NULL;
   }
-
-  s->mem = mem;
+  s->heapbase = heapmem.p;
+  s->heapsize = heapmem.size;
+  s->memalloc = ma;
   return (rvm*)s;
 }
 
 
 void rvm_dispose(rvm* vm) {
   S* s = (S*)vm;
-  rmem_free(s->mem, s->heapbase, s->heapsize);
-  rmem_free(s->mem, s, sizeof(S));
+  rmem_free(s->memalloc, RMEM(s->heapbase, s->heapsize));
+  rmem_free(s->memalloc, RMEM(s, sizeof(S)));
 }
 

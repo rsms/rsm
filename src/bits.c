@@ -24,8 +24,33 @@ static const u8 kBitsetMaskFirst[8] = { 0xFF, 0xFE, 0xFC, 0xF8, 0xF0, 0xE0, 0xC0
 static const u8 kBitsetMaskLast[8] = { 0x00, 0x1, 0x3, 0x7, 0xF, 0x1F, 0x3F, 0x7F };
 
 
+#ifdef BITS_TRACE
+  static const char* debug_fmt_bits(const void* bits, usize len) {
+    static char bufs[2][128];
+    static int nbuf = 0;
+    char* buf = bufs[nbuf++ % 2];
+    assert(len <= sizeof(bufs[0]) - 1);
+    usize i = 0;
+    for (; i < len; i++)
+      buf[i] = '0' + bit_get(bits, i);
+    buf[i] = 0;
+    return buf;
+  }
+#endif
+
+
 void bits_set_range(u8* bits, usize start, usize len, bool on) {
   assert(len > 0);
+
+  #if 0
+  if (on) {
+    for (usize end = start + len; start < end; start++)
+      bit_set(bits, start);
+  } else {
+    for (usize end = start + len; start < end; start++)
+      bit_clear(bits, start);
+  }
+  #else
 
   u8* first = &bits[start / 8];
   u8* last = &bits[(start + len) / 8];
@@ -47,6 +72,7 @@ void bits_set_range(u8* bits, usize start, usize len, bool on) {
 
   // set all bytes in between
   memset(first, 0xFF * (u8)on, last - first);
+  #endif
 }
 
 
@@ -77,7 +103,7 @@ usize bitset_find_unset_range(
   assert(maxlen >= minlen);
 
   trace("start         %4zu", *startp);
-  trace("min-maxlen    %4zu–%4zu", minlen, maxlen);
+  trace("min-maxlen    %4zu–%zu", minlen, maxlen);
   trace("stride        %4zu", stride);
 
   // We'll work at a register-sized granule ("bucket") over the bitset
@@ -93,8 +119,8 @@ usize bitset_find_unset_range(
   trace("start_bucket  %4zu (startp %zu)", start_bucket, *startp);
 
   // bit index to start at
-  u8 start_bit = (u8)(*startp % bucket_bits);
-  trace("start_bit     %4u", start_bit);
+  usize start_bit = *startp % bucket_bits;
+  trace("start_bit     %4zu", start_bit);
 
   // bitwise stride
   usize stride2 = stride % bucket_bits; // remainder after "removing" bucket_stride
@@ -129,7 +155,7 @@ usize bitset_find_unset_range(
       freelen += bucket_bits - start_bit;
       trace("   freelen %zu", freelen);
       if (freelen >= maxlen) {
-        trace("   -> %zu", maxlen);
+        trace("-> %zu…%zu (%zu = maxlen)", *startp, *startp + maxlen, maxlen);
         return maxlen;
       }
       start_bit = 0;
@@ -139,42 +165,68 @@ usize bitset_find_unset_range(
 
     // else: bucket has some free space; scan its bits
     trace("** buckets[%zu] = %zx  PARTIAL", bucket, buckets[bucket]);
-    usize bucket_val = buckets[bucket];
-    u8 nbits = start_bit; // number of bits we've looked at
-    u32 tz = 0; // number of trailing zeroes
-    bucket_val >>= nbits;
-    start_bit = 0;
 
-    // visit each bit
+    usize bucket_val = buckets[bucket];
+    usize nbits = start_bit; // number of bits we've looked at
+    bucket_val >>= nbits;    // remove bits we've looked at from bucket_val
+
     while (nbits < bucket_bits) {
-      trace("  nbits %u", nbits);
+      trace("  nbits %zu, freelen %zu, bucket_val:\n          %s",
+        nbits, freelen, debug_fmt_bits(&bucket_val, sizeof(bucket_val)*8 - nbits));
+
+      if (freelen == 0) {
+        usize start = (bucket * bucket_bits) + nbits;
+        usize start_aligned = ALIGN_CEIL(start, stride);
+        nbits += start_aligned - start;
+        *startp = start_aligned;
+        trace("    set start %zu", *startp);
+        assertf(*startp == ALIGN_CEIL(*startp, stride), "%zu != %zu",
+          *startp, ALIGN_CEIL(*startp, stride));
+      }
+
       if (bucket_val == 0) {
         // rest of bucket is free
         trace("    bucket_val = 0");
-        if (freelen == 0)
-          *startp = ALIGN_CEIL(bucket * bucket_bits + nbits, stride);
         freelen += bucket_bits - nbits;
-        nbits = bucket_bits;
-      } else {
-        tz = rsm_ctz(bucket_val);
-        bucket_val >>= tz;
-
-        if (freelen == 0)
-          *startp = ALIGN_CEIL(bucket * bucket_bits + nbits, stride);
-        freelen += tz;
-        nbits += tz;
-
-        if (freelen >= minlen)
-          goto found;
-
-        // Deleting trailing ones.
-        u32 trailing_ones = rsm_ctz(~bucket_val);
-        bucket_val >>= trailing_ones;
-        nbits += trailing_ones;
-        freelen = 0;
+        nbits = bucket_bits; // end the while loop
+        continue;
       }
+
+      // count trailing zeroes (i.e. "free bits")
+      //   e.g. bucket_val = 0b11000
+      //   rsm_ctz(bucket_val) = 3
+      //   bucket_val >> 3 = 0b11
+      u32 trailing_zeroes = rsm_ctz(bucket_val);
+      u32 tzrem = trailing_zeroes % stride;
+      trace("    trailing_zeroes %u (%u + tzrem %u)",
+        trailing_zeroes, trailing_zeroes - tzrem, tzrem);
+      trailing_zeroes -= tzrem;
+      bucket_val >>= trailing_zeroes;
+      freelen += trailing_zeroes;
+      nbits += trailing_zeroes;
+
+      if (freelen >= minlen)
+        goto found;
+
+      // if stride caused us to not count all trailing zeroes,
+      // skip the ones we didn't skip already now, before skipping trailing ones.
+      bucket_val >>= tzrem;
+
+      // Skip trailing ones and reset freelen
+      //   e.g. bucket_val = 0b110000111
+      //   rsm_ctz(bucket_val) = 3
+      //   bucket_val >> 3 = 0b110000
+      u32 trailing_ones = rsm_ctz(~bucket_val);
+      u32 nbits_remaining = (u32)sizeof(bucket_val)*8 - nbits;
+      trailing_ones = ALIGN_CEIL(trailing_ones, MIN(stride, nbits_remaining - 1));
+      bucket_val >>= trailing_ones;
+      nbits += trailing_ones;
+      freelen = 0;
     }
 
+    // The partial bucket did not have enough unset bits.
+    // Loop.
+    start_bit = 0;
     bucket = ALIGN_CEIL(bucket + 1, bucket_stride);
   }
 
@@ -201,8 +253,8 @@ usize bitset_find_unset_range(
   // no free range found that satisfies freelen >= minlen
   freelen = 0;
 found:
-  trace("-> %zu (= MIN(freelen(%zu), maxlen(%zu)))",
-    MIN(freelen, maxlen), freelen, maxlen);
+  trace("-> %zu…%zu (%zu = MIN(freelen(%zu), maxlen(%zu)))",
+    *startp, *startp + MIN(freelen, maxlen), MIN(freelen, maxlen), freelen, maxlen);
   return MIN(freelen, maxlen);
 }
 

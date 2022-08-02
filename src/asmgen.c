@@ -39,15 +39,7 @@ struct gnamed {
   NAMED_HEAD
 };
 
-// head of instruction-block structs
-struct gbhead {
-  #define BLOCK_HEAD \
-    NAMED_HEAD        \
-    usize i; /* first instruction = iv[starti] */
-  BLOCK_HEAD
-};
-
-struct gdata {
+struct gdata { // base: gnamed
   NAMED_HEAD
   u32                  align; // byte alignment (1, 2, 4, 8, 16 ...)
   u64                  size;  // length of data in bytes
@@ -57,11 +49,24 @@ struct gdata {
   rnode*               origin;
 };
 
-struct gfun {
+// head of instruction-block structs
+struct gbhead { // base: gnamed
+  #define BLOCK_HEAD \
+    NAMED_HEAD        \
+    usize i; /* first instruction = iv[starti] */
+  BLOCK_HEAD
+};
+
+struct gfun { // base: gbhead
   BLOCK_HEAD
   rarray blocks; // gblock[]
   u32    fi;     // function table index (value that fits in Au)
   rarray ulv;    // gref[]; pending undefined references (temporary)
+};
+
+struct gblock { // base: gbhead
+  BLOCK_HEAD
+  rsrcpos pos;
 };
 
 #define SLAB_HEAD(TYPE) \
@@ -101,11 +106,6 @@ struct gstate {
   gfun* nullable fn; // current function
 };
 
-struct gblock {
-  BLOCK_HEAD
-  rsrcpos pos;
-};
-
 struct gref {
   u32      i;     // referrer's iv offset
   rnode*   n;     // referrer
@@ -130,26 +130,26 @@ static bool check_alloc(gstate* g, void* nullable p) {
 }
 
 #define GARRAY_PUSH_OR_RET(T, arrayp, ERRRET...) ({ \
-  T* vp__ = rarray_push(T, (arrayp), g->a->mem);    \
-  if (check_alloc(g, vp__)) return ERRRET;          \
+  T* vp__ = rarray_push(T, (arrayp), g->a->memalloc); \
+  if (check_alloc(g, vp__)) return ERRRET; \
   vp__; })
 
-#define GSLAB_ALLOC(g, HEADFIELD, CURRFIELD, ERRRET...) ({          \
-  if UNLIKELY(g->CURRFIELD->len == countof(g->HEADFIELD.data)) {    \
-    if (g->CURRFIELD->next) {                                       \
-      g->CURRFIELD = g->CURRFIELD->next;                            \
-      assert(g->CURRFIELD->len == 0);                               \
-    } else {                                                        \
-      __typeof__(g->CURRFIELD) tmp__ =                              \
-        rmem_alloc(g->a->mem, sizeof(g->HEADFIELD), sizeof(void*)); \
-      if (check_alloc(g, tmp__))                                    \
-        return ERRRET;                                              \
-      tmp__->len = 0;                                               \
-      tmp__->next = g->CURRFIELD;                                   \
-      g->CURRFIELD = tmp__;                                         \
-    }                                                               \
-  }                                                                 \
-  &g->CURRFIELD->data[g->CURRFIELD->len++];                         \
+#define GSLAB_ALLOC(g, HEADFIELD, CURRFIELD, ERRRET...) ({       \
+  if UNLIKELY(g->CURRFIELD->len == countof(g->HEADFIELD.data)) { \
+    if (g->CURRFIELD->next) {                                    \
+      g->CURRFIELD = g->CURRFIELD->next;                         \
+      assert(g->CURRFIELD->len == 0);                            \
+    } else {                                                     \
+      __typeof__(g->CURRFIELD) tmp__ =                           \
+        rmem_alloc(g->a->memalloc, sizeof(g->HEADFIELD)).p;      \
+      if (check_alloc(g, tmp__))                                 \
+        return ERRRET;                                           \
+      tmp__->len = 0;                                            \
+      tmp__->next = g->CURRFIELD;                                \
+      g->CURRFIELD = tmp__;                                      \
+    }                                                            \
+  }                                                              \
+  &g->CURRFIELD->data[g->CURRFIELD->len++];                      \
 })
 
 #define NAME_LOOKUP(g, name, namelen) ({          \
@@ -179,6 +179,10 @@ static const char* gnamedtype_name(gnamedtype t) {
 static bool check_named_ref(
   gstate* g, rnode* referrer, u32 referreri, grefflag flags, gnamed* target)
 {
+  #if DEBUG
+    const char* scrubcheck = rmem_scrubcheck(target, sizeof(*target));
+    assertf(scrubcheck[0] == 'o', "scrubcheck(target) => %s", scrubcheck);
+  #endif
   rop op = RSM_GET_OP(*rarray_at(rinstr, &g->iv, referreri));
   const char* expected;
   switch (op) {
@@ -204,7 +208,11 @@ static bool check_named_ref(
     default:
       return true;
   }
-  ERRN(referrer, "expected %s, got %s", expected, gnamedtype_name(target->namedtype));
+  /*const char**/ scrubcheck = rmem_scrubcheck(target, sizeof(*target));
+  ERRN(referrer, "expected %s, got %s (0x%x, name \"%.*s\", scrubcheck: %s)",
+    expected, gnamedtype_name(target->namedtype), target->namedtype,
+    target->namelen >= 0xbb ? 0 : (int)target->namelen, target->name,
+    scrubcheck);
   return false;
 }
 
@@ -431,6 +439,11 @@ largeval:
 
 // resolves pending PC arguments (jumps, calls and branch targets) pointing to b
 static void gpostresolve_pc(gstate* g, rarray* refs, gbhead* b) {
+  #if DEBUG
+    const char* scrubcheck = rmem_scrubcheck(&b->namedtype, sizeof(b->namedtype));
+    assertf(scrubcheck[0] == 'o', "scrubcheck(b->namedtype) => %s", scrubcheck);
+  #endif
+
   for (u32 i = refs->len; i-- ; ) {
     gref* ref = rarray_at(gref, refs, i);
     assert(assertnotnull(ref->n)->t == RT_NAME);
@@ -835,12 +848,13 @@ static void genblock(gstate* g, rnode* block) {
   assert(block->t == RT_LABEL);
   assertnotnull(g->fn);
 
-  // register block
+  // Register block. This is the only place where we initialize a new gblock
   gblock* b = GARRAY_PUSH_OR_RET(gblock, &g->fn->blocks);
-  b->i = g->iv.len;
+  b->namedtype = GNAMED_T_BLOCK;
   b->name = block->sval.p;
   b->namelen = block->sval.len;
   b->nrefs = 0;
+  b->i = g->iv.len;
   b->pos = block->pos;
 
   // resolve pending references
@@ -941,12 +955,13 @@ static void gendata(gstate* g, rnode* datn) {
 static void genfun(gstate* g, rnode* fun) {
   assert(fun->t == RT_FUN);
 
+  // This is the only place where we initialize a new gfun
   gfun* fn = GSLAB_ALLOC(g, fnvhead, fnvcurr);
   fn->namedtype = GNAMED_T_FUN;
   fn->name = fun->sval.p;
   fn->namelen = fun->sval.len;
-  fn->i = g->iv.len;
   fn->nrefs = 0;
+  fn->i = g->iv.len;
   fn->blocks = (rarray){0};
   fn->fi = g->funs.len - 1; // TODO only exported functions' table index
   fn->ulv = (rarray){0};
@@ -1049,7 +1064,7 @@ static void layout_gdata(gstate* g) {
   usize datacount = 0;
   for (gdataslab* slab = &g->datavhead; slab && slab->len; slab = slab->next)
     datacount += slab->len;
-  if UNLIKELY(!rarray_reserve(gdata*, &g->dataorder, g->a->mem, datacount))
+  if UNLIKELY(!rarray_reserve(gdata*, &g->dataorder, g->a->memalloc, datacount))
     return errf(g->a, (rposrange){0}, "out of memory");
   usize datalen = 0;
   for (gdataslab* slab = &g->datavhead; slab; slab = slab->next) {
@@ -1127,18 +1142,18 @@ static void report_unresolved(gstate* g) {
   }
 }
 
-static gstate* nullable init_gstate(rasm* a, rmem rommem) {
+static gstate* nullable init_gstate(rasm* a) {
   gstate* g = rasm_gstate(a);
   if (!g) {
-    g = rmem_alloc(a->mem, sizeof(gstate), _Alignof(gstate));
+    g = rmem_alloc_aligned(a->memalloc, sizeof(gstate), _Alignof(gstate)).p;
     if (!g)
       return NULL;
     memset(g, 0, sizeof(gstate));
     rasm_gstate_set(a, g);
     g->a = a;
-    smap_make(&g->names, a->mem, 16, MAPLF_2);
+    smap_make(&g->names, a->memalloc, 16, MAPLF_2);
     // preallocate instruction buffer
-    rarray_grow(&g->iv, a->mem, sizeof(rinstr), 512/sizeof(rinstr));
+    rarray_grow(&g->iv, a->memalloc, sizeof(rinstr), 512/sizeof(rinstr));
   } else {
     // recycle gstate
     g->udnames.len = 0;
@@ -1151,7 +1166,7 @@ static gstate* nullable init_gstate(rasm* a, rmem rommem) {
       s->len = 0;
     for (gfunslab* s = &g->fnvhead; s; s = s->next)
       s->len = 0;
-    assertf(g->names.mem.state == a->mem.state, "allocator changed");
+    assertf(g->names.memalloc == a->memalloc, "memory allocator changed");
     smap_clear(&g->names);
   }
   g->datavcurr = &g->datavhead;
@@ -1159,10 +1174,10 @@ static gstate* nullable init_gstate(rasm* a, rmem rommem) {
   return g;
 }
 
-rerror rasm_gen(rasm* a, rnode* module, rmem rommem, rrom* rom) {
+rerror rasm_gen(rasm* a, rnode* module, rmemalloc_t* rommem, rrom* rom) {
   dlog("assembling \"%s\"", a->srcname);
   assert(module->t == RT_LPAREN);
-  gstate* g = init_gstate(a, rommem);
+  gstate* g = init_gstate(a);
   if UNLIKELY(g == NULL)
     return rerr_nomem;
 
@@ -1202,33 +1217,30 @@ rerror rasm_gen(rasm* a, rnode* module, rmem rommem, rrom* rom) {
 }
 
 void gstate_dispose(gstate* g) {
-  rmem mem = g->a->mem;
+  rmemalloc_t* ma = g->a->memalloc;
   if (g->fn)
-    rarray_free(gref, &g->fn->ulv, mem);
+    rarray_free(gref, &g->fn->ulv, ma);
   for (u32 i = 0; i < g->funs.len; i++) {
     gfun* fn = rarray_at(gfun, &g->funs, i);
-    rarray_free(gblock, &fn->blocks, mem);
+    rarray_free(gblock, &fn->blocks, ma);
   }
-  rarray_free(gref, &g->udnames, mem);
-  rarray_free(gfun, &g->funs, mem);
-  rarray_free(gfun, &g->dataorder, mem);
+  rarray_free(gref, &g->udnames, ma);
+  rarray_free(gfun, &g->funs, ma);
+  rarray_free(gfun, &g->dataorder, ma);
   smap_dispose(&g->names);
 
   for (gdataslab* s = g->datavhead.next; s; ) {
     gdataslab* tmp = s->next;
-    rmem_free(mem, s, sizeof(gdataslab));
+    rmem_free(ma, RMEM(s, sizeof(gdataslab)));
     s = tmp;
   }
   for (gfunslab* s = g->fnvhead.next; s; ) {
     gfunslab* tmp = s->next;
-    rmem_free(mem, s, sizeof(gfunslab));
+    rmem_free(ma, RMEM(s, sizeof(gfunslab)));
     s = tmp;
   }
 
-  #ifdef DEBUG
-  memset(g, 0, sizeof(gstate));
-  #endif
-  rmem_free(mem, g, sizeof(gstate));
+  rmem_free(ma, RMEM(g, sizeof(gstate)));
 }
 
 

@@ -23,8 +23,8 @@ static u32 perfectcap(u32 len, maplf lf) {
   return CEIL_POW2(len + (u32)( (double)len*captab[lf-1] + 0.5 ));
 }
 
-smap* nullable smap_make(smap* m, rmem mem, u32 hint, maplf lf) {
-  m->mem = mem;
+smap* nullable smap_make(smap* m, rmemalloc_t* ma, u32 hint, maplf lf) {
+  m->memalloc = ma;
   m->len = 0;
   m->cap = hint == 0 ? 8 : perfectcap(hint, lf);
   // lf is a bit shift magnitude that does fast integer division
@@ -32,27 +32,24 @@ smap* nullable smap_make(smap* m, rmem mem, u32 hint, maplf lf) {
   m->lf = lf;
   m->gcap = m->cap - (m->cap >> m->lf);
   m->hash0 = fastrand();
-  usize nbytes;
-  if (check_mul_overflow((usize)m->cap, sizeof(smapent), &nbytes))
+  rmem_t entries_mem = rmem_alloc_arrayt(ma, m->cap, smapent);
+  if UNLIKELY(!entries_mem.p)
     return NULL;
-  void* entries = rmem_alloc(mem, nbytes, _Alignof(smapent));
-  if UNLIKELY(entries == NULL)
-    return NULL;
-  memset(entries, 0, nbytes);
-  m->entries = entries;
+  rmem_zerofill(entries_mem);
+  m->entries_mem = entries_mem;
   return m;
 }
 
 void smap_dispose(smap* m) {
-  rmem_free(m->mem, m->entries, m->cap*sizeof(smapent));
+  rmem_free(m->memalloc, m->entries_mem);
   #ifdef DEBUG
-  memset(m, 0, sizeof(*m));
+  rmem_zerofill(RMEM(m, sizeof(*m)));
   #endif
 }
 
 void smap_clear(smap* m) {
   m->len = 0;
-  memset(m->entries, 0, m->cap*sizeof(smapent));
+  rmem_zerofill(RMEM(m->entries, m->cap*sizeof(smapent)));
 }
 
 static void smap_relocate(hashcode hash0, smapent* entries, u32 cap, smapent* ent) {
@@ -70,21 +67,20 @@ static bool smap_grow(smap* m) {
   u32 newcap;
   if (check_mul_overflow(m->cap, (u32)2u, &newcap))
     return false;
-  usize nbytes;
-  if (check_mul_overflow((usize)newcap, sizeof(smapent), &nbytes))
-    return false;
-  // dlog("grow len cap %u %u => cap size %u %zu", m->len, m->cap, newcap, nbytes);
-  smapent* new_entries = rmem_alloc(m->mem, nbytes, _Alignof(smapent));
-  if (new_entries == NULL)
+  // dlog("grow len cap %u %u => cap size %u %zu",
+  //   m->len, m->cap, newcap, (usize)newcap*sizeof(smapent));
+  rmem_t entries_mem = rmem_alloc_arrayt(m->memalloc, newcap, smapent);
+  if (!entries_mem.p)
     return false;
   // rehash
+  smapent* new_entries = entries_mem.p;
   for (u32 i = 0; i < m->cap; i++) {
     smapent ent = m->entries[i];
     if (ent.key && ent.key != DELMARK)
       smap_relocate(m->hash0, new_entries, newcap, &ent);
   }
-  rmem_free(m->mem, m->entries, m->cap*sizeof(smapent));
-  m->entries = new_entries;
+  rmem_free(m->memalloc, m->entries_mem);
+  m->entries_mem = entries_mem;
   m->cap = newcap;
   m->gcap = newcap - (newcap >> m->lf);
   return true;
@@ -181,14 +177,16 @@ static void insert_coll(smapent* entries, u32 cap, u32 index, const smapent* e) 
 // smap_compact reorders the entries of m to minimize lookup distance.
 // Has no effect if smap_score(m)==0.
 // Returns false if scratch memory allocation in mem failed.
-static bool smap_compact(smap* m, rmem mem) {
-  void* newentries = rmem_alloc(mem, sizeof(smapent)*m->cap, _Alignof(smapent));
-  if UNLIKELY(newentries == NULL)
+static bool smap_compact(smap* m, rmemalloc_t* ma) {
+  rmem_t entries_mem = rmem_alloc_arrayt(ma, m->cap, smapent);
+  if UNLIKELY(!entries_mem.p)
     return false;
+  void* newentries = entries_mem.p;
   cstate cs = { m, newentries };
 
   // // copy of entries for later debug printing
-  // smapent* entries_orig = rmem_alloc(mem, sizeof(smapent)*m->cap);
+  // smapent* entries_orig =
+  //   rmem_alloc_aligned(ma, sizeof(smapent)*m->cap, _Alignof(smapent)).p;
   // memcpy(entries_orig, m->entries, sizeof(smapent)*m->cap);
   // smap m_orig = *m;
   // m_orig.entries = entries_orig;
@@ -227,7 +225,7 @@ static bool smap_compact(smap* m, rmem mem) {
   }
 
   memcpy(m->entries, newentries, sizeof(smapent)*m->cap);
-  rmem_free(mem, newentries, sizeof(smapent)*m->cap);
+  rmem_free(ma, entries_mem);
 
   return true;
 }
@@ -269,10 +267,12 @@ UNUSED static void dump_smap(
   int cmp);
 #endif
 
-double smap_optimize(smap* m, usize iterations, rmem mem) {
-  smapent* entries = rmem_alloc(mem, m->cap*sizeof(smapent), _Alignof(smapent));
-  if (entries == NULL)
+double smap_optimize(smap* m, usize iterations, rmemalloc_t* ma) {
+  // allocate temporary storage for a copy of m->entries
+  rmem_t entries_mem = rmem_alloc_arrayt(ma, m->cap, smapent);
+  if (!entries_mem.p)
     return -1.0;
+  smapent* entries = entries_mem.p;
   memcpy(entries, m->entries, m->cap*sizeof(smapent));
   hashcode best_hash0 = m->hash0;
   double best_score = -1.0;
@@ -315,7 +315,7 @@ double smap_optimize(smap* m, usize iterations, rmem mem) {
 
   // compact
   if (best_score != 0) {
-    smap_compact(m, mem);
+    smap_compact(m, ma);
     double score = smap_score(m);
     if (score > best_score) { // undo
       for (u32 i = 0; i < m->cap; i++) {
@@ -334,7 +334,7 @@ double smap_optimize(smap* m, usize iterations, rmem mem) {
   dump_smap(m, &m_orig, NULL, 0, 0);
   #endif
 
-  rmem_free(mem, entries, m->cap*sizeof(smapent));
+  rmem_free(ma, entries_mem);
   return best_score;
 }
 

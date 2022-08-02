@@ -63,6 +63,14 @@ typedef struct rmm_ {
   //usize nalloc[MAX_ORDER + 1]; // number of allocations per order
 } rmm_t;
 
+// lock         4 + 4 + sizeof(void*)
+// start_addr   sizeof(void*)
+// end_addr     sizeof(void*)
+// free_size    sizeof(void*)
+// bitsets      sizeof(void*) * (MAX_ORDER + 1)
+// freelists    (sizeof(void*) * 2) * (MAX_ORDER + 1)
+// TODO: static_assert(sizeof(rmm_t) == RMM_MIN_SIZE, "update RMM_MIN_SIZE");
+
 
 #if defined(RMM_TRACE) && defined(DEBUG)
   #define trace(fmt, args...) dlog("[mm] " fmt, ##args)
@@ -273,7 +281,7 @@ rmm_t* nullable rmm_create(void* memp, usize memsize) {
 
   // Place the mm struct at the end of memory to increase alignment efficiency,
   // assuming that in most cases start has a large alignment.
-  // (The kmem allocator will allocate 64k-aligned chunks immediately, for its slabs.)
+  // (The rmem allocator will allocate 64k-aligned chunks immediately, for its slabs.)
   //
   //   ┌───────────────────────────────┬──────────┬──────────┬──────────┬───────┐
   //   │ memory                        │ bitset 1 │ bitset … │ bitset N │ rmm_t │
@@ -386,6 +394,22 @@ out_of_memory:
 
 void rmm_dispose(rmm_t* mm) {
   // nothing to do, but maybe in the future
+}
+
+
+rmm_t* nullable rmm_create_host_vmmap(usize memsize) {
+  void* p = osvmem_alloc(memsize);
+  if (!p)
+    return NULL;
+  return rmm_create(p, memsize);
+}
+
+
+bool rmm_dispose_host_vmmap(rmm_t* mm) {
+  rmm_dispose(mm);
+  void* ptr = (void*)rmm_startaddr(mm);
+  usize size = ALIGN2(mm->end_addr - mm->start_addr, mem_pagesize());
+  return osvmem_free(ptr, size);
 }
 
 

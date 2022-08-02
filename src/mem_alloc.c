@@ -1,4 +1,4 @@
-// kernel-style memory allocator
+// generic memory allocator
 // SPDX-License-Identifier: Apache-2.0
 
 #define ILIST_TEST_IMPL /* define ilist test in this translation unit */
@@ -8,7 +8,7 @@
 #include "mem.h"
 
 //
-// This implements a universal heap allocator backed by a few small-size slabs
+// This implements a generic heap allocator backed by a few small-size slabs
 // and one or more subheaps. subheaps are in turn backed by pages from a
 // memory manager (rmm_t).
 //
@@ -18,11 +18,11 @@
 // subheap is allocated and added to the subheaps list.
 //
 
-// KMEM_TRACE: uncomment to enable logging a lot of info via dlog/
-//#define KMEM_TRACE
+// RMEM_TRACE: uncomment to enable logging a lot of info via dlog/
+//#define RMEM_TRACE
 
-// KMEM_RUN_TEST_ON_INIT: uncomment to run tests during exe init in DEBUG builds
-#define KMEM_RUN_TEST_ON_INIT
+// RMEM_RUN_TEST_ON_INIT: uncomment to run tests during exe init in DEBUG builds
+#define RMEM_RUN_TEST_ON_INIT
 
 // _SCRUB_BYTE defines a byte value that, upon allocating or freeing a region,
 // memory is filled with (ie. memset(ptr,_SCRUB_BYTE,size).)
@@ -30,27 +30,27 @@
 // memory managed by this allocator is not subject to host memory protection.
 // Set to zero to disable scrubbing.
 #if RSM_SAFE
-  #ifndef KMEM_ALLOC_SCRUB_BYTE
-    #define KMEM_ALLOC_SCRUB_BYTE 0xbb
+  #ifndef RMEM_ALLOC_SCRUB_BYTE
+    #define RMEM_ALLOC_SCRUB_BYTE 0xbb
   #endif
-  #ifndef KMEM_FREE_SCRUB_BYTE
-    #define KMEM_FREE_SCRUB_BYTE  0xaa
+  #ifndef RMEM_FREE_SCRUB_BYTE
+    #define RMEM_FREE_SCRUB_BYTE  0xaa
   #endif
 #else
-  #ifndef KMEM_ALLOC_SCRUB_BYTE
-    #define KMEM_ALLOC_SCRUB_BYTE 0
+  #ifndef RMEM_ALLOC_SCRUB_BYTE
+    #define RMEM_ALLOC_SCRUB_BYTE 0
   #endif
-  #ifndef KMEM_FREE_SCRUB_BYTE
-    #define KMEM_FREE_SCRUB_BYTE  0
+  #ifndef RMEM_FREE_SCRUB_BYTE
+    #define RMEM_FREE_SCRUB_BYTE  0
   #endif
 #endif
 
-// KMEM_SLABHEAP_ENABLE: define to enable use of slabheaps; speeds up small allocations
-#define KMEM_SLABHEAP_ENABLE
+// RMEM_SLABHEAP_ENABLE: define to enable use of slabheaps; speeds up small allocations
+#define RMEM_SLABHEAP_ENABLE
 
-// KMEM_SLABHEAP_ENABLE_EAGER_ALLOC: define to allocate slab space up front
-// Note: test_kmem assumes expects this to NOT be defined.
-//#define KMEM_SLABHEAP_ENABLE_EAGER_ALLOC
+// RMEM_SLABHEAP_ENABLE_EAGER_ALLOC: define to allocate slab space up front
+// Note: test_rmem assumes expects this to NOT be defined.
+//#define RMEM_SLABHEAP_ENABLE_EAGER_ALLOC
 
 // SLABHEAP_COUNT dictates the slabheap size classes in increasing pow2, starting
 // with SLABHEAP_MIN_SIZE and ending with SLABHEAP_MAX_SIZE (inclusive.)
@@ -66,19 +66,25 @@
 #define SLABHEAP_MAX_BLOCKS  (SLABHEAP_BLOCK_SIZE / SLABHEAP_MIN_SIZE)
 
 static_assert(IS_ALIGN2(SLABHEAP_BLOCK_SIZE, PAGE_SIZE), "");
-static_assert(SLABHEAP_COUNT > 0, "undef KMEM_SLABHEAP_ENABLE instead");
+static_assert(SLABHEAP_COUNT > 0, "undef RMEM_SLABHEAP_ENABLE instead");
 
 #define HEAP_MIN_SIZE  (CHUNK_SIZE*2)
-
+#define HEAP_ALIGN     CHUNK_SIZE
 // HEAP_MAX_ALIGN: maximum alignment factor that heap_alloc can handle
 #define HEAP_MAX_ALIGN  XMAX(PAGE_SIZE, SLABHEAP_BLOCK_SIZE)
 static_assert(IS_POW2(HEAP_MAX_ALIGN), "");
+
+#ifdef RMEM_SLABHEAP_ENABLE
+  #define HEAP_IDEAL_ALIGN  SLABHEAP_BLOCK_SIZE
+#else
+  #define HEAP_IDEAL_ALIGN  HEAP_ALIGN
+#endif
 
 #define SAFECHECK_VALID_REGION(region) \
   safecheckf(RMEM_IS_VALID(region), "invalid region " RMEM_FMT, RMEM_FMT_ARGS(region))
 
 // debug_id
-#ifdef KMEM_TRACE
+#ifdef RMEM_TRACE
   #define DEBUG_ID_FIELD(NAME)   usize NAME;
   #define DEBUG_ID_PARAM         , usize debug_id
   #define DEBUG_ID_ARG           , debug_id
@@ -104,7 +110,7 @@ typedef struct {
 } heap_t;
 
 typedef struct {
-  heap_t  allocator; // should be first to make debugging heap_t <> subheap_t easier
+  heap_t  heap; // should be first to make debugging heap_t <> subheap_t easier
   ilist_t list_entry;
 } subheap_t;
 
@@ -127,13 +133,16 @@ typedef struct {
 } slabheap_t;
 
 typedef struct rmemalloc_ {
-  rmm_t*     mm;
-  RHMutex    lock;
-  ilist_t    subheaps;
-  void*      mem_origin;
-  #ifdef KMEM_SLABHEAP_ENABLE
+  RHMutex lock;
+  ilist_t subheaps;
+
+  rmm_t* nullable mm;
+  void* nullable  mm_origin; // address of mm pages, if allocator was allocated in mm
+
+  #ifdef RMEM_SLABHEAP_ENABLE
   slabheap_t slabheaps[SLABHEAP_COUNT];
   #endif
+
   DEBUG_ID_FIELD(next_heap_debug_id)
 } rmemalloc_t;
 
@@ -153,16 +162,16 @@ static_assert(sizeof(subheap_t) <= PAGE_SIZE, "");
 
 // BEST_FIT_THRESHOLD: if the number of allocation chunks required are at least
 // these many, use a "best fit" search instead of a "first fit" search.
-// Used by kmem_alloc.
+// Used by rmem_alloc.
 #define BEST_FIT_THRESHOLD 128u
 
 
-#if defined(KMEM_TRACE) && defined(DEBUG)
-  #define trace(fmt, args...) dlog("[kmem] " fmt, ##args)
+#if defined(RMEM_TRACE) && defined(DEBUG)
+  #define trace(fmt, args...) dlog("[rmem] " fmt, ##args)
 #else
-  #ifdef KMEM_TRACE
-    #warning KMEM_TRACE has no effect unless DEBUG is enabled
-    #undef KMEM_TRACE
+  #ifdef RMEM_TRACE
+    #warning RMEM_TRACE has no effect unless DEBUG is enabled
+    #undef RMEM_TRACE
   #endif
   #define trace(...) ((void)0)
 #endif
@@ -365,8 +374,8 @@ static void* nullable heap_alloc(heap_t* h, usize* sizep, usize alignment) {
   *sizep = chunk_len * CHUNK_SIZE;
 
   // fill allocated memory with scrub bytes (if enabled)
-  if (KMEM_ALLOC_SCRUB_BYTE)
-    memset(ptr, KMEM_ALLOC_SCRUB_BYTE, chunk_len * CHUNK_SIZE);
+  if (RMEM_ALLOC_SCRUB_BYTE)
+    memset(ptr, RMEM_ALLOC_SCRUB_BYTE, chunk_len * CHUNK_SIZE);
 
   trace("[heap %zu] allocating %p (%zu B) in %zu chunks [%zu…%zu)",
     h->debug_id, ptr, *sizep, chunk_len, chunk_index, chunk_index + chunk_len);
@@ -383,42 +392,43 @@ static void heap_free(heap_t* h, void* ptr, usize size) {
   uintptr chunk_index = (chunk_addr - (uintptr)h->chunks) / CHUNK_SIZE;
   usize chunk_len = size / CHUNK_SIZE;
 
-  trace("[heap %zu] freeing chunk %p (%zu B) in %zu chunks [%zu…%zu)",
-    h->debug_id, ptr, size, chunk_len, chunk_index, chunk_index + chunk_len);
+  trace("[heap %zu] freeing " RMEM_FMT " in %zu chunks [%zu…%zu)",
+    h->debug_id, RMEM_FMT_ARGS(RMEM(ptr, size)),
+    chunk_len, chunk_index, chunk_index + chunk_len);
 
   assertf(bitset_get(&h->chunk_use, chunk_index),
-    "trying to free segment starting at %zu that is already free (ptr=%p)",
+    "trying to free already-free region starting at chunk %zu (ptr=%p)",
     chunk_index, ptr);
 
-  bitset_set_range(&h->chunk_use, chunk_index, chunk_len, false);
+  bitset_set_range(&h->chunk_use, chunk_index, chunk_len, 0);
 
   assert(h->chunk_len >= chunk_len);
   h->chunk_len -= chunk_len;
 
   // fill freed memory with scrub bytes, if enabled
-  if (KMEM_FREE_SCRUB_BYTE)
-    memset(ptr, KMEM_FREE_SCRUB_BYTE, size);
+  if (RMEM_FREE_SCRUB_BYTE)
+    memset(ptr, RMEM_FREE_SCRUB_BYTE, size);
 }
 
 
 inline static void subheap_init(subheap_t* sh, u8* base, usize size  DEBUG_ID_PARAM) {
-  heap_init(&sh->allocator, base, size  DEBUG_ID_ARG);
+  heap_init(&sh->heap, base, size  DEBUG_ID_ARG);
 }
 
 inline static void* nullable subheap_alloc(subheap_t* sh, usize* size, usize alignment) {
-  return heap_alloc(&sh->allocator, size, alignment);
+  return heap_alloc(&sh->heap, size, alignment);
 }
 
 inline static usize subheap_avail(const subheap_t* sh) {
-  return heap_avail(&sh->allocator);
+  return heap_avail(&sh->heap);
 }
 
 inline static usize subheap_cap(const subheap_t* sh) {
-  return heap_cap(&sh->allocator);
+  return heap_cap(&sh->heap);
 }
 
 
-static bool kmem_add_subheap(rmemalloc_t* a, void* storage, usize size) {
+static bool rmem_add_subheap(rmemalloc_t* a, void* storage, usize size) {
   if (size < ALIGN2(sizeof(subheap_t), _Alignof(subheap_t)) + HEAP_MIN_SIZE) {
     trace("[%s] size (%zu) too small", __FUNCTION__, size);
     return false;
@@ -426,53 +436,73 @@ static bool kmem_add_subheap(rmemalloc_t* a, void* storage, usize size) {
 
   subheap_t* sh;
 
-  // If storage is aligned, place subheap struct at the end to minimize spill.
-  // Otherwise we place the subheap struct at the beginning and align storage.
+  // If storage is aligned, place subheap struct at the end to minimize spill
   if (IS_ALIGN2((uintptr)storage, HEAP_MAX_ALIGN)) {
     uintptr end_addr = (uintptr)storage + size;
     sh = (subheap_t*)ALIGN2_FLOOR(end_addr - sizeof(subheap_t), _Alignof(subheap_t));
     if (check_sub_overflow((usize)(uintptr)sh, (usize)(uintptr)storage, &size)) {
-      trace("[%s] not enough space at %p for subheap_t", __FUNCTION__,sh);
+      trace("not enough space at %p…%p for %lu B alignment while adding subheap",
+        storage, (void*)end_addr, HEAP_MAX_ALIGN);
       return false;
     }
     assert((uintptr)storage + size <= (uintptr)sh);
   } else {
+    // Otherwise we place the subheap struct at the beginning and align storage
+    assert(IS_ALIGN2((uintptr)storage, _Alignof(subheap_t)));
     sh = storage;
-    storage = (subheap_t*)ALIGN2((uintptr)storage + sizeof(subheap_t), HEAP_MAX_ALIGN);
-    usize size_diff = (usize)((uintptr)storage - (uintptr)sh);
-    if (size_diff > 0)
-      trace("forfeiting %zu kiB in subheap (HEAP_MAX_ALIGN alignment)", size_diff / kiB);
-    if (check_sub_overflow(size, size_diff, &size)) {
-      trace("[%s] not enough space at %p for HEAP_MAX_ALIGN alignment", __FUNCTION__,sh);
+    usize halign = (size - sizeof(subheap_t) >= HEAP_MAX_ALIGN) ?
+      HEAP_MAX_ALIGN : HEAP_ALIGN;
+    usize size_diff;
+    void* newstorage = storage;
+    usize newsize;
+    for (;;) {
+      trace("try storage in tail with %lu B alignment for new subheap", halign);
+      newstorage = (subheap_t*)ALIGN2((uintptr)storage + sizeof(subheap_t), halign);
+      size_diff = (usize)((uintptr)newstorage - (uintptr)sh);
+      if (!check_sub_overflow(size, size_diff, &newsize))
+        break;
+      if (HEAP_MAX_ALIGN > HEAP_ALIGN && halign > HEAP_ALIGN) {
+        // try with smaller alignment (slabheaps will fail to grow)
+        halign = HEAP_ALIGN;
+        continue;
+      }
+      // give up
+      trace("not enough space at %p (%p…%p) for %lu B alignment while adding subheap",
+        newstorage, storage, storage + size, halign);
       return false;
     }
+    size = newsize;
+    storage = newstorage;
+    if (size_diff > 0)
+      trace("forfeiting %zu kiB in subheap (%zu B alignment)", size_diff / kiB, halign);
   }
 
   if (size < HEAP_MIN_SIZE) {
-    trace("[%s] size (%zu) too small after HEAP_MAX_ALIGN alignment", __FUNCTION__,size);
+    trace("size (%zu) too small after alignment while adding subheap", size);
     return false;
   }
 
-  trace("add subheap %p (%p … %p, %zu kiB, %zu pages)",
-    sh, storage, storage + size, size / kiB, size / PAGE_SIZE);
-  assertf(IS_ALIGN2((uintptr)storage, HEAP_MAX_ALIGN), "%p", storage);
+  assertf(IS_ALIGN2((uintptr)storage, HEAP_ALIGN), "%p", storage);
 
   subheap_init(sh, storage, size  DEBUG_ID_GEN_ARG(a->next_heap_debug_id));
   ilist_append(&a->subheaps, &sh->list_entry);
+
+  trace("added [heap %zu] owning %p…%p (%zu B, %.1f pages)",
+    sh->heap.debug_id, storage, storage + size, size, (double)size / (double)PAGE_SIZE);
 
   return true;
 }
 
 
 #if DEBUG
-  UNUSED static void kmem_debug_dump_state(
+  UNUSED static void rmem_debug_dump_state(
     rmemalloc_t* a, void* nullable highlight_p, usize highlight_size)
   {
     RHMutexLock(&a->lock);
     usize i = 0;
     ilist_for_each(lent, &a->subheaps) {
       subheap_t* sh = ilist_entry(lent, subheap_t, list_entry);
-      heap_t* h = &sh->allocator;
+      heap_t* h = &sh->heap;
       uintptr start_addr = (uintptr)h->chunks;
       uintptr end_addr = (uintptr)h->chunks + (h->chunk_cap * CHUNK_SIZE);
       uintptr end_addr_use = (uintptr)h->chunks + (h->chunk_len * CHUNK_SIZE);
@@ -488,7 +518,7 @@ static bool kmem_add_subheap(rmemalloc_t* a, void* storage, usize size) {
 #endif
 
 
-static void* nullable kmem_heapalloc(rmemalloc_t* a, usize* size, usize alignment) {
+static void* nullable rmem_heapalloc(rmemalloc_t* a, usize* size, usize alignment) {
   ilist_for_each(lent, &a->subheaps) {
     subheap_t* sh = ilist_entry(lent, subheap_t, list_entry);
     void* ptr = subheap_alloc(sh, size, alignment);
@@ -499,11 +529,11 @@ static void* nullable kmem_heapalloc(rmemalloc_t* a, usize* size, usize alignmen
 }
 
 
-static bool kmem_expand(rmemalloc_t* a, usize minsize);
+static bool rmem_expand(rmemalloc_t* a, usize minsize);
 static bool free_to_subheaps(rmemalloc_t* a, void* ptr, usize size);
 
 
-#ifdef KMEM_SLABHEAP_ENABLE
+#ifdef RMEM_SLABHEAP_ENABLE
 
 
 static usize slabheap_avail(const slabheap_t* sh) {
@@ -551,18 +581,18 @@ static slabblock_t* nullable slabheap_grow(rmemalloc_t* a, slabheap_t* sh) {
 
   slabblock_t* block;
   for (usize attempt = 10; ; attempt++) {
-    if LIKELY(( block = kmem_heapalloc(a, &size, SLABHEAP_BLOCK_SIZE) ))
+    if LIKELY(( block = rmem_heapalloc(a, &size, SLABHEAP_BLOCK_SIZE) ))
       break;
     size = SLABHEAP_BLOCK_SIZE;
-    trace("[slab %zu] kmem_heapalloc(%zu, %zu) failed; trying kmem_expand",
+    trace("[slab %zu] rmem_heapalloc(%zu, %zu) failed; trying rmem_expand",
       sh->size, size, SLABHEAP_BLOCK_SIZE);
-    if UNLIKELY(!kmem_expand(a, size) || attempt == 0)
+    if UNLIKELY(!rmem_expand(a, size) || attempt == 0)
       return NULL;
   }
 
   trace("[slab %zu] allocated backing block %p", sh->size, block);
   assertf((uintptr)block % SLABHEAP_BLOCK_SIZE == 0,
-    "misaligned address %p returned by kmem_heapalloc", block);
+    "misaligned address %p returned by rmem_heapalloc", block);
 
   usize block_align = CEIL_POW2(MAX(sh->size, _Alignof(slabblock_t)));
   usize block_size = ALIGN2(sizeof(slabblock_t), block_align);
@@ -611,7 +641,7 @@ static void* nullable slabheap_alloc(rmemalloc_t* a, slabheap_t* sh) {
     sh->full = block;
   }
 
-  #ifdef KMEM_TRACE
+  #ifdef RMEM_TRACE
   uintptr data_addr = ALIGN2((uintptr)block + sizeof(slabblock_t), sh->size);
   trace("[slab %zu] allocating chunk %zu %p from block %p",
     sh->size, ((uintptr)chunk - data_addr) / sh->size, chunk, block);
@@ -625,8 +655,8 @@ static void slabheap_free(rmemalloc_t* a, slabheap_t* sh, void* ptr) {
   assertf( !((uintptr)ptr % sh->size), "invalid address %p (slab %zu)", ptr, sh->size);
 
   // fill freed memory with scrub bytes, if enabled
-  if (KMEM_FREE_SCRUB_BYTE)
-    memset(ptr, KMEM_FREE_SCRUB_BYTE, sh->size);
+  if (RMEM_FREE_SCRUB_BYTE)
+    memset(ptr, RMEM_FREE_SCRUB_BYTE, sh->size);
 
   slabblock_t* block = (slabblock_t*)((uintptr)ptr & SLABHEAP_BLOCK_MASK);
 
@@ -637,7 +667,7 @@ static void slabheap_free(rmemalloc_t* a, slabheap_t* sh, void* ptr) {
   chunk->next = block->recycle;
   block->recycle = chunk;
 
-  #ifdef KMEM_TRACE
+  #ifdef RMEM_TRACE
   uintptr data_addr = ALIGN2((uintptr)block + sizeof(slabblock_t), sh->size);
   trace("[slab %zu] freeing chunk %zu %p from block %p",
     sh->size, ((uintptr)ptr - data_addr) / sh->size, ptr, block);
@@ -654,67 +684,87 @@ static void slabheap_free(rmemalloc_t* a, slabheap_t* sh, void* ptr) {
 }
 
 
-#endif // KMEM_SLABHEAP_ENABLE
+#endif // RMEM_SLABHEAP_ENABLE
 
 
-// kmem_alloc_aligned attempts to allocate *size bytes.
+// rmem_alloc_aligned attempts to allocate *size bytes.
 // On success, *size is updated to its actual size.
-rmem2_t kmem_alloc_aligned(rmemalloc_t* a, usize size, usize alignment) {
+rmem_t rmem_alloc_aligned(rmemalloc_t* a, usize size, usize alignment) {
   assertf(IS_POW2(alignment), "alignment %zu is not a power-of-two", alignment);
   assertf(alignment <= PAGE_SIZE, "%zu", alignment);
 
-  void* ptr = NULL;
+  if (size == 0)
+    return (rmem_t){0};
 
-  #ifdef KMEM_SLABHEAP_ENABLE
-    const usize slabsize = ALIGN2(size, alignment);
-  #endif
+  void* ptr = NULL;
 
   RHMutexLock(&a->lock);
 
-retry:
-
   // Attempt to allocate space in a slabheap.
   // This succeeds for the common case of a small allocation size.
-  #ifdef KMEM_SLABHEAP_ENABLE
-    // CEIL_POW2()
-
-    for (usize i = 0; i < SLABHEAP_COUNT; i++) {
-      if (slabsize <= a->slabheaps[i].size) {
-        size = a->slabheaps[i].size;
-        ptr = slabheap_alloc(a, &a->slabheaps[i]);
-        if UNLIKELY(ptr == NULL)
-          goto expand;
+  #ifdef RMEM_SLABHEAP_ENABLE
+    // overflow of slab_index is ok
+    const usize slabsize = CEIL_POW2(ALIGN2(size, SLABHEAP_MIN_SIZE));
+    usize slab_index = ILOG2(slabsize) - ILOG2(SLABHEAP_MIN_SIZE);
+    //dlog("** %zu => slabsize %zu, slab_index %zu", size, slabsize, slab_index);
+    if (slab_index < SLABHEAP_COUNT) {
+      slabheap_t* slab = &a->slabheaps[slab_index];
+      size = slab->size;
+      if LIKELY((ptr = slabheap_alloc(a, slab)))
         goto end;
-      }
+      // If we get here, that means we were unable to slabheap_grow,
+      // which in turn means there's less than SLABHEAP_BLOCK_SIZE space available
+      // from subheaps, including potential growth by requesting more pages from mm.
+      // So what we do now is to fall back to subheap allocation for small "slab"
+      // sized allocation. Essentially the same path as if slabheaps were disabled.
     }
   #endif
 
-  // Attempt to allocate space in a subheap
-  if LIKELY((ptr = kmem_heapalloc(a, &size, alignment)))
-    goto end;
-
-#ifdef KMEM_SLABHEAP_ENABLE
-expand:
-#endif
-
-  if (kmem_expand(a, size))
-    goto retry;
+  // Attempt to allocate space in a subheap, retrying after successful expansion
+  for (;;) {
+    if LIKELY((ptr = rmem_heapalloc(a, &size, alignment)))
+      break;
+    if (!rmem_expand(a, size))
+      break;
+  }
 
 end:
   RHMutexUnlock(&a->lock);
-  return (rmem2_t){ .start=ptr, .size=size };
+  trace("allocated region " RMEM_FMT, RMEM_FMT_ARGS(RMEM(ptr, size)));
+  return (rmem_t){ .p=ptr, .size=size };
+}
+
+
+rmem_t rmem_must_alloc(rmemalloc_t* a, usize size) {
+  rmem_t m = rmem_alloc(a, size);
+  if UNLIKELY(!m.p)
+    panic("out of memory");
+  return m;
+}
+
+
+void rmem_must_resize(rmemalloc_t* a, rmem_t* m, usize newsize) {
+  if (!rmem_resize(a, m, newsize))
+    panic("out of memory");
+}
+
+
+rmem_t rmem_alloc_array(rmemalloc_t* a, usize count, usize elemsize, usize alignment) {
+  if (check_mul_overflow(count, elemsize, &count))
+    return (rmem_t){0};
+  return rmem_alloc_aligned(a, count, alignment);
 }
 
 
 static bool free_to_subheaps(rmemalloc_t* a, void* ptr, usize size) {
-  #ifdef KMEM_SLABHEAP_ENABLE
+  #ifdef RMEM_SLABHEAP_ENABLE
   assert(size > SLABHEAP_MAX_SIZE);
   #endif
 
   ilist_for_each(lent, &a->subheaps) {
     subheap_t* sh = ilist_entry(lent, subheap_t, list_entry);
-    if (heap_contains(&sh->allocator, ptr, size)) {
-      heap_free(&sh->allocator, ptr, size);
+    if (heap_contains(&sh->heap, ptr, size)) {
+      heap_free(&sh->heap, ptr, size);
       return true;
     }
   }
@@ -722,34 +772,41 @@ static bool free_to_subheaps(rmemalloc_t* a, void* ptr, usize size) {
 }
 
 
-void kmem_free(rmemalloc_t* a, rmem2_t region) {
+void rmem_free(rmemalloc_t* a, rmem_t region) {
   SAFECHECK_VALID_REGION(region);
 
   RHMutexLock(&a->lock);
 
-  #ifdef KMEM_SLABHEAP_ENABLE
+  #ifdef RMEM_SLABHEAP_ENABLE
     for (usize i = 0; i < SLABHEAP_COUNT; i++) {
       if (region.size <= a->slabheaps[i].size) {
-        slabheap_free(a, &a->slabheaps[i], region.start);
+        slabheap_free(a, &a->slabheaps[i], region.p);
         goto end;
       }
     }
   #endif
 
-  if UNLIKELY(!free_to_subheaps(a, region.start, region.size))
-    safecheckf(0, "kmem_free: invalid region " RMEM_FMT, RMEM_FMT_ARGS(region));
+  if UNLIKELY(!free_to_subheaps(a, region.p, region.size))
+    safecheckf(0, "rmem_free: invalid region " RMEM_FMT, RMEM_FMT_ARGS(region));
 
 end:
+  trace("freed region " RMEM_FMT, RMEM_FMT_ARGS(region));
   RHMutexUnlock(&a->lock);
 }
 
 
-bool kmem_resize(rmemalloc_t* a, rmem2_t* region, usize newsize) {
+bool rmem_resize(rmemalloc_t* a, rmem_t* region, usize newsize) {
+  // Allow "resizing" zero region
+  if (RMEM_IS_NULL(*region)) {
+    *region = rmem_alloc(a, newsize);
+    return region->p != NULL;
+  }
+
   SAFECHECK_VALID_REGION(*region);
 
   // can't shrink to zero
   // TODO: should this be allowed as a weird way to free a region?
-  safecheckf(newsize > 0, "attempted to resize %p to 0", region->start);
+  safecheckf(newsize > 0, "attempted to resize %p to 0", region->p);
 
   // load old size and check for misaligned (invalid) region address
   usize oldsize = region->size;
@@ -758,7 +815,7 @@ bool kmem_resize(rmemalloc_t* a, rmem2_t* region, usize newsize) {
 
   // align newsize
   newsize = (
-    #ifdef KMEM_SLABHEAP_ENABLE
+    #ifdef RMEM_SLABHEAP_ENABLE
       // slabs sizes are pow2
       (newsize <= SLABHEAP_MAX_SIZE) ? CEIL_POW2(newsize) :
     #endif
@@ -769,18 +826,36 @@ bool kmem_resize(rmemalloc_t* a, rmem2_t* region, usize newsize) {
     return true;
 
   // The region could not be trivially resized; resort to actual resizing.
-  trace("resizing %p  %zu -> %zu", region->start, oldsize, newsize);
+  trace("resizing %p  %zu -> %zu", region->p, oldsize, newsize);
 
   // FIXME replace this daft "allocate new, copy, free old" code
-  rmem2_t new_region = kmem_alloc(a, newsize);
-  if (!new_region.start)
+  usize alignment = MIN(CEIL_POW2(newsize), (usize)CEIL_POW2((uintptr)region->p));
+  rmem_t new_region = rmem_alloc_aligned(a, newsize, alignment);
+  if (!new_region.p)
     return false;
-  memcpy(new_region.start, region->start, MIN(oldsize, newsize));
-  kmem_free(a, *region);
+
+  // r1 |...........|
+  // r2        |............|
+  #define RMEM_IS_INTERSECTING(r1, r2) ( \
+    (uintptr)(r1).p <= ((uintptr)(r2).p + (uintptr)(r2).size) && \
+    (uintptr)(r2).p <= ((uintptr)(r1).p + (uintptr)(r1).size) \
+  )
+
+  assertf(!RMEM_IS_INTERSECTING(new_region, *region),
+    "bug in rmem_alloc_aligned: allocated non-free memory."
+    "\nThe following regions overlap:"
+    "\n  new allocation  " RMEM_FMT
+    "\n  non-free region " RMEM_FMT
+    "\n",
+    RMEM_FMT_ARGS(new_region),
+    RMEM_FMT_ARGS(*region) );
+
+  memcpy(new_region.p, region->p, MIN(oldsize, newsize));
+  rmem_free(a, *region);
   *region = new_region;
   return true;
 
-  // #ifdef KMEM_SLABHEAP_ENABLE
+  // #ifdef RMEM_SLABHEAP_ENABLE
   //   if (oldsize <= SLABHEAP_MAX_SIZE) {
   //     panic("TODO slabheap resize");
   //   }
@@ -788,12 +863,12 @@ bool kmem_resize(rmemalloc_t* a, rmem2_t* region, usize newsize) {
 }
 
 
-// kmem_expand attempts to expand the available memory to allocate.
+// rmem_expand attempts to expand the available memory to allocate.
 // Returns true if expansion succeeded; the caller should try again to allocate.
-static bool kmem_expand(rmemalloc_t* a, usize minsize) {
+static bool rmem_expand(rmemalloc_t* a, usize minsize) {
 
   // before we ask the memory manager for more pages, attempt to purge slabs
-  #ifdef KMEM_SLABHEAP_ENABLE
+  #ifdef RMEM_SLABHEAP_ENABLE
     usize nbyte_purged = 0;
     for (usize i = 0; i < SLABHEAP_COUNT; i++) {
       nbyte_purged += slabheap_purge(a, &a->slabheaps[i]);
@@ -804,6 +879,8 @@ static bool kmem_expand(rmemalloc_t* a, usize minsize) {
 
   // We were unable to purge enough slab space to satisfy minsize.
   // Let's try to allocate more pages from the memory manager.
+  if (!a->mm)
+    return false;
 
   // align minsize to page boundary
   #if DEBUG
@@ -820,7 +897,7 @@ static bool kmem_expand(rmemalloc_t* a, usize minsize) {
   // Ideally we'd like to allocate memory in SLABHEAP_BLOCK_SIZE granules for
   // our slabs, which all require size _and_ alignment of SLABHEAP_BLOCK_SIZE
   // for their backing data.
-  #ifdef KMEM_SLABHEAP_ENABLE
+  #ifdef RMEM_SLABHEAP_ENABLE
     usize req_size2;
     if (!check_align_ceil_overflow(req_size, SLABHEAP_BLOCK_SIZE, &req_size2)) {
       req_size = req_size2;
@@ -846,7 +923,7 @@ static bool kmem_expand(rmemalloc_t* a, usize minsize) {
   trace("[expand] allocated %zu pages from mm: %p…%p(%zu)",
     req_npages, ptr, ptr + (req_npages * PAGE_SIZE), req_npages * PAGE_SIZE);
 
-  if UNLIKELY(!kmem_add_subheap(a, ptr, req_npages * PAGE_SIZE)) {
+  if UNLIKELY(!rmem_add_subheap(a, ptr, req_npages * PAGE_SIZE)) {
     rmm_freepages(a->mm, ptr);
     return false;
   }
@@ -855,10 +932,10 @@ static bool kmem_expand(rmemalloc_t* a, usize minsize) {
 }
 
 
-usize kmem_alloc_size(usize size) {
+usize rmem_alloc_size(usize size) {
   assert(size > 0);
 
-  #ifdef KMEM_SLABHEAP_ENABLE
+  #ifdef RMEM_SLABHEAP_ENABLE
   if (size <= SLABHEAP_MAX_SIZE)
     return CEIL_POW2(size);
   #endif
@@ -867,39 +944,29 @@ usize kmem_alloc_size(usize size) {
 }
 
 
-rmemalloc_t* nullable kmem_allocator_create(rmm_t* mm, usize initsize) {
-  const usize allocator_size = ALIGN2(sizeof(rmemalloc_t), _Alignof(rmemalloc_t));
-  const usize min_npages = ALIGN2(allocator_size, PAGE_SIZE) / PAGE_SIZE;
+static rmemalloc_t* nullable rmem_allocator_init(
+  rmemalloc_t*    a,
+  void*           heap0p, usize heap0size, // initial heap storage
+  rmm_t* nullable mm,
+  void* nullable  mm_origin)
+{
+  assertf(((uintptr)a % (uintptr)_Alignof(rmemalloc_t)) == 0, "a %p misaligned", a);
+  assertf(IS_ALIGN2((uintptr)heap0p, HEAP_ALIGN), "heap0p %p misaligned", heap0p);
+  assertf(mm_origin == NULL || mm != NULL, "mm_origin without a mm");
 
-  // initmem needs to be aligned to CHUNK_SIZE
-  initsize = ALIGN_CEIL(initsize, CHUNK_SIZE);
-
-  // rmm requires page allocations in pow2 orders
-  usize npages = CEIL_POW2(ALIGN2(allocator_size + initsize, PAGE_SIZE) / PAGE_SIZE);
-
-  // try to allocate npages, going lower if needed, but no lower than min_npages
-  void* p = rmm_allocpages_min(mm, &npages, min_npages);
-  if (!p)
-    return NULL;
-
-  usize nbyte = npages * PAGE_SIZE;
-  trace("creating allocator in %zu pages (%zu kiB, %.2f kiB usable)",
-    npages,  nbyte / kiB,  (double)(nbyte - allocator_size) / (double)kiB);
-
-  // place the allocator at the end of the page range to increase the chances
-  // of perfect alignment of the initial heap (which has HEAP_MAX_ALIGN alignment.)
-  rmemalloc_t* a = (void*)( ((uintptr)p + nbyte) - allocator_size );
-  memset(a, 0, sizeof(*a));
-  a->mm = mm;
-  a->mem_origin = p;
-  ilist_init(&a->subheaps);
-  DEBUG_ID_INIT(a, next_heap_debug_id, 0);
   if (!RHMutexInit(&a->lock))
     return NULL;
 
+  ilist_init(&a->subheaps);
+
+  a->mm = mm;
+  a->mm_origin = mm_origin;
+
+  DEBUG_ID_INIT(a, next_heap_debug_id, 0);
+
   // initialize slab heaps, starting with size=sizeof(void*)
   // TODO: tune these sizes once we have some stats on usage.
-  #ifdef KMEM_SLABHEAP_ENABLE
+  #ifdef RMEM_SLABHEAP_ENABLE
     for (usize i = 0; i < SLABHEAP_COUNT; i++) {
       a->slabheaps[i].size = 1lu << (i + ILOG2(SLABHEAP_MIN_SIZE));
       a->slabheaps[i].usable = NULL;
@@ -908,38 +975,139 @@ rmemalloc_t* nullable kmem_allocator_create(rmm_t* mm, usize initsize) {
     }
   #endif
 
-  // use the rest of the memory allocated for the allocator struct as a subheap
-  // TODO: consider using this as a slabheap instead (when we have slabheaps)
-  if (!kmem_add_subheap(a, p, nbyte - allocator_size))
+  // initialize the first heap
+  if UNLIKELY(!rmem_add_subheap(a, heap0p, heap0size)) {
     trace("failed to add initial subheap; not enough space and/or alignment too small");
-
-  // allocate initial slab blocks up front, if enabled
-  #if defined(KMEM_SLABHEAP_ENABLE) && defined(KMEM_SLABHEAP_ENABLE_EAGER_ALLOC)
-    for (usize i = SLABHEAP_COUNT; i--; ) {
-      if UNLIKELY(!slabheap_grow(a, &a->slabheaps[i])) {
-        // We're out of memory, but don't do anything about it since we are
-        // just optimistically allocating slab space here
-        break;
+    if (!mm)
+      return NULL;
+  } else {
+    // allocate initial slab blocks up front, if enabled
+    #if defined(RMEM_SLABHEAP_ENABLE) && defined(RMEM_SLABHEAP_ENABLE_EAGER_ALLOC)
+      for (usize i = SLABHEAP_COUNT; i--; ) {
+        if UNLIKELY(!slabheap_grow(a, &a->slabheaps[i])) {
+          // We're out of memory, but don't do anything about it since we are
+          // just optimistically allocating slab space here
+          break;
+        }
       }
-    }
-  #endif
+    #endif
+  }
 
   return a;
 }
 
 
-void kmem_allocator_free(rmemalloc_t* a) {
-  // TODO: free slabheaps
-  // TODO: free additional subheaps
-  rmm_freepages(a->mm, a->mem_origin);
+rmemalloc_t* nullable rmem_allocator_create(rmm_t* mm, usize req_heap0size) {
+  // rmm requires page allocations in pow2 orders
+  usize nbytes = sizeof(rmemalloc_t) + ALIGN_CEIL(req_heap0size, HEAP_ALIGN);
+  usize npages = CEIL_POW2(ALIGN2(nbytes, PAGE_SIZE) / PAGE_SIZE);
+
+  // minimum amount of memory pages we need
+  const usize min_npages =
+    ALIGN2(sizeof(rmemalloc_t) + HEAP_MIN_SIZE, PAGE_SIZE) / PAGE_SIZE;
+
+  // try to allocate npages, going lower if needed, but no lower than min_npages
+  void* p = rmm_allocpages_min(mm, &npages, min_npages);
+  if (!p)
+    return NULL;
+
+  usize nbyte = npages * PAGE_SIZE;
+  trace("creating allocator in %zu pages (%zu kiB, %.2f kiB usable)",
+    npages,  nbyte / kiB,  (double)(nbyte - sizeof(rmemalloc_t)) / (double)kiB);
+
+  // place the allocator at the end of the page range to increase the chances
+  // of perfect alignment of the initial heap (which has HEAP_MAX_ALIGN alignment.)
+  rmemalloc_t* a = (void*)( ((uintptr)p + nbyte) - sizeof(rmemalloc_t) );
+
+  void* heap0p = p;
+  usize heap0size = nbyte - sizeof(rmemalloc_t);
+  void* mm_origin = p;
+
+  return rmem_allocator_init(a, heap0p, heap0size, mm, mm_origin);
 }
 
 
-usize kmem_avail(rmemalloc_t* a) {
+rmemalloc_t* nullable rmem_allocator_create_buf(
+  rmm_t* nullable mm, void* buf, usize bufsize)
+{
+  if (bufsize < sizeof(rmemalloc_t) + sizeof(subheap_t))
+    return NULL; // definitely too small
+
+  // The following loop finds out...
+  // - if it's better to put the allocator in the head or tail of buf
+  // - what the largest alignment is that we can use (<=HEAP_IDEAL_ALIGN)
+  const uintptr end_addr = (uintptr)buf + bufsize;
+
+  usize halign = (bufsize - sizeof(rmemalloc_t) - sizeof(subheap_t) >= HEAP_MAX_ALIGN) ?
+    HEAP_MAX_ALIGN : HEAP_ALIGN;
+
+  uintptr head_a_addr, head_h_addr, head_h_size;
+  uintptr tail_h_addr, tail_a_addr, tail_h_size;
+
+  rmemalloc_t* a;
+  void* heap0p = NULL;
+  usize heap0size = 0;
+
+  for (;;) {
+    trace("[%s] try with halign %lu (size %zu B)", __FUNCTION__, halign, bufsize);
+
+    head_a_addr = ALIGN2((uintptr)buf, _Alignof(rmemalloc_t));
+    head_h_addr = ALIGN2(head_a_addr + sizeof(rmemalloc_t), halign);
+    head_h_size = (end_addr >= head_h_addr) ?
+      end_addr - head_h_addr : 0;
+
+    tail_h_addr = ALIGN2((uintptr)buf, halign);
+    tail_a_addr = ALIGN2_FLOOR(end_addr - sizeof(rmemalloc_t), _Alignof(rmemalloc_t));
+    tail_h_size = (tail_a_addr > tail_h_addr) ?
+      ALIGN2_FLOOR(tail_a_addr - tail_h_addr, CHUNK_SIZE) : 0;
+
+    trace("[%s]   halign      %lu", __FUNCTION__, halign);
+    trace("[%s]   head_a_addr 0x%lx", __FUNCTION__, head_a_addr);
+    trace("[%s]   head_h_addr 0x%lx", __FUNCTION__, head_h_addr);
+    trace("[%s]   head_h_size %lu", __FUNCTION__, head_h_size);
+    trace("[%s]   tail_a_addr 0x%lx", __FUNCTION__, tail_a_addr);
+    trace("[%s]   tail_h_addr 0x%lx", __FUNCTION__, tail_h_addr);
+    trace("[%s]   tail_h_size %lu", __FUNCTION__, tail_h_size);
+
+    if (tail_h_size == 0 && head_h_size == 0) {
+      if (HEAP_IDEAL_ALIGN > HEAP_ALIGN && halign > HEAP_ALIGN) {
+        halign = HEAP_ALIGN;
+        continue;
+      }
+      trace("cannot create allocator in too-small buffer %p (%zu B)", buf, bufsize);
+      return NULL;
+    } else if (tail_h_size > head_h_size) {
+      // go with tail placement
+      a = (void*)tail_a_addr;
+      heap0p = (void*)tail_h_addr;
+      heap0size = (usize)tail_h_size;
+      break;
+    } else {
+      // go with head placement
+      a = (void*)head_a_addr;
+      heap0p = (void*)head_h_addr;
+      heap0size = (usize)head_h_size;
+      break;
+    }
+  }
+
+  return rmem_allocator_init(a, heap0p, heap0size, mm, NULL);
+}
+
+
+void rmem_allocator_free(rmemalloc_t* a) {
+  // TODO: free slabheaps
+  // TODO: free additional subheaps
+  if (a->mm_origin)
+    rmm_freepages(assertnotnull(a->mm), a->mm_origin);
+}
+
+
+usize rmem_avail(rmemalloc_t* a) {
   RHMutexLock(&a->lock);
   usize nbyte = 0;
 
-  #ifdef KMEM_SLABHEAP_ENABLE
+  #ifdef RMEM_SLABHEAP_ENABLE
     for (usize i = 0; i < SLABHEAP_COUNT; i++) {
       nbyte += slabheap_avail(&a->slabheaps[i]);
     }
@@ -955,7 +1123,7 @@ usize kmem_avail(rmemalloc_t* a) {
 }
 
 
-usize kmem_cap(rmemalloc_t* a) {
+usize rmem_cap(rmemalloc_t* a) {
   RHMutexLock(&a->lock);
 
   usize nbyte = 0;
@@ -971,12 +1139,35 @@ usize kmem_cap(rmemalloc_t* a) {
 }
 
 
-#if defined(KMEM_RUN_TEST_ON_INIT) && defined(DEBUG)
-static void test_kmem() {
+const char* rmem_scrubcheck(void* ptr, usize size) {
+  if (RMEM_ALLOC_SCRUB_BYTE | RMEM_FREE_SCRUB_BYTE) {
+    u8 scrub_bytes[128] ATTR_ALIGNED(sizeof(void*));
+
+    size = MIN(size, sizeof(scrub_bytes));
+
+    if (RMEM_ALLOC_SCRUB_BYTE) {
+      memset(scrub_bytes, RMEM_ALLOC_SCRUB_BYTE, size);
+      if (memcmp(ptr, scrub_bytes, size) == 0)
+        return "uninit";
+    }
+
+    if (RMEM_FREE_SCRUB_BYTE) {
+      memset(scrub_bytes, RMEM_FREE_SCRUB_BYTE, sizeof(scrub_bytes));
+      if (memcmp(ptr, scrub_bytes, size) == 0)
+        return "freed";
+    }
+  }
+
+  return "ok";
+}
+
+
+#if defined(RMEM_RUN_TEST_ON_INIT) && defined(DEBUG)
+static void test_rmem() {
   // verbose?
   //#define tlog dlog
   #ifndef tlog
-    #ifdef KMEM_TRACE
+    #ifdef RMEM_TRACE
       #define tlog dlog
     #else
       #define tlog(...) ((void)0)
@@ -997,13 +1188,13 @@ static void test_kmem() {
     while (npages--)
       assertnotnull( rmm_allocpages(mm, 1) );
 
-    assertnull( kmem_allocator_create(mm, 0) );
+    assertnull( rmem_allocator_create(mm, 0) );
 
     osvmem_free(memp, memsize);
     rmm_dispose(mm);
   }
 
-  // test "not enough memory to create allocator"
+  // test "not enough memory"
   {
     tlog("————————————————————————————————");
     usize allocator_size = ALIGN2(sizeof(rmemalloc_t), PAGE_SIZE);
@@ -1017,11 +1208,13 @@ static void test_kmem() {
     while (npages--)
       assertnotnull( rmm_allocpages(mm, 1) );
 
-    // kmem_allocator_create with initmem > 0 should fail
-    rmemalloc_t* a = assertnotnull( kmem_allocator_create(mm, PAGE_SIZE) );
-    assert(kmem_avail(a) == 0);
+    rmemalloc_t* a = assertnotnull( rmem_allocator_create(mm, PAGE_SIZE) );
 
-    kmem_allocator_free(a);
+    // should have less than a page of memory, not enough for slabs or really
+    // anything useful
+    assertf(rmem_avail(a) < PAGE_SIZE, "rmem_avail(a) => %zu", rmem_avail(a));
+
+    rmem_allocator_free(a);
     osvmem_free(memp, memsize);
     rmm_dispose(mm);
   }
@@ -1034,19 +1227,19 @@ static void test_kmem() {
     rmm_t* mm = assertnotnull( rmm_create(memp, memsize) );
 
     // create an allocator
-    rmemalloc_t* a = kmem_allocator_create(mm, rmm_avail_maxregion(mm) * PAGE_SIZE);
+    rmemalloc_t* a = rmem_allocator_create(mm, rmm_avail_maxregion(mm) * PAGE_SIZE);
     assertnotnull(a);
-    //tlog("kmem_cap / _avail  %zu / %zu", kmem_cap(a), kmem_avail(a));
+    //tlog("rmem_cap / _avail  %zu / %zu", rmem_cap(a), rmem_avail(a));
 
     // allocate a small piece to trigger creation of a slab
-    rmem2_t mem = kmem_alloc(a, 1); assertnotnull(mem.start);
-    kmem_free(a, mem);
+    rmem_t mem = rmem_alloc(a, 1); assertnotnull(mem.p);
+    rmem_free(a, mem);
 
     // should expand available memory
-    mem = kmem_alloc(a, kmem_avail(a) + 1);
-    assertnotnull(mem.start);
+    mem = rmem_alloc(a, rmem_avail(a) + 1);
+    assertnotnull(mem.p);
 
-    kmem_allocator_free(a);
+    rmem_allocator_free(a);
     rmm_dispose(mm);
     osvmem_free(memp, memsize);
   }
@@ -1059,13 +1252,13 @@ static void test_kmem() {
     rmm_t* mm = assertnotnull( rmm_create(memp, memsize) );
 
     // create an allocator
-    rmemalloc_t* a = kmem_allocator_create(mm, rmm_avail_maxregion(mm) * PAGE_SIZE);
+    rmemalloc_t* a = rmem_allocator_create(mm, rmm_avail_maxregion(mm) * PAGE_SIZE);
     assertnotnull(a);
 
     // should attempt to expand available memory, but mm should be out of memory
-    assertnull( kmem_alloc(a, kmem_avail(a) + 1).start );
+    assertnull( rmem_alloc(a, rmem_avail(a) + 1).p );
 
-    kmem_allocator_free(a);
+    rmem_allocator_free(a);
     rmm_dispose(mm);
     osvmem_free(memp, memsize);
   }
@@ -1078,42 +1271,42 @@ static void test_kmem() {
     rmm_t* mm = assertnotnull( rmm_create(memp, memsize) );
 
     // create an allocator
-    rmemalloc_t* a = kmem_allocator_create(mm, SLABHEAP_BLOCK_SIZE * 2);
+    rmemalloc_t* a = rmem_allocator_create(mm, SLABHEAP_BLOCK_SIZE * 2);
     assertnotnull(a);
 
     // should expand available memory by adding another subheap backed by mm
-    rmem2_t mem = kmem_alloc(a, kmem_avail(a) + 1);
-    assertnotnull(mem.start);
+    rmem_t mem = rmem_alloc(a, rmem_avail(a) + 1);
+    assertnotnull(mem.p);
 
-    kmem_allocator_free(a);
+    rmem_allocator_free(a);
     rmm_dispose(mm);
     osvmem_free(memp, memsize);
   }
 
   { // invalid regions
-    rmem2_t null_region = { .start=NULL, .size=8 };
-    rmem2_t empty_region = { .start=&null_region, .size=0 };
-    rmem2_t overflow_region = { .start=(void*)(~(uintptr)0)-16, .size=17 };
+    rmem_t null_region = { .p=NULL, .size=8 };
+    rmem_t empty_region = { .p=&null_region, .size=0 };
+    rmem_t overflow_region = { .p=(void*)(~(uintptr)0)-16, .size=17 };
 
     assert(!RMEM_IS_VALID(null_region));
     assert(!RMEM_IS_VALID(empty_region));
     assert(!RMEM_IS_VALID(overflow_region));
     // freeing an invalid region panics (in safe mode only)
-    // kmem_free(a, null_region);
+    // rmem_free(a, null_region);
   }
 
-  { // kmem_alloc_size returns aligned allocation sizes
+  { // rmem_alloc_size returns aligned allocation sizes
     usize heap_min_size = MAX(CEIL_POW2(SLABHEAP_MAX_SIZE + 1), CHUNK_SIZE);
 
-    #ifdef KMEM_SLABHEAP_ENABLE
-    assert( kmem_alloc_size(SLABHEAP_MIN_SIZE - 2) == SLABHEAP_MIN_SIZE );
-    assert( kmem_alloc_size(SLABHEAP_MIN_SIZE + 2) == CEIL_POW2(SLABHEAP_MIN_SIZE + 1) );
-    assert( kmem_alloc_size(SLABHEAP_MAX_SIZE - 2) == SLABHEAP_MAX_SIZE );
-    assert( kmem_alloc_size(SLABHEAP_MAX_SIZE + 2) == heap_min_size );
+    #ifdef RMEM_SLABHEAP_ENABLE
+    assert( rmem_alloc_size(SLABHEAP_MIN_SIZE - 2) == SLABHEAP_MIN_SIZE );
+    assert( rmem_alloc_size(SLABHEAP_MIN_SIZE + 2) == CEIL_POW2(SLABHEAP_MIN_SIZE + 1) );
+    assert( rmem_alloc_size(SLABHEAP_MAX_SIZE - 2) == SLABHEAP_MAX_SIZE );
+    assert( rmem_alloc_size(SLABHEAP_MAX_SIZE + 2) == heap_min_size );
     #endif
 
-    assert( kmem_alloc_size(heap_min_size - 2) == heap_min_size );
-    assert( kmem_alloc_size(heap_min_size + CHUNK_SIZE + 1)
+    assert( rmem_alloc_size(heap_min_size - 2) == heap_min_size );
+    assert( rmem_alloc_size(heap_min_size + CHUNK_SIZE + 1)
             == heap_min_size + CHUNK_SIZE*2 );
   }
 
@@ -1123,136 +1316,136 @@ static void test_kmem() {
   rmm_t* mm = rmm_create(assertnotnull( osvmem_alloc(memsize) ), memsize);
 
   // create an allocator with ~4MiB initial memory
-  rmemalloc_t* a = assertnotnull( kmem_allocator_create(mm, 4 * MiB) );
+  rmemalloc_t* a = assertnotnull( rmem_allocator_create(mm, 4 * MiB) );
 
   { // resize a slab allocation
-    rmem2_t m, old;
+    rmem_t m, old;
 
     // canary data
     u8 expected_data[SLABHEAP_MIN_SIZE];
     memset(expected_data, 0xab, sizeof(expected_data));
 
     // initial allocation
-    m = kmem_alloc(a, SLABHEAP_MIN_SIZE * 2); // 2nd order slab
-    memcpy(m.start, expected_data, sizeof(expected_data));
+    m = rmem_alloc(a, SLABHEAP_MIN_SIZE * 2); // 2nd order slab
+    memcpy(m.p, expected_data, sizeof(expected_data));
 
     // shrink by 2B: noop (will update size)
     old = m;
-    assert( kmem_resize(a, &m, (SLABHEAP_MIN_SIZE * 2) - 2 ) );
-    assert( m.start == old.start );
+    assert( rmem_resize(a, &m, (SLABHEAP_MIN_SIZE * 2) - 2 ) );
+    assert( m.p == old.p );
     assert( m.size == SLABHEAP_MIN_SIZE * 2 );
-    assert( memcmp(m.start, expected_data, sizeof(expected_data)) == 0 );
+    assert( memcmp(m.p, expected_data, sizeof(expected_data)) == 0 );
 
     // shrink
     old = m;
-    assert( kmem_resize(a, &m, SLABHEAP_MIN_SIZE) );
+    assert( rmem_resize(a, &m, SLABHEAP_MIN_SIZE) );
     assert( m.size < old.size );
-    assert( memcmp(m.start, expected_data, sizeof(expected_data)) == 0 );
+    assert( memcmp(m.p, expected_data, sizeof(expected_data)) == 0 );
 
     // grow
     old = m;
-    assert( kmem_resize(a, &m, SLABHEAP_MIN_SIZE * 2) );
+    assert( rmem_resize(a, &m, SLABHEAP_MIN_SIZE * 2) );
     assert( m.size > old.size );
-    assert( memcmp(m.start, expected_data, sizeof(expected_data)) == 0 );
+    assert( memcmp(m.p, expected_data, sizeof(expected_data)) == 0 );
 
-    kmem_free(a, m);
+    rmem_free(a, m);
   }
 
   { // resize a subheap allocation
-    rmem2_t m, old;
+    rmem_t m, old;
 
     // canary data
     u8 expected_data[CHUNK_SIZE];
     memset(expected_data, 0xab, sizeof(expected_data));
 
     // initial allocation (force subheap use, instead of slabs)
-    m = kmem_alloc(a, MAX(SLABHEAP_MAX_SIZE + 1, CHUNK_SIZE*2));
-    memcpy(m.start, expected_data, sizeof(expected_data));
+    m = rmem_alloc(a, MAX(SLABHEAP_MAX_SIZE + 1, CHUNK_SIZE*2));
+    memcpy(m.p, expected_data, sizeof(expected_data));
 
     // shrink (noop)
     old = m;
-    assert( kmem_resize(a, &m, old.size - sizeof(void*)) );
-    assert( m.start == old.start );
+    assert( rmem_resize(a, &m, old.size - sizeof(void*)) );
+    assert( m.p == old.p );
     assert( m.size == old.size );
-    assert( memcmp(m.start, expected_data, sizeof(expected_data)) == 0 );
+    assert( memcmp(m.p, expected_data, sizeof(expected_data)) == 0 );
 
     // shrink
     old = m;
-    assert( kmem_resize(a, &m, old.size - CHUNK_SIZE) );
+    assert( rmem_resize(a, &m, old.size - CHUNK_SIZE) );
     assert( m.size < old.size );
-    assert( memcmp(m.start, expected_data, sizeof(expected_data)) == 0 );
+    assert( memcmp(m.p, expected_data, sizeof(expected_data)) == 0 );
 
     // grow
     old = m;
-    assert( kmem_resize(a, &m, old.size + sizeof(void*)) );
+    assert( rmem_resize(a, &m, old.size + sizeof(void*)) );
     assert( m.size > old.size );
-    assert( memcmp(m.start, expected_data, sizeof(expected_data)) == 0 );
+    assert( memcmp(m.p, expected_data, sizeof(expected_data)) == 0 );
 
-    kmem_free(a, m);
+    rmem_free(a, m);
   }
 
 
-  rmem2_t p1, p2, p3, p4, p5;
+  rmem_t p1, p2, p3, p4, p5;
 
   // slabheap
-  rmem2_t regions[SLABHEAP_BLOCK_SIZE / 64];
-  // rmem2_t regions[4];
+  rmem_t regions[SLABHEAP_BLOCK_SIZE / 64];
+  // rmem_t regions[4];
   for (usize i = 0; i < countof(regions); i++)
-    regions[i] = kmem_alloc(a, 64);
+    regions[i] = rmem_alloc(a, 64);
   for (usize i = 0; i < countof(regions); i++)
-    kmem_free(a, regions[i]);
+    rmem_free(a, regions[i]);
   // push it over the limit
-  p1 = kmem_alloc(a, 64);
-  kmem_free(a, p1);
+  p1 = rmem_alloc(a, 64);
+  rmem_free(a, p1);
 
-  p1 = kmem_alloc(a, 120);
-  tlog("kmem_alloc(%u) => " RMEM_FMT, 120u, RMEM_FMT_ARGS(p1));
+  p1 = rmem_alloc(a, 120);
+  tlog("rmem_alloc(%u) => " RMEM_FMT, 120u, RMEM_FMT_ARGS(p1));
 
   usize req_size = 100;
-  p2 = kmem_alloc_aligned(a, req_size, 512);
-  tlog("kmem_alloc_aligned(%zu,512) => " RMEM_FMT " (expect %p)",
-    req_size, RMEM_FMT_ARGS(p2), (void*)ALIGN2((uintptr)p2.start,512) );
+  p2 = rmem_alloc_aligned(a, req_size, 512);
+  tlog("rmem_alloc_aligned(%zu,512) => " RMEM_FMT " (expect %p)",
+    req_size, RMEM_FMT_ARGS(p2), (void*)ALIGN2((uintptr)p2.p,512) );
 
-  kmem_free(a, p1);
-  kmem_free(a, p2);
+  rmem_free(a, p1);
+  rmem_free(a, p2);
 
-  p3 = kmem_alloc(a, 800);
-  tlog("kmem_alloc(800) => " RMEM_FMT, RMEM_FMT_ARGS(p3));
-  kmem_free(a, p3);
+  p3 = rmem_alloc(a, 800);
+  tlog("rmem_alloc(800) => " RMEM_FMT, RMEM_FMT_ARGS(p3));
+  rmem_free(a, p3);
 
-  p1 = kmem_alloc(a, CHUNK_SIZE*(BEST_FIT_THRESHOLD-2));
-  p1 = kmem_alloc(a, CHUNK_SIZE);   // 0-2
-  p2 = kmem_alloc(a, CHUNK_SIZE*3); // 2-6
-  p3 = kmem_alloc(a, CHUNK_SIZE);   // 6-8
-  p4 = kmem_alloc(a, CHUNK_SIZE);   // 8-10
-  p5 = kmem_alloc(a, CHUNK_SIZE*3); // 10-14
-  kmem_free(a, p2);
-  kmem_free(a, p4);
-  // kmem_debug_dump_state(a, NULL, 0);
+  p1 = rmem_alloc(a, CHUNK_SIZE*(BEST_FIT_THRESHOLD-2));
+  p1 = rmem_alloc(a, CHUNK_SIZE);   // 0-2
+  p2 = rmem_alloc(a, CHUNK_SIZE*3); // 2-6
+  p3 = rmem_alloc(a, CHUNK_SIZE);   // 6-8
+  p4 = rmem_alloc(a, CHUNK_SIZE);   // 8-10
+  p5 = rmem_alloc(a, CHUNK_SIZE*3); // 10-14
+  rmem_free(a, p2);
+  rmem_free(a, p4);
+  // rmem_debug_dump_state(a, NULL, 0);
   // now, for a CHUNK_SIZE allocation,
   // the "best fit" allocation strategy should select chunks 8-10, and
   // the "first fit" allocation strategy should select chunks 2-4.
 
-  p2 = kmem_alloc(a, CHUNK_SIZE);
-  // kmem_debug_dump_state(a, p2, CHUNK_SIZE);
-  kmem_free(a, p2);
+  p2 = rmem_alloc(a, CHUNK_SIZE);
+  // rmem_debug_dump_state(a, p2, CHUNK_SIZE);
+  rmem_free(a, p2);
 
-  kmem_free(a, p5);
-  kmem_free(a, p3);
-  kmem_free(a, p1);
+  rmem_free(a, p5);
+  rmem_free(a, p3);
+  rmem_free(a, p1);
 
-  kmem_allocator_free(a);
-  osvmem_free((void*)rmm_startaddr(mm), memsize);
+  rmem_allocator_free(a);
   rmm_dispose(mm);
+  osvmem_free((void*)rmm_startaddr(mm), memsize);
 
-  tlog("——————————————————");
+  dlog("————————— END %s —————————", __FUNCTION__);
 }
-#endif // KMEM_RUN_TEST_ON_INIT
+#endif // RMEM_RUN_TEST_ON_INIT
 
 
 rerror init_rmem() {
-  #if defined(KMEM_RUN_TEST_ON_INIT) && defined(DEBUG)
-  test_kmem();
+  #if defined(RMEM_RUN_TEST_ON_INIT) && defined(DEBUG)
+  test_rmem();
   #endif
   // currently nothing to initialize
   return 0;

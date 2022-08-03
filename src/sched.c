@@ -1,6 +1,8 @@
 // virtual machine
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
+#include "abuf.h"
+#include "thread.h"
 
 //#define DEBUG_VM_LOG_LOADSTORE // define to dlog LOAD and STORE operations
 
@@ -305,7 +307,7 @@ enum vmerror {
 #if RSM_SAFE
   static void _vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
     char buf[2048];
-    abuf s1 = abuf_make(buf, sizeof(buf)); abuf* b = &s1;
+    abuf_t s1 = abuf_make(buf, sizeof(buf)); abuf_t* b = &s1;
     pc--; // undo the increment to make pc point to the violating instruction
     #define _(ERR, fmt, args...) case ERR: abuf_fmt(b, fmt, ##args); break;
     switch ((enum vmerror)err) {

@@ -41,6 +41,7 @@
 #include "rsmimpl.h"
 #include "list.h"
 #include "bits.h"
+#include "thread.h"
 
 #define MAX_ORDER   19  /* 19=2GiB, 20=4GiB, 21=8GiB, 22=16GiB, ... */
 #define OBJ_MAXSIZE (1ul * GiB)

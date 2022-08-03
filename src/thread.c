@@ -1,4 +1,5 @@
 #include "rsmimpl.h"
+#include "thread.h"
 
 //#define USE_UNIX_SEMA
 

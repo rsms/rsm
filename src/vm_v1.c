@@ -1,6 +1,7 @@
 // virtual machine
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
+#include "abuf.h"
 
 //#define DEBUG_VM_LOG_LOADSTORE // define to dlog LOAD and STORE operations
 
@@ -116,7 +117,7 @@ enum vmerror {
 
 static void _vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
   char buf[2048];
-  abuf s1 = abuf_make(buf, sizeof(buf)); abuf* s = &s1;
+  abuf_t s1 = abuf_make(buf, sizeof(buf)); abuf_t* s = &s1;
   pc--; // undo the increment to make pc point to the violating instruction
   #define S(ERR, fmt, args...) case ERR: abuf_fmt(s, fmt, ##args); break;
   switch ((enum vmerror)err) {
@@ -270,7 +271,7 @@ static rerror tesdev_close(rvm_dev_t* dev, void* m, usize msize) {
 }
 static rerror testdev_refresh(rvm_dev_t* dev, void* m, usize msize, u32 flags) {
   char buf[(sizeof(testdev_mem)*3) + 1];
-  abuf s = abuf_make(buf, sizeof(buf));
+  abuf_t s = abuf_make(buf, sizeof(buf));
   abuf_repr(&s, testdev_mem, sizeof(testdev_mem));
   abuf_terminate(&s);
   dlog("[testdev_refresh] device memory contents:\n\"%s\"", buf);
@@ -527,7 +528,7 @@ static void log_memory(rrom* rom, vmstate* vs) {
   );
   if (rom->datasize > 0) {
     char buf[1024];
-    abuf s = abuf_make(buf, sizeof(buf));
+    abuf_t s = abuf_make(buf, sizeof(buf));
     if (rom->datasize > sizeof(buf)/3) {
       abuf_reprhex(&s, membase, sizeof(buf)/3 - strlen("…"));
       abuf_str(&s, "…");

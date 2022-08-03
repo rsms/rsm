@@ -1,6 +1,7 @@
 // ROM stuff
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
+#include "asm.h"
 
 typedef u8 rrom_skind; // section kind
 enum rrom_skind {

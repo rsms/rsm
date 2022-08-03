@@ -8,6 +8,7 @@
 //
 #include "rsmimpl.h"
 #include "map.h"
+#include "abuf.h"
 
 #define DELMARK ((const char*)1) /* assume no key is ever at address 0x1 */
 
@@ -356,7 +357,7 @@ double smap_optimize(smap* m, usize iterations, rmemalloc_t* ma) {
 
 
 usize smap_cfmt(char* buf, usize bufcap, const smap* m, const char* name) {
-  abuf s = abuf_make(buf, bufcap);
+  abuf_t s = abuf_make(buf, bufcap);
   abuf_fmt(&s, "static const smapent %s_entries[%u] = {\n ", name, m->cap);
   char* lnstart = s.p;
   for (u32 i = 0; i < m->cap; i++) {

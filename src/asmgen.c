@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #ifndef RSM_NO_ASM
 #include "rsmimpl.h"
+#include "array.h"
 #include "map.h"
+#include "abuf.h"
+#include "asm.h"
 
 #define DEBUG_LOG_DATA // define to log debug messages about data layout
 
@@ -1016,7 +1019,7 @@ static void dlog_gdata(gdata* nullable d) {
     return;
   }
   char buf[1024];
-  abuf s = abuf_make(buf, sizeof(buf));
+  abuf_t s = abuf_make(buf, sizeof(buf));
   if (d->initp) {
     abuf_reprhex(&s, d->initp, (usize)d->size);
     if (d->size < (u64)d->align) {

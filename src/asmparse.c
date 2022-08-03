@@ -3,6 +3,7 @@
 #ifndef RSM_NO_ASM
 #include "rsmimpl.h"
 #include "map.h"
+#include "asm.h"
 
 //#define LOG_TOKENS // define to log() token scanning
 //#define LOG_AST    // define to log() parsed top-level ast nodes

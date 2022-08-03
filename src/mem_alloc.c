@@ -5,7 +5,6 @@
 #include "rsmimpl.h"
 #include "list.h"
 #include "bits.h"
-#include "mem.h"
 
 //
 // This implements a generic heap allocator backed by a few small-size slabs

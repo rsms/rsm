@@ -2,7 +2,6 @@
 // See vmem.txt for in-depth documentation
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
-#include "mem.h"
 
 // constants
 //   PT_BITS: bits per page table; a divisor of VFN_BITS.
@@ -98,7 +97,7 @@ static mpte_t mpte_make(u64 outaddr) {
 
 static mptab_t nullable mptab_create(rmm_t* mm) {
   usize nbyte = PT_LEN * sizeof(mpte_t);
-  mptab_t ptab = rmm_allocpages_bytes(mm, nbyte);
+  mptab_t ptab = rmm_allocpages(mm, ALIGN2(nbyte, PAGE_SIZE) / PAGE_SIZE);
   if UNLIKELY(ptab == NULL)
     return NULL;
   memset(ptab, 0, nbyte);
@@ -113,7 +112,8 @@ static mpagedir_t* nullable mpagedir_create(rmm_t* mm) {
     return NULL;
   }
   // FIXME whole page allocated!
-  mpagedir_t* pagedir = rmm_allocpages_bytes(mm, sizeof(mpagedir_t));
+  mpagedir_t* pagedir =
+    rmm_allocpages(mm, ALIGN2(sizeof(mpagedir_t), PAGE_SIZE) / PAGE_SIZE);
   if UNLIKELY(!pagedir)
     return NULL;
   pagedir->mm = mm;

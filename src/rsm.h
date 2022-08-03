@@ -334,13 +334,13 @@ enum rerr_ {
 };
 
 //———————————————————————————————————————————————————————————————————————————————————————
-// rmem_t describes a memory region
+// rmem_t: memory region
 typedef struct {
   void* nullable p;    // start address
   usize          size; // size in bytes
 } rmem_t;
 
-#define RMEM(p, size)  ((rmem_t){ p, size })
+#define RMEM(p, size)  ((rmem_t){ (p), (size) })
 
 // RMEM_FMT is used for printf formatting of a rmem_t
 #define RMEM_FMT              "{%p … %p %zu}"
@@ -478,13 +478,6 @@ usize rmem_avail(rmemalloc_t*);
 // rmem_cap returns the total number of bytes managed by the allocator
 usize rmem_cap(rmemalloc_t*);
 
-// OLD memory allocation interface
-// static void* nullable rmem_alloc(rmem m, usize size, usize alignment);
-// static void* nullable rmem_resize(
-//   rmem m, void* nullable p, usize oldsize, usize newsize, usize newalignment);
-// static void rmem_free(rmem m, void* p, usize size);
-
-
 //——————————————————————————————————————————————————————————————————————————————————————
 
 // rromimg_t: ROM image layout, a portable binary blob
@@ -509,7 +502,7 @@ typedef struct {
   u32           dataalign; // data segment alignment (in bytes)
 } rrom_t;
 
-// rvmstatus: VM status
+// rvmstatus_t: VM status
 typedef u8 rvmstatus_t;
 enum rvmstatus {
   RVM_INIT,
@@ -517,7 +510,7 @@ enum rvmstatus {
   RVM_END = 0xff,
 };
 
-// rvm: VM instance
+// rvm_t: VM instance
 typedef struct {
   rvmstatus_t status;
   u64         iregs[RSM_NREGS];
@@ -576,12 +569,7 @@ void rsm_unloadfile(rmem_t); // unload file loaded with rsm_loadfile
 // assembler API (optional)
 #ifndef RSM_NO_ASM
 
-typedef struct rasm    rasm_t;    // assembly session (think of it as one source file)
-typedef struct rnode   rnode_t;   // AST node
-typedef struct rdiag   rdiag_t;   // diagnostic report
-typedef struct rsrcpos rsrcpos_t; // line & column source position
-
-// source tokens (rtok_t)
+// rtok_t: source token
 typedef u8 rtok_t;
 #define RSM_FOREACH_TOKEN(_) \
 _( RT_END ) \
@@ -645,20 +633,22 @@ enum rtok {
   rtok_COUNT
 } RSM_END_ENUM2(rtok, rtok_t)
 
-// rdiaghandler is called with a diagnostict report.
-// Return false to stop the process (e.g. stop assembling.)
-typedef bool(*rdiaghandler_t)(const rdiag_t*, void* nullable userdata);
-
-struct rdiag {
+// rdiag_t: diagnostic report
+typedef struct rdiag {
   int         code;      // error code (1=error, 0=warning)
   const char* msg;       // descriptive message including "srcname:line:col: type:"
   const char* msgshort;  // short descriptive message without source location
   const char* srclines;  // source context (a few lines of the source; may be empty)
   const char* srcname;   // eg filename
   u32         line, col; // origin (0 if unknown or not line-specific)
-};
+} rdiag_t;
 
-struct rasm {
+// rdiaghandler_t is called with a diagnostic report.
+// Return false to stop the process (e.g. stop assembling.)
+typedef bool(*rdiaghandler_t)(const rdiag_t*, void* nullable userdata);
+
+// rasm_t: assembly session (think of it as one source file)
+typedef struct rasm {
   rmemalloc_t*   memalloc;    // memory allocator
   const char*    srcdata;     // input source bytes
   usize          srclen;      // length of srcdata
@@ -668,12 +658,15 @@ struct rasm {
   rdiaghandler_t diaghandler; // diagnostic report callback
   void* nullable userdata;    // passed along to diaghandler
   void* _internal[8];
-};
+} rasm_t;
 
-struct rsrcpos {
+// rsrcpos_t: line & column source position
+typedef struct rsrcpos {
   u32 line, col;
-};
+} rsrcpos_t;
 
+// rnode_t: AST node
+typedef struct rnode rnode_t;
 struct rnode {
   rtok_t            t;    // type
   rsrcpos_t         pos;  // source position, or {0,0} if unknown

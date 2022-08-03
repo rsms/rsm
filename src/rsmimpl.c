@@ -11,6 +11,7 @@
   #include <execinfo.h> // backtrace* (for _panic)
   #include <sys/stat.h>
   #include <sys/mman.h> // mmap
+  #include <string.h> // strerror
 
   #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -53,8 +54,16 @@
       #include <mach/vm_statistics.h>
       #include <mach/vm_prot.h>
     #endif
-    #ifndef MAP_ANON
-      #define MAP_ANON MAP_ANONYMOUS
+    #ifndef MAP_ANONYMOUS
+      #ifdef MAP_ANON
+        #define MAP_ANONYMOUS MAP_ANON
+      #else
+        #define MAP_ANONYMOUS 0
+      #endif
+    #endif
+    // MAP_NORESERVE flag says "don't reserve needed swap area"
+    #ifndef MAP_NORESERVE
+      #define MAP_NORESERVE 0
     #endif
     #define HAS_MMAP
   #endif // _WIN32
@@ -474,61 +483,23 @@ void* nullable osvmem_alloc(usize nbytes) {
   #ifndef HAS_MMAP
     return NULL;
   #else
-    if (nbytes == 0)
+    if (nbytes == 0) {
+      dlog("mmap failed: zero size requested");
       return NULL;
+    }
 
-    #if defined(DEBUG) && defined(HAS_MPROTECT)
-      usize nbytes2;
-      if (check_add_overflow(nbytes, MEM_PAGESIZE, &nbytes2)) {
-        // nbytes too large
-        nbytes2 = 0;
-      } else {
-        nbytes += MEM_PAGESIZE;
-      }
-    #endif
+    int protection = PROT_READ | PROT_WRITE;
+    int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE;
 
-    #if defined(__MACH__) && defined(__APPLE__) && defined(VM_PROT_DEFAULT)
-      // vm_map_entry_is_reusable uses VM_PROT_DEFAULT as a condition for page reuse.
-      // See http://fxr.watson.org/fxr/source/osfmk/vm/vm_map.c?v=xnu-2050.18.24#L10705
-      int mmapprot = VM_PROT_DEFAULT;
-    #else
-      int mmapprot = PROT_READ | PROT_WRITE;
-    #endif
+    void* ptr = mmap(0, nbytes, protection, flags, -1, 0);
 
-    int mmapflags = MAP_PRIVATE | MAP_ANON
-      #ifdef MAP_NORESERVE
-      | MAP_NORESERVE // don't reserve needed swap area
-      #endif
-    ;
-
-    // note: VM_FLAGS_PURGABLE implies a 2GB allocation limit on macos 10
-    // #if defined(__MACH__) && defined(__APPLE__) && defined(VM_FLAGS_PURGABLE)
-    //   int fd = VM_FLAGS_PURGABLE; // Create a purgable VM object for new VM region
-    // #else
-    int fd = -1;
-
-    void* ptr = mmap(0, nbytes, mmapprot, mmapflags, fd, 0);
-    if UNLIKELY(ptr == MAP_FAILED)
+    if UNLIKELY(ptr == MAP_FAILED | ptr == NULL) {
+      dlog("mmap failed with errno %d %s", errno, strerror(errno));
       return NULL;
-
-    // protect the last page from access to cause a crash on out of bounds access
-    #if defined(DEBUG) && defined(HAS_MPROTECT)
-      if (nbytes2 != 0) {
-        const usize pagesize = MEM_PAGESIZE;
-        assert(nbytes > pagesize);
-        void* protPagePtr = ptr;
-        protPagePtr = &((u8*)ptr)[nbytes - pagesize];
-        int status = mprotect(protPagePtr, pagesize, PROT_NONE);
-        if LIKELY(status == 0) {
-          *nbytes = nbytes - pagesize;
-        } else {
-          dlog("mprotect failed");
-        }
-      }
-    #endif
+    }
 
     return ptr;
-  #endif // HAS_MMAP
+  #endif
 }
 
 

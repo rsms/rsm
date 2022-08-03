@@ -118,7 +118,7 @@ rerror rsm_loadrom(rrom_t* rom) {
   }
 
   const u8* p = (const u8*)rom->img->data;
-  const u8* end = p + rom->imgsize - sizeof(rromimg);
+  const u8* end = p + rom->imgsize - sizeof(rromimg_t);
   if UNLIKELY(p == end)
     return 0;
   return load_section(rom, p, end, 0);
@@ -201,7 +201,7 @@ rerror rom_build(rrombuild_t* rb, rmemalloc_t* ma, rrom_t* rom) {
 
   // Calculate image size
   // Important: CALC_SECTION_SIZE order must match START_SECTION order
-  usize imgz = sizeof(rromimg);
+  usize imgz = sizeof(rromimg_t);
   usize sechsize[rrom_skind_MAX+1] = {0}; // header size with padding
   usize secbsize[rrom_skind_MAX+1] = {0}; // body size with padding (duplicate)
   usize secalign[rrom_skind_MAX+1] = {0};
@@ -232,7 +232,7 @@ rerror rom_build(rrombuild_t* rb, rmemalloc_t* ma, rrom_t* rom) {
 
   // allocate memory
   rmem_t imgmem = rmem_alloc_aligned(ma, imgz, sizeof(void*)); // TODO: alignment
-  rromimg* img = imgmem.p;
+  rromimg_t* img = imgmem.p;
   if UNLIKELY(img == NULL)
     return rerr_nomem;
 
@@ -242,7 +242,7 @@ rerror rom_build(rrombuild_t* rb, rmemalloc_t* ma, rrom_t* rom) {
 
   // p points to current "fill location" of the image
   void* base = img;
-  u8* p = base + sizeof(rromimg);
+  u8* p = base + sizeof(rromimg_t);
 
   for (rrom_skind kind = rrom_skind_MIN; kind <= rrom_skind_MAX; kind++) {
     usize bodysize = secbsize[kind];

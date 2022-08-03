@@ -473,19 +473,19 @@ usize rmem_cap(rmemalloc_t*);
 
 //——————————————————————————————————————————————————————————————————————————————————————
 
-// rromimg: ROM image layout, a portable binary blob
+// rromimg_t: ROM image layout, a portable binary blob
 typedef struct {
   u8 magic[4]; // RSM_ROM_MAGIC
   u8 version;
   u8 data[];
-} rromimg;
+} rromimg_t;
 
 // rrom_t: ROM (read only media); the container for an RSM program
 typedef struct {
   // ROM image
-  rromimg* img;
-  usize    imgsize; // size of img, in bytes
-  rmem_t   imgmem;  // img memory region (for use with rmem_free)
+  rromimg_t* img;
+  usize      imgsize; // size of img, in bytes
+  rmem_t     imgmem;  // img memory region (for use with rmem_free)
 
   // fields populated on demand by rsm_loadrom
   const rinstr* code;      // vm instructions array (pointer into img)

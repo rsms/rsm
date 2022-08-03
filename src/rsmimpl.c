@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
 #include "hash.h"
-// #include "abuf.h"
 
 #ifndef RSM_NO_LIBC
   #include <stdio.h>

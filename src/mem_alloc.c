@@ -18,7 +18,7 @@
 // subheap is allocated and added to the subheaps list.
 //
 
-// RMEM_TRACE: uncomment to enable logging a lot of info via dlog/
+// RMEM_TRACE: uncomment to enable logging a lot of info via dlog
 //#define RMEM_TRACE
 
 // RMEM_RUN_TEST_ON_INIT: uncomment to run tests during exe init in DEBUG builds

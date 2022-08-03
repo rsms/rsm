@@ -15,28 +15,28 @@
 #endif
 
 
-WASM_IMPORT rerror unixtime(i64* sec, u64* nsec);
+WASM_IMPORT rerr_t unixtime(i64* sec, u64* nsec);
 #ifdef CLOCK_REALTIME
-  rerror unixtime(i64* sec, u64* nsec) {
+  rerr_t unixtime(i64* sec, u64* nsec) {
     struct timespec ts;
     if (clock_gettime(CLOCK_REALTIME, &ts))
-      return rerror_errno(errno);
+      return rerr_errno(errno);
     *sec = (i64)ts.tv_sec;
     *nsec = (u64)ts.tv_nsec;
     return 0;
   }
 #elif !defined(RSM_NO_LIBC)
-  rerror unixtime(i64* sec, u64* nsec) {
+  rerr_t unixtime(i64* sec, u64* nsec) {
     struct timeval tv;
     if (gettimeofday(&tv, 0) != 0)
-      return rerror_errno(errno);
+      return rerr_errno(errno);
     *sec = (i64)tv.tv_sec;
     *nsec = ((u64)tv.tv_usec) * 1000;
     return 0;
   }
 #elif !defined(__wasm__)
   #warning TODO RSM_NO_LIBC unixtime
-  rerror unixtime(i64* sec, u64* nsec) {
+  rerr_t unixtime(i64* sec, u64* nsec) {
     return rerr_not_supported;
   }
 #endif
@@ -101,7 +101,7 @@ usize fmtduration(char buf[25], u64 duration_ns) {
   return i;
 }
 
-rerror init_time() {
+rerr_t init_time() {
   #if defined(__APPLE__)
     if (mach_timebase_info(&tbase) != KERN_SUCCESS)
       return rerr_not_supported;

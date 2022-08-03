@@ -247,7 +247,7 @@ void rasm_dispose(rasm_t* a) {
   #endif
 }
 
-rerror rsm_loadfile(const char* filename, rmem_t* data_out) {
+rerr_t rsm_loadfile(const char* filename, rmem_t* data_out) {
   return mmapfile(filename, data_out);
 }
 

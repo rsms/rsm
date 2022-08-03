@@ -255,21 +255,21 @@ static u64 _read(VMPARAMS, u64 fd, u64 addr, u64 size) {
 typedef struct rvm_dev_t rvm_dev_t;
 struct rvm_dev_t {
   u32 id;
-  rerror(*open)(rvm_dev_t*, void** mp, usize* msizep, u32 flags);
-  rerror(*close)(rvm_dev_t*, void* m, usize msize);
-  rerror(*refresh)(rvm_dev_t*, void* m, usize msize, u32 flags);
+  rerr_t(*open)(rvm_dev_t*, void** mp, usize* msizep, u32 flags);
+  rerr_t(*close)(rvm_dev_t*, void* m, usize msize);
+  rerr_t(*refresh)(rvm_dev_t*, void* m, usize msize, u32 flags);
 };
 
 static void* testdev_mem[32/sizeof(void*)];
-static rerror tesdev_open(rvm_dev_t* dev, void** mp, usize* msizep, u32 flags) {
+static rerr_t tesdev_open(rvm_dev_t* dev, void** mp, usize* msizep, u32 flags) {
   *mp = testdev_mem;
   *msizep = sizeof(testdev_mem);
   return 0;
 }
-static rerror tesdev_close(rvm_dev_t* dev, void* m, usize msize) {
+static rerr_t tesdev_close(rvm_dev_t* dev, void* m, usize msize) {
   return 0;
 }
-static rerror testdev_refresh(rvm_dev_t* dev, void* m, usize msize, u32 flags) {
+static rerr_t testdev_refresh(rvm_dev_t* dev, void* m, usize msize, u32 flags) {
   char buf[(sizeof(testdev_mem)*3) + 1];
   abuf_t s = abuf_make(buf, sizeof(buf));
   abuf_repr(&s, testdev_mem, sizeof(testdev_mem));
@@ -289,9 +289,9 @@ static u64 dev_open(VMPARAMS, u64 devid) {
   if (devid < 1 || devid > M_SEG_COUNT-1)
     return 0;
   testdev.id = (u32)devid;
-  rerror err = testdev.open(&testdev, &vs->mbase[devid], &vs->msize[devid], 0);
+  rerr_t err = testdev.open(&testdev, &vs->mbase[devid], &vs->msize[devid], 0);
   if (err) {
-    log("devopen [%u] failed: %s", testdev.id, rerror_str(err));
+    log("devopen [%u] failed: %s", testdev.id, rerr_str(err));
     return 0;
   }
   u64 addr = devid * M_SEG_SIZE;
@@ -542,18 +542,18 @@ static void log_memory(rrom_t* rom, vmstate* vs) {
 #endif // DEBUG
 
 
-static rerror vm_loadrom(rrom_t* rom) {
+static rerr_t vm_loadrom(rrom_t* rom) {
   if (rom->code)
     return 0; // already loaded
-  rerror err = rsm_loadrom(rom);
+  rerr_t err = rsm_loadrom(rom);
   if (err == 0 && (rom->code == NULL || rom->codelen == 0))
     err = rerr_invalid; // ROM without (or with empty) code section
   return err;
 }
 
 
-rerror rsm_vmexec(rvm* vm, rrom_t* rom) {
-  rerror err = vm_loadrom(rom);
+rerr_t rsm_vmexec(rvm* vm, rrom_t* rom) {
+  rerr_t err = vm_loadrom(rom);
   if (err)
     return err;
 
@@ -624,8 +624,8 @@ rerror rsm_vmexec(rvm* vm, rrom_t* rom) {
   vmexec(&vs, iregs, rom->code, 0);
 
   if (vs.mbase[testdev.id]) {
-    rerror err = testdev.refresh(&testdev, vs.mbase[testdev.id], vs.msize[testdev.id], 0);
-    rerror err2 = testdev.close(&testdev, vs.mbase[testdev.id], vs.msize[testdev.id]);
+    rerr_t err = testdev.refresh(&testdev, vs.mbase[testdev.id], vs.msize[testdev.id], 0);
+    rerr_t err2 = testdev.close(&testdev, vs.mbase[testdev.id], vs.msize[testdev.id]);
     return err ? err : err2;
   }
 

@@ -1443,7 +1443,7 @@ static void test_rmem() {
 #endif // RMEM_RUN_TEST_ON_INIT
 
 
-rerror init_rmem() {
+rerr_t init_rmem() {
   #if defined(RMEM_RUN_TEST_ON_INIT) && DEBUG
   test_rmem();
   #endif

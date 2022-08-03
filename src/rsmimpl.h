@@ -735,14 +735,14 @@ void rsm_qsort(void* base, usize nmemb, usize size, rsm_qsort_cmp cmp, void* nul
 #define tolower(c) ((c) | 0x20)
 
 usize stru64(char buf[64], u64 v, u32 base);
-rerror parseu64(const char* src, usize srclen, int base, u64* result, u64 cutoff);
+rerr_t parseu64(const char* src, usize srclen, int base, u64* result, u64 cutoff);
 
-rerror mmapfile(const char* filename, rmem_t* data_out);
+rerr_t mmapfile(const char* filename, rmem_t* data_out);
 void unmapfile(rmem_t);
-rerror read_stdin_data(rmemalloc_t* ma, usize maxlen, rmem_t* data_out);
-rerror writefile(const char* filename, u32 mode, const void* data, usize size);
+rerr_t read_stdin_data(rmemalloc_t* ma, usize maxlen, rmem_t* data_out);
+rerr_t writefile(const char* filename, u32 mode, const void* data, usize size);
 
-rerror rerror_errno(int errnoval);
+rerr_t rerr_errno(int errnoval);
 
 noreturn void _panic(const char* file, int line, const char* fun, const char* fmt, ...)
   ATTR_FORMAT(printf, 4, 5);
@@ -787,7 +787,7 @@ u32 fmtinstr(abuf_t* s, rin_t in, rfmtflag_t fl);
 
 // unixtime stores the number of seconds + nanoseconds since Jan 1 1970 00:00:00 UTC
 // at *sec and *nsec
-rerror unixtime(i64* sec, u64* nsec);
+rerr_t unixtime(i64* sec, u64* nsec);
 
 // nanotime returns nanoseconds measured from an undefined point in time.
 // It uses the most high-resolution, low-latency clock available on the system.

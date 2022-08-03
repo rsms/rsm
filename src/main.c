@@ -48,7 +48,7 @@ malformed:
 static int parse_bytesize_opt(char opt, const char* arg, usize* resultp) {
   u64 result;
   usize len = strlen(arg);
-  rerror err;
+  rerr_t err;
   if (len == 0) {
     err = rerr_invalid;
     goto error;
@@ -72,7 +72,7 @@ static int parse_bytesize_opt(char opt, const char* arg, usize* resultp) {
   *resultp = (usize)result;
   return 0;
 error:
-  errmsg("-%c %s: invalid value: %s", opt, arg, rerror_str(err));
+  errmsg("-%c %s: invalid value: %s", opt, arg, rerr_str(err));
   return 1;
 }
 
@@ -133,21 +133,21 @@ static bool loadfile(
   // rmemalloc_t* ma, const char* nullable infile, void** p, usize* size)
 {
   if (infile) {
-    rerror err = rsm_loadfile(infile, data_out);
+    rerr_t err = rsm_loadfile(infile, data_out);
     if (err) {
-      fprintf(stderr, "%s: %s\n", infile, rerror_str(err));
+      fprintf(stderr, "%s: %s\n", infile, rerr_str(err));
       return false;
     }
     return true;
   }
   usize limit = 1024 * MiB;
-  rerror err = read_stdin_data(ma, limit, data_out);
+  rerr_t err = read_stdin_data(ma, limit, data_out);
   if (err == 0)
     return true;
   if (err == rerr_badfd) { // stdin is a tty
     errmsg("missing <infile> (see %s -h for help)", prog);
   } else {
-    errmsg("error reading stdin: %s", rerror_str(err));
+    errmsg("error reading stdin: %s", rerr_str(err));
   }
   return false;
 }
@@ -217,17 +217,17 @@ static bool compile(
   if (a.errcount) // note: errors have been reported by diaghandler
     return false;
 
-  rerror err = rasm_gen(&a, mod, ma, rom);
+  rerr_t err = rasm_gen(&a, mod, ma, rom);
   if (err) {
-    errmsg("(rasm_gen) %s", rerror_str(err));
+    errmsg("(rasm_gen) %s", rerr_str(err));
     return false;
   }
 
   if (outfile) {
     dlog("writing ROM to %s (%zu B)", outfile, rom->imgsize);
-    rerror err = writefile(outfile, 0777, rom->img, rom->imgsize);
+    rerr_t err = writefile(outfile, 0777, rom->img, rom->imgsize);
     if (err) {
-      errmsg("%s: %s", outfile, rerror_str(err));
+      errmsg("%s: %s", outfile, rerr_str(err));
       return false;
     }
   }
@@ -286,10 +286,10 @@ int main(int argc, char*const* argv) {
   if (opt_newexec) {
 
     rvm* vm2 = safechecknotnull( rvm_create(ma) );
-    rerror err2 = rvm_main(vm2, &rom);
+    rerr_t err2 = rvm_main(vm2, &rom);
     rvm_dispose(vm2);
     if (err2) {
-      errmsg("rvm_main: %s", rerror_str(err2));
+      errmsg("rvm_main: %s", rerr_str(err2));
       return 1;
     }
 
@@ -303,9 +303,9 @@ int main(int argc, char*const* argv) {
     }
 
     rvm vm = { .rambase=rambase, .ramsize=vm_ramsize };
-    rerror err = rsm_vmexec(&vm, &rom);
+    rerr_t err = rsm_vmexec(&vm, &rom);
     if (err) {
-      errmsg("vmexec: %s", err == rerr_nomem ? "not enough memory" : rerror_str(err));
+      errmsg("vmexec: %s", err == rerr_nomem ? "not enough memory" : rerr_str(err));
       return 1;
     }
   }// ——————————————

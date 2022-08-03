@@ -56,10 +56,10 @@ typedef struct rrombuild {
   usize        datasize;  // data segment size
   u8           dataalign; // data segment alignment
   void*        userdata;
-  rerror(*filldata)(void* dst, void* userdata);
+  rerr_t(*filldata)(void* dst, void* userdata);
 } rrombuild_t;
 
-rerror rom_build(rrombuild_t* rb, rmemalloc_t* ma, rrom_t* rom);
+rerr_t rom_build(rrombuild_t* rb, rmemalloc_t* ma, rrom_t* rom);
 
 // ————————————————
 // bufslab

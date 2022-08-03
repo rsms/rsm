@@ -474,7 +474,7 @@ static void test_rmm() {
 #endif // RMM_RUN_TEST_ON_INIT
 
 
-rerror init_mm() {
+rerr_t init_mm() {
   // check that PAGE_SIZE is an even multiple (or divisor) of host pagesize
   usize host_pagesize = mem_pagesize();
   if (host_pagesize % PAGE_SIZE && PAGE_SIZE % host_pagesize) {

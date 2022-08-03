@@ -392,13 +392,13 @@ static void sstring(pstate* p) {
   serr(p, "unterminated string literal");
 }
 
-static rerror snumber1(pstate* p, int base) {
+static rerr_t snumber1(pstate* p, int base) {
   u64 cutoff = 0xFFFFFFFFFFFFFFFF;
   u64 acc = 0;
   u64 cutlim = cutoff % base;
   cutoff /= base;
   int any = 0;
-  rerror err = 0;
+  rerr_t err = 0;
   for (u8 c = (u8)*p->inp; p->inp != p->inend; c = *++p->inp) {
     switch (c) {
       case '0' ... '9': c -= '0'; break;
@@ -438,7 +438,7 @@ end:
 }
 
 static void snumber(pstate* p, int base) {
-  rerror err = snumber1(p, base);
+  rerr_t err = snumber1(p, base);
   if (err) switch (err) {
     case rerr_not_supported: return serr(p, "floating-point literal not supported");
     case rerr_overflow:      return serr(p, "integer literal too large");
@@ -448,7 +448,7 @@ static void snumber(pstate* p, int base) {
 
 static void sreg(pstate* p) {
   assert(p->isneg == false); // or snumber1 will return a garbage token
-  rerror err = snumber1(p, 10);
+  rerr_t err = snumber1(p, 10);
   if UNLIKELY(err || p->ival > RSM_MAX_REG) {
     return serr(p, "invalid register");
   }
@@ -1408,7 +1408,7 @@ enum {
   kwcount
 };
 
-rerror init_asmparse() {
+rerr_t init_asmparse() {
   // create kwmap
   #if USIZE_MAX >= 0xFFFFFFFFFFFFFFFFu
     static u8 memory[3072] ATTR_ALIGNED(sizeof(void*));

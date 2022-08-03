@@ -1098,7 +1098,7 @@ static void layout_gdata(gstate* g) {
   g->datasize = addr;
 }
 
-static rerror rom_on_filldata(void* base, void* gp) {
+static rerr_t rom_on_filldata(void* base, void* gp) {
   gstate* g = gp;
   for (u32 i = 0; i < g->dataorder.len; i++) {
     gdata* d = *rarray_at(gdata*, &g->dataorder, i);
@@ -1169,7 +1169,7 @@ static gstate* nullable init_gstate(rasm_t* a) {
   return g;
 }
 
-rerror rasm_gen(rasm_t* a, rnode_t* module, rmemalloc_t* rommem, rrom_t* rom) {
+rerr_t rasm_gen(rasm_t* a, rnode_t* module, rmemalloc_t* rommem, rrom_t* rom) {
   dlog("assembling \"%s\"", a->srcname);
   assert(module->t == RT_LPAREN);
   gstate* g = init_gstate(a);

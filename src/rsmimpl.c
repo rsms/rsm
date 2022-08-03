@@ -207,8 +207,8 @@ u64 _rsm_floor_pow2_64(u64 x) {
 }
 
 
-const char* rerror_str(rerror e) {
-  switch ((enum rerror)e) {
+const char* rerr_str(rerr_t e) {
+  switch ((enum rerr_)e) {
   case rerr_ok:            return "(no error)";
   case rerr_invalid:       return "invalid data or argument";
   case rerr_sys_op:        return "invalid syscall op or syscall op data";
@@ -228,7 +228,7 @@ const char* rerror_str(rerror e) {
   return "(unknown error)";
 }
 
-rerror rerror_errno(int e) {
+rerr_t rerr_errno(int e) {
   switch (e) {
     case 0: return 0;
   #ifndef RSM_NO_LIBC
@@ -252,17 +252,17 @@ const char* rop_name(rop_t op) {
 }
 
 
-rerror mmapfile(const char* filename, rmem_t* data_out) {
+rerr_t mmapfile(const char* filename, rmem_t* data_out) {
   #ifdef RSM_NO_LIBC
     return rerr_not_supported;
   #else
     int fd = open(filename, O_RDONLY);
     if (fd < 0)
-      return rerror_errno(errno);
+      return rerr_errno(errno);
 
     struct stat st;
     if (fstat(fd, &st) != 0) {
-      rerror err = rerror_errno(errno);
+      rerr_t err = rerr_errno(errno);
       close(fd);
       return err;
     }
@@ -284,7 +284,7 @@ void unmapfile(rmem_t m) {
   #endif
 }
 
-rerror read_stdin_data(rmemalloc_t* ma, usize maxlen, rmem_t* data_out) {
+rerr_t read_stdin_data(rmemalloc_t* ma, usize maxlen, rmem_t* data_out) {
   #ifdef RSM_NO_LIBC
     return rerr_not_supported;
   #else
@@ -298,7 +298,7 @@ rerror read_stdin_data(rmemalloc_t* ma, usize maxlen, rmem_t* data_out) {
       isize n = read(0, dst.p + len, dst.size - len);
       if (n < 0) {
         rmem_free(ma, dst);
-        return rerror_errno(errno);
+        return rerr_errno(errno);
       }
       len += (usize)n;
       if ((usize)n < dst.size - len)
@@ -313,19 +313,19 @@ rerror read_stdin_data(rmemalloc_t* ma, usize maxlen, rmem_t* data_out) {
   #endif
 }
 
-rerror writefile(const char* filename, u32 mode, const void* data, usize size) {
+rerr_t writefile(const char* filename, u32 mode, const void* data, usize size) {
   #ifdef RSM_NO_LIBC
     return rerr_not_supported;
   #else
     assert(size <= ISIZE_MAX);
     int fd = open(filename, O_WRONLY|O_CREAT|O_TRUNC, 0777);
     if (fd < 0)
-      return rerror_errno(errno);
-    rerror err = 0;
+      return rerr_errno(errno);
+    rerr_t err = 0;
     while (size) {
       isize n = write(fd, data, size);
       if (n < (isize)size) {
-        err = n < 0 ? rerror_errno(errno) : rerr_canceled;
+        err = n < 0 ? rerr_errno(errno) : rerr_canceled;
         break;
       }
       data += n;
@@ -360,7 +360,7 @@ usize stru64(char buf[64], u64 v, u32 base) {
   return len;
 }
 
-rerror parseu64(const char* src, usize srclen, int base, u64* result, u64 cutoff) {
+rerr_t parseu64(const char* src, usize srclen, int base, u64* result, u64 cutoff) {
   assert(base >= 2 && base <= 36);
   const char* s = src;
   const char* end = src + srclen;
@@ -651,15 +651,15 @@ void* memmove(void* dest, const void* src, usize n) {
 // --- resume original rsm code ---
 
 // one-time initialization of global state
-rerror init_time();
-rerror init_mm();
-rerror init_rmem();
-rerror init_vmem();
-rerror init_asmparse();
+rerr_t init_time();
+rerr_t init_mm();
+rerr_t init_rmem();
+rerr_t init_vmem();
+rerr_t init_asmparse();
 
 bool rsm_init() {
   static bool y = false; if (y) return true; y = true;
-  rerror err;
+  rerr_t err;
   const char* err_what = "?";
   #define CHECK_ERR(expr, what) err = (expr); if (err) { err_what = (what); goto error; }
 
@@ -687,7 +687,7 @@ bool rsm_init() {
 
   return true;
 error:
-  log("rsm_init error: %s (%s)", rerror_str(err), err_what);
+  log("rsm_init error: %s (%s)", rerr_str(err), err_what);
   return false;
 }
 

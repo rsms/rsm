@@ -24,8 +24,8 @@ enum rrom_skind {
   log("error while loading rom, at offset %zu: " fmt, POFFS, ##args); \
   rerr_invalid; })
 
-static rerror leb_u64_read(u64* resultp, u32 nbit, const u8** input, const u8* inputend) {
-  rerror err = rerr_invalid;
+static rerr_t leb_u64_read(u64* resultp, u32 nbit, const u8** input, const u8* inputend) {
+  rerr_t err = rerr_invalid;
   u64 v = 0;
   u32 shift = 0;
   const u8* p = *input;
@@ -47,19 +47,19 @@ static rerror leb_u64_read(u64* resultp, u32 nbit, const u8** input, const u8* i
   return err;
 }
 
-static rerror load_section(LPARAMS);
-static rerror load_next_section(LPARAMS) {
+static rerr_t load_section(LPARAMS);
+static rerr_t load_next_section(LPARAMS) {
   if (p >= end) return 0;
   MUSTTAIL return load_section(LARGS);
 }
 
 // skip_section skips the current section (or the remainder of the current section)
-UNUSED static rerror skip_section(LPARAMS) {
+UNUSED static rerr_t skip_section(LPARAMS) {
   p = MIN(end, p + size);
   MUSTTAIL return load_next_section(LARGS);
 }
 
-static rerror load_section_DATA(LPARAMS) {
+static rerr_t load_section_DATA(LPARAMS) {
   u8 align_log2 = *p++; size--;
   if UNLIKELY(size == 0)
     return perr("DATA section ended prematurely");
@@ -72,7 +72,7 @@ static rerror load_section_DATA(LPARAMS) {
   MUSTTAIL return load_next_section(LARGS);
 }
 
-static rerror load_section_CODE(LPARAMS) {
+static rerr_t load_section_CODE(LPARAMS) {
   const void* code = (const void*)ALIGN2((uintptr)p, CODE_ALIGNMENT);
   usize codesize = size - (usize)(code - (const void*)p);
   if UNLIKELY(!IS_ALIGN2(codesize, CODE_ALIGNMENT))
@@ -83,12 +83,12 @@ static rerror load_section_CODE(LPARAMS) {
   MUSTTAIL return load_next_section(LARGS);
 }
 
-static rerror load_section(LPARAMS) {
+static rerr_t load_section(LPARAMS) {
   assert(p < end);
   u8 kind = *p++;
-  rerror err = leb_u64_read(&size, 64, &p, end);
+  rerr_t err = leb_u64_read(&size, 64, &p, end);
   if UNLIKELY(err)
-    return perr("invalid section 0x%02x header size: %s", kind, rerror_str(err));
+    return perr("invalid section 0x%02x header size: %s", kind, rerr_str(err));
   if UNLIKELY(size > (usize)(end - p))
     return perr("corrupt section 0x%02x", kind);
   switch (kind) {
@@ -100,7 +100,7 @@ static rerror load_section(LPARAMS) {
   }
 }
 
-rerror rsm_loadrom(rrom_t* rom) {
+rerr_t rsm_loadrom(rrom_t* rom) {
   // default values
   rom->codelen   = 0;
   rom->datasize  = 0;
@@ -168,14 +168,14 @@ static void calc_DATA(rrombuild_t* rb, usize* bsize, usize* align) {
   if (rb->datasize)
     *bsize = 1 + rb->datasize; // 1+ for "align u8"
 }
-static u8* build_DATA(rrombuild_t* rb, rrom_t* rom, u8* p, rerror* errp) {
+static u8* build_DATA(rrombuild_t* rb, rrom_t* rom, u8* p, rerr_t* errp) {
   assert(rb->dataalign != 0);
   assert(CEIL_POW2(rb->dataalign) == rb->dataalign);
   *p++ = rb->dataalign == 1 ? 1 : ILOG2(rb->dataalign);
   rom->data = p;
   rom->datasize = rb->datasize;
   rom->dataalign = rb->dataalign;
-  rerror err = rb->filldata(p, rb->userdata);
+  rerr_t err = rb->filldata(p, rb->userdata);
   if (err)
     *errp = err;
   p += rb->datasize;
@@ -186,7 +186,7 @@ static void calc_CODE(rrombuild_t* rb, usize* bsize, usize* align) {
   *bsize = rb->codelen * sizeof(rin_t);
   *align = CODE_ALIGNMENT;
 }
-static u8* build_CODE(rrombuild_t* rb, rrom_t* rom, u8* p, rerror* errp) {
+static u8* build_CODE(rrombuild_t* rb, rrom_t* rom, u8* p, rerr_t* errp) {
   rom->code = (const rin_t*)p;
   rom->codelen = rb->codelen;
   memcpy(p, rb->code, rb->codelen*sizeof(rin_t));
@@ -195,7 +195,7 @@ static u8* build_CODE(rrombuild_t* rb, rrom_t* rom, u8* p, rerror* errp) {
 }
 
 
-rerror rom_build(rrombuild_t* rb, rmemalloc_t* ma, rrom_t* rom) {
+rerr_t rom_build(rrombuild_t* rb, rmemalloc_t* ma, rrom_t* rom) {
   memset(rom, 0, sizeof(rrom_t)); // in case of error
   rom->dataalign = 1;
 
@@ -267,7 +267,7 @@ rerror rom_build(rrombuild_t* rb, rmemalloc_t* ma, rrom_t* rom) {
     // write section body
     dlog("        body at %08lx: %zu B", (uintptr)((void*)p-base), bodysize);
     assertf(IS_ALIGN2((uintptr)((void*)p-base), secalign[kind]), "misaligned");
-    rerror err = 0;
+    rerr_t err = 0;
     switch ((enum rrom_skind)kind) {
       case RSM_ROM_DATA: p = build_DATA(rb, rom, p, &err); break;
       case RSM_ROM_CODE: p = build_CODE(rb, rom, p, &err); break;

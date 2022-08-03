@@ -123,10 +123,10 @@ WASM_EXPORT void* wcompile(const char* srcname, const char* srcdata, usize srcle
 
   // build ROM
   rrom rom = {0};
-  rerror err = rasm_gen(&a, mod, mem, &rom);
+  rerr_t err = rasm_gen(&a, mod, mem, &rom);
   if (err) {
     if (cresult.errmsg == NULL)
-      cresult.errmsg = rerror_str(err);
+      cresult.errmsg = rerr_str(err);
     goto end;
   }
 
@@ -148,14 +148,14 @@ WASM_EXPORT isize wfmtprog(char* buf, usize bufcap, rromimg* rom_img, usize rom_
   if (!rom_img || rom_imgsize == 0)
     return 0;
   rrom rom = { .img=rom_img, .imgsize=rom_imgsize };
-  rerror err = rsm_loadrom(&rom);
+  rerr_t err = rsm_loadrom(&rom);
   if (err)
     return -1;
   return rsm_fmtprog(buf, bufcap, rom.code, rom.codelen, /*rfmtflag*/0);
 }
 
 
-WASM_EXPORT rerror wvmexec(u64* iregs, rromimg* rom_img, usize rom_imgsize) {
+WASM_EXPORT rerr_t wvmexec(u64* iregs, rromimg* rom_img, usize rom_imgsize) {
   // allocate instance memory
   static usize memsize = 1024*1024;
   void* membase = rmem_alloc(mem, memsize);
@@ -164,7 +164,7 @@ WASM_EXPORT rerror wvmexec(u64* iregs, rromimg* rom_img, usize rom_imgsize) {
 
   // load ROM
   rrom rom = { .img=rom_img, .imgsize=rom_imgsize };
-  rerror err = rsm_loadrom(&rom);
+  rerr_t err = rsm_loadrom(&rom);
 
   // run
   if (!err)

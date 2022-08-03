@@ -830,7 +830,7 @@ static T* p_runqget(P* p, bool* inheritTime) {
 }
 
 
-static rerror s_allt_add(S* s, T* t) {
+static rerr_t s_allt_add(S* s, T* t) {
   assert(t->s == s);
   assert(t_readstatus(t) != T_IDLE);
 
@@ -924,10 +924,10 @@ static T* nullable s_alloctask(S* s, usize stacksize) {
 // of 0 means to allocate a stack of default standard size.
 // Put it on the queue of T's waiting to run.
 // The compiler turns a go statement into a call to this.
-static rerror s_spawn(S* s, const rin_t* iv, usize ic, const void* rodata, usize pc) {
+static rerr_t s_spawn(S* s, const rin_t* iv, usize ic, const void* rodata, usize pc) {
   T* t = t_get();
   M* m = t->m;
-  rerror err = 0;
+  rerr_t err = 0;
 
   // disable preemption
   m_acquire(m);
@@ -975,7 +975,7 @@ onerr:
 }
 
 
-static rerror m_init(M* m, u64 id) {
+static rerr_t m_init(M* m, u64 id) {
   m->id = id;
 
   // configure main task
@@ -1036,7 +1036,7 @@ static void schedule() {
 // m_start is the entry-point for new M's.
 // Basically the "OS thread main function."
 // M doesn't have a P yet.
-NOINLINE static rerror m_start(M* m) {
+NOINLINE static rerr_t m_start(M* m) {
   assert(t_get() == &m->t0);
   // TODO: loop
   schedule();
@@ -1069,7 +1069,7 @@ static void p_acquire(P* p, M* m) {
 // }
 
 
-static rerror s_init(S* s) {
+static rerr_t s_init(S* s) {
   // clear allt struct
   memset(&s->allt, 0, sizeof(s->allt));
   mtx_init(&s->allt.lock, mtx_plain);
@@ -1078,7 +1078,7 @@ static rerror s_init(S* s) {
   s->midgen = 1;
   s->maxmcount = 1000;
   s->m0.s = s;
-  rerror err = m_init(&s->m0, 0);
+  rerr_t err = m_init(&s->m0, 0);
   if UNLIKELY(err)
     return err;
 
@@ -1108,17 +1108,17 @@ static rerror s_init(S* s) {
 }
 
 
-rerror rvm_main(rvm* vm, rrom_t* rom) {
+rerr_t rvm_main(rvm* vm, rrom_t* rom) {
   S* s = (S*)vm;
 
   // initialize the scheduler
-  rerror err = s_init(s);
+  rerr_t err = s_init(s);
   if (err)
     return err;
 
   // load ROM
   if (!rom->code) {
-    rerror err = rsm_loadrom(rom);
+    rerr_t err = rsm_loadrom(rom);
     if (err == 0 && (rom->code == NULL || rom->codelen == 0))
       err = rerr_invalid; // ROM without (or with empty) code section
     return err;

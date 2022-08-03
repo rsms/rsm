@@ -223,7 +223,7 @@ static void test_vmem() {
 #endif // VMEM_RUN_TEST_ON_INIT
 
 
-rerror init_vmem() {
+rerr_t init_vmem() {
   #if defined(VMEM_RUN_TEST_ON_INIT) && DEBUG
   test_vmem();
   #endif

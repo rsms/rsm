@@ -314,8 +314,8 @@ enum rfmtflag {
   RSM_FMT_COLOR = 1 << 0, // use ANSI colors
 } RSM_END_ENUM2(rfmtflag, rfmtflag_t)
 
-typedef int rerror; // error code
-enum rerror {
+typedef int rerr_t; // error code
+enum rerr_ {
   rerr_ok            =   0, // no error
   rerr_invalid       =  -1, // invalid data or argument
   rerr_sys_op        =  -2, // invalid syscall op or syscall op data
@@ -539,15 +539,15 @@ rvm* nullable rvm_create(rmemalloc_t*);
 void rvm_dispose(rvm* vm);
 
 // rvm_main loads & runs a program in a ROM image
-rerror rvm_main(rvm* vm, rrom_t* rom);
+rerr_t rvm_main(rvm* vm, rrom_t* rom);
 
 // rsm_vmexec executes a program, starting with instruction 0
 // Loads the ROM if needed.
-RSMAPI rerror rsm_vmexec(rvm* vm, rrom_t* rom);
+RSMAPI rerr_t rsm_vmexec(rvm* vm, rrom_t* rom);
 
 // rsm_loadrom parses rom->img of rom->imgsize bytes,
 // populating the rest of the fields of the rrom_t struct.
-RSMAPI rerror rsm_loadrom(rrom_t* rom);
+RSMAPI rerr_t rsm_loadrom(rrom_t* rom);
 
 // rsm_fmtprog formats an array of instructions ip as "assembly" text to buf.
 // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th
@@ -565,10 +565,10 @@ RSMAPI usize rsm_fmtinstr(
 
 // enum related functions
 RSMAPI const char* rop_name(rop_t);      // name of an opcode
-RSMAPI const char* rerror_str(rerror); // short description of an error
+RSMAPI const char* rerr_str(rerr_t); // short description of an error
 
 // rsm_loadfile loads a file into memory
-rerror rsm_loadfile(const char* filename, rmem_t* data_out);
+rerr_t rsm_loadfile(const char* filename, rmem_t* data_out);
 void rsm_unloadfile(rmem_t); // unload file loaded with rsm_loadfile
 
 
@@ -698,7 +698,7 @@ RSMAPI rnode_t* nullable rasm_parse(rasm_t* a);
 // rasm_gen builds VM code from AST.
 // Uses a->mem for temporary storage, allocates data for rom with rommem.
 // a can be reused.
-RSMAPI rerror rasm_gen(rasm_t* a, rnode_t* module, rmemalloc_t* rommem, rrom_t* rom);
+RSMAPI rerr_t rasm_gen(rasm_t* a, rnode_t* module, rmemalloc_t* rommem, rrom_t* rom);
 
 // rasm_dispose frees resources of a
 RSMAPI void rasm_dispose(rasm_t* a);

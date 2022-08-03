@@ -1,11 +1,11 @@
 // memory manager
 // SPDX-License-Identifier: Apache-2.0
 //
-// This memory manager implements a binary buddy allocator, where a linear address range
-// is arranged in sub-ranges half the size of larger sub-ranges.
+// This memory manager implements a binary buddy allocator, where a linear
+// address range is arranged in sub-ranges half the size of larger sub-ranges.
 // Blocks are managed per order of power of two (0 4096, 1 8192, 2 16384, ...)
 //
-// Here's an illustration of what the heirarchy logically looks like when we
+// Here's an illustration of what the hierarchy logically looks like when we
 // manage 64 kiB of memory. Blocks are considered "buddies" when they are split.
 // The blocks below are filled with "Buddy #" when they are allocated and left
 // empty when they are free. I.e. the second block of the 3rd order is free.
@@ -26,25 +26,36 @@
 //       └───╂───┨       ┠───┴───┘       ┃                               ┃
 //        4096  8192   16384           32768                           65536
 //
-// The following allocation has been made to get the blocks into the state shown above:
+// The following allocations has been made to get to the state shown above:
 // - allocate 1 page  -> 1st block of order 0  (b1/b1/b1/b1/b1)
 // - allocate 2 pages -> 2nd block of order 1  (b1/b1/b1/b2)
 // - allocate 1 page  -> 2nd block of order 0  (b1/b1/b1/b1/b2)
 // - allocate 1 page  -> 5th block of order 0  (b1/b1/b2/b1/b1)
 //
-// We use one free-list and one bitset per order. The free-lists contains free blocks
-// and the bitsets denotes what blocks are free and which are buddies.
-//
-// Ideas for improvement
-// - use just one bit per buddy (half the amount of bits in total)
+// We use one free-list and one bitset per order. The free-lists contains free
+// blocks and the bitsets denotes what blocks are free and which are buddies.
 //
 #include "rsmimpl.h"
 #include "list.h"
 #include "bits.h"
 #include "thread.h"
 
-#define MAX_ORDER   19  /* 19=2GiB, 20=4GiB, 21=8GiB, 22=16GiB, ... */
-#define OBJ_MAXSIZE (1ul * GiB)
+// MAX_ORDER: the largest pow2 order of page size to use in our buddy tree.
+// This value has almost no impact on the capacity.
+// The size of bitset data varies very little with this value:
+//   MAX_ORDER 12 vs 20 uses 262125 B vs 262167 B memory for bitsets, respectively.
+// The size of mm_t also varies very little with this value:
+//   MAX_ORDER 12 vs 20 uses 352 B vs 544 B memory for mm_t, respectively.
+// These differences are so small that it doesn't change the page aligned usable
+// memory range, meaning the amount of usable memory is the same for e.g. 12 and 20.
+// If the value is small, there will be a few freelists with many entries each,
+// if the value is large, there will be many freelists with a few entries each.
+// The ideal value is large enough for the most commonly managed memory size.
+// The largest possible value is log2(max_address/PAGE_SIZE).
+#define MAX_ORDER  20 /* 17=512M 18=1G 19=2G 20=4G ... (assuming PAGE_SIZE=4096) */
+
+// MAX_ORDER_NPAGES: number of pages that can fit into the largest order
+#define MAX_ORDER_NPAGES  (1lu << MAX_ORDER)
 
 // RMM_TRACE: uncomment to enable logging a lot of info via dlog
 //#define RMM_TRACE
@@ -63,14 +74,6 @@ typedef struct rmm_ {
   //usize nalloc[MAX_ORDER + 1]; // number of allocations per order
 } rmm_t;
 
-// lock         4 + 4 + sizeof(void*)
-// start_addr   sizeof(void*)
-// end_addr     sizeof(void*)
-// free_size    sizeof(void*)
-// bitsets      sizeof(void*) * (MAX_ORDER + 1)
-// freelists    (sizeof(void*) * 2) * (MAX_ORDER + 1)
-// TODO: static_assert(sizeof(rmm_t) == RMM_MIN_SIZE, "update RMM_MIN_SIZE");
-
 
 #if defined(RMM_TRACE) && defined(DEBUG)
   #define trace(fmt, args...) dlog("[mm] " fmt, ##args)
@@ -81,6 +84,9 @@ typedef struct rmm_ {
   #endif
   #define trace(...) ((void)0)
 #endif
+
+
+static_assert(MAX_ORDER <= ILOG2(UINTPTR_MAX / PAGE_SIZE), "MAX_ORDER too large");
 
 
 usize rmm_cap(const rmm_t* mm) {
@@ -97,7 +103,7 @@ usize rmm_avail_total(rmm_t* mm) {
 usize rmm_avail_maxregion(rmm_t* mm) {
   usize npages = 0;
   RHMutexLock(&mm->lock);
-  for (int order = 0; order < MAX_ORDER; order++) {
+  for (int order = 0; order <= MAX_ORDER; order++) {
     usize n = ilist_count(&mm->freelists[order]) * (1lu << order);
     if (n > npages)
       npages = n;
@@ -133,7 +139,7 @@ usize rmm_avail_maxregion(rmm_t* mm) {
 static uintptr rmm_allocpages1(rmm_t* mm, int order) {
   usize size = (usize)PAGE_SIZE << order;
 
-  if (order >= MAX_ORDER)
+  if (order > MAX_ORDER)
     return UINTPTR_MAX;
 
   // try to dequeue a free block
@@ -224,7 +230,7 @@ void* nullable rmm_allocpages_min(rmm_t* mm, usize* req_npages, usize min_npages
 
 
 static int rmm_freepages1(rmm_t* mm, uintptr addr, int order) {
-  if (order >= MAX_ORDER)
+  if (order > MAX_ORDER)
     return -1;
 
   int bit = addr / ((uintptr)PAGE_SIZE << order);
@@ -297,66 +303,86 @@ rmm_t* nullable rmm_create(void* memp, usize memsize) {
   if (check_sub_overflow((uintptr)mm, start, &memsize))
     goto out_of_memory;
 
-  // number of entries per bitmap
-  usize nchunks = (memsize / PAGE_SIZE) / 8;
+  // number of entries per bitset
+  const usize nchunks = memsize / PAGE_SIZE;
+
+  // bset_nbytes is the size in bytes of bitset[0] (sans bset_extra_nbytes)
+  const usize bset_nbytes = nchunks / 8;
+  const usize bset_extra_nbytes = 2; // extra per bitset
+
+  // BITSET_SIZE returns the byte size of bitset[order]
+  #define BITSET_SIZE(order) ((bset_nbytes >> (order)) + bset_extra_nbytes)
 
   // (over) estimate memory needed for bitset data
-  //usize bitsets_size = (nchunks * 2) + (MAX_ORDER * 2);
+  //usize bset_total_size = (nchunks * 2) + (MAX_ORDER * 2);
 
-  // calculate memory needed for bitsets
-  usize bitsets_size = 0;
-  usize n = nchunks;
-  for (int order = 0; order < MAX_ORDER; order++) {
-    bitsets_size += n + 2;
-    n /= 2;
-  }
+  // calculate total memory needed for bitsets
+  usize bset_total_size = bset_nbytes + bset_extra_nbytes;
+  for (u8 order = 1; order <= MAX_ORDER; order++)
+    bset_total_size += BITSET_SIZE(order);
 
-  // Adjust memsize to the usable space at start (memsize -= bitsets_size + PAGE_SIZE)
+  // Adjust memsize to the usable space at start (memsize -= bset_total_size + PAGE_SIZE)
   // We need at least one page of free memory in addition to bitset storage.
-  if (check_sub_overflow(memsize, bitsets_size + PAGE_SIZE, &memsize))
+  if (check_sub_overflow(memsize, bset_total_size + PAGE_SIZE, &memsize))
     goto out_of_memory;
 
   // calculate start of bitset data
-  void* bitset_start = (void*)(uintptr)mm - bitsets_size;
+  void* bitset_start = (void*)(uintptr)mm - bset_total_size;
   trace("bitsets at %p … %p (%zu B)",
-    bitset_start, bitset_start + bitsets_size, bitsets_size);
+    bitset_start, bitset_start + bset_total_size, bset_total_size);
 
-  // initialize per-order data (bitsets and freelists)
-  for (int order = 0; order < MAX_ORDER; order++) {
+  // Initialize each per-order bitset & freelist
+  //
+  // The smallest-order bitset holds the smallest block granule and has the most bits.
+  // The next smallest-order bitset holds blocks twice the size; has 2/n bits.
+  // The next smallest-order bitset holds blocks twice the size; has 2/n bits.
+  // ...
+  // The largest-order bitset holds blocks of the largest size and may have more than
+  // one block, in case the total amount of memory is >=2x of MAX_ORDER.
+  // (+2: this diagram assumes bset_extra_nbytes=2)
+  //      ┌────────────────────────────────┬────────────────┬────────┬────┐
+  //      │ order 0                        │ order 1        │ o2     │ o3 │
+  //      ├────────────────────────────────┴────────────────┴────────┴────┘
+  //      ↑           nbyte=16+2                  8+2          4+2    2+2
+  // bitset_start
+  for (u8 order = 0; order <= MAX_ORDER; order++) {
     ilist_init(&mm->freelists[order]);
+
     mm->bitsets[order] = bitset_start;
-    memset(bitset_start, 0, nchunks + 2); // set all bits to 0
-    bitset_start += nchunks + 2;
-    nchunks /= 2;
+    usize size = BITSET_SIZE(order);
+    memset(bitset_start, 0, size); // set all bits to 0
+    bitset_start += size;
   }
 
   // align memsize to page boundary
-  memsize = ALIGN2_FLOOR(memsize, PAGE_SIZE);
-  if UNLIKELY(memsize == 0)
+  if UNLIKELY((memsize = ALIGN2_FLOOR(memsize, PAGE_SIZE)) == 0)
     goto out_of_memory;
 
   // set usable memory
   mm->start_addr = start;
   mm->end_addr = start + memsize;
-  mm->free_size = (usize)(mm->end_addr - mm->start_addr);
+  mm->free_size = memsize;
 
   trace("memory at  %p … %p (%zu kiB in %zu pages)",
-    (void*)mm->start_addr, (void*)mm->end_addr,
-    (mm->end_addr - mm->start_addr) / kiB,
-    (mm->end_addr - mm->start_addr) / PAGE_SIZE);
+    (void*)mm->start_addr,  (void*)mm->end_addr,  memsize / kiB,  memsize / PAGE_SIZE);
+  trace("max buddy  %11zu kiB", ((usize)MAX_ORDER_NPAGES * PAGE_SIZE) / kiB);
 
   // Now we need to put initially-free blocks of memory into the free lists.
   // We'll do this by starting with the largest pow2(memsize),
   // then we put the rest pow2(memsize - (largest pow2(memsize))) and so on.
   usize npages_total = memsize / PAGE_SIZE;
   while (npages_total) {
-    usize npages = FLOOR_POW2(npages_total);
+    // Round npages_total down to nearest pow2, constrained by the top order page limit
+    const usize npages = MIN(FLOOR_POW2(npages_total), MAX_ORDER_NPAGES);
     assert(npages > 0);
     npages_total -= npages;
 
     int order = -1;
     for (usize n = npages; n; n >>= 1)
       order++;
+    assertf(order <= MAX_ORDER,
+      "order (%d) > MAX_ORDER (%d) (npages %zu, MAX_ORDER_NPAGES %zu)",
+      order, MAX_ORDER, npages, MAX_ORDER_NPAGES);
 
     // memory used by this block
     usize block_size = (usize)PAGE_SIZE << order;
@@ -385,6 +411,8 @@ rmm_t* nullable rmm_create(void* memp, usize memsize) {
 
     start += block_size;
   }
+
+  #undef BITSET_SIZE
 
   return mm;
 

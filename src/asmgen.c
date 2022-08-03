@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #ifndef RSM_NO_ASM
 #include "rsmimpl.h"
+#include "map.h"
 
 #define DEBUG_LOG_DATA // define to log debug messages about data layout
 

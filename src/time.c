@@ -101,7 +101,7 @@ usize fmtduration(char buf[25], u64 duration_ns) {
   return i;
 }
 
-rerror time_init() {
+rerror init_time() {
   #if defined(__APPLE__)
     if (mach_timebase_info(&tbase) != KERN_SUCCESS)
       return rerr_not_supported;

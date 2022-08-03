@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
+#include "hash.h" // for fastrand_seed
 
 #ifndef RSM_NO_LIBC
   #include <stdio.h>
@@ -904,11 +905,11 @@ void* memmove(void* dest, const void* src, usize n) {
 // --- resume original rsm code ---
 
 // one-time initialization of global state
-rerror time_init();
+rerror init_time();
 rerror init_mm();
 rerror init_rmem();
 rerror init_vmem();
-rerror parse_init();
+rerror init_asmparse();
 
 bool rsm_init() {
   static bool y = false; if (y) return true; y = true;
@@ -917,7 +918,7 @@ bool rsm_init() {
   #define CHECK_ERR(expr, what) err = (expr); if (err) { err_what = (what); goto error; }
 
   // time
-  CHECK_ERR(time_init(), "time_init");
+  CHECK_ERR(init_time(), "init_time");
   u64 sec, nsec;
   CHECK_ERR(unixtime((i64*)&sec, &nsec), "unixtime");
 
@@ -935,7 +936,7 @@ bool rsm_init() {
 
   // assembly parser
   #ifndef RSM_NO_ASM
-    CHECK_ERR(parse_init(), "parse_init");
+    CHECK_ERR(init_asmparse(), "init_asmparse");
   #endif
 
   return true;

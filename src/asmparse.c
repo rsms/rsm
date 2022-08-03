@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #ifndef RSM_NO_ASM
 #include "rsmimpl.h"
+#include "map.h"
 
 //#define LOG_TOKENS // define to log() token scanning
 //#define LOG_AST    // define to log() parsed top-level ast nodes
@@ -1376,12 +1377,12 @@ rnode* nullable rasm_parse(rasm* a) {
 #endif // LOG_AST
 
 
-// print_keywords
+// dlog_keywords
 #if 0 && defined(DEBUG) && !defined(RSM_NO_LIBC)
   static int cstrsort(const char** p1, const char** p2, void* ctx) {
     return strcmp(*p1, *p2);
   }
-  UNUSED static void print_keywords() {
+  UNUSED static void dlog_keywords() {
     const char* list[128];
     usize n = 0;
     for (const smapent* e = smap_itstart(&kwmap); smap_itnext(&kwmap, &e); )
@@ -1392,7 +1393,7 @@ rnode* nullable rasm_parse(rasm* a) {
     putc('\n', stdout);
   }
 #else
-  #define print_keywords(...) ((void)0)
+  #define dlog_keywords(...) ((void)0)
 #endif
 
 // kwcount -- total number of keywords
@@ -1406,21 +1407,21 @@ enum {
   kwcount
 };
 
-rerror parse_init() {
+rerror init_asmparse() {
   // create kwmap
   #if USIZE_MAX >= 0xFFFFFFFFFFFFFFFFu
-    static void* memory[IDIV_CEIL(768, sizeof(void*))] ATTR_ALIGNED(sizeof(void*));
+    static u8 memory[3072] ATTR_ALIGNED(sizeof(void*));
   #else
-    static u8 memory[1024*4] ATTR_ALIGNED(RMEM_ALLOC_ALIGN);
+    static u8 memory[1552] ATTR_ALIGNED(sizeof(void*));
   #endif
 
-
-  static u8 membuf[PAGE_SIZE * 4] ATTR_ALIGNED(RMEM_ALLOC_ALIGN);
-  dlog("membuf %zu", sizeof(membuf));
+  // temporary sparse stack memory for building the map
+  void* membuf[(PAGE_SIZE * 2) / sizeof(void*)] ATTR_ALIGNED(RMEM_ALLOC_ALIGN);
   rmemalloc_t* ma =
     assertnotnull( rmem_allocator_create_buf(NULL, membuf, sizeof(membuf)) );
 
-  smap* m = smap_make(&kwmap, ma, kwcount, MAPLF_2);
+  smap tmpmap_;
+  smap* m = smap_make(&tmpmap_, ma, kwcount, MAPLF_2);
   if UNLIKELY(m == NULL) {
     assertf(0, "sizeof(membuf) too small");
     return rerr_nomem;
@@ -1441,13 +1442,21 @@ rerror parse_init() {
   RSM_FOREACH_KEYWORD_TOKEN(_)
   #undef _
 
-  #ifdef DEBUG
-    // dlog("kwmap hash0 0x%lx", m->hash0);
-    usize avail_bytes = rmem_avail(ma);
-    if (avail_bytes)
-      dlog("kwmap uses only %zu B memory -- trim 'memory'", avail_bytes);
-  #endif
-  print_keywords();
+  // copy into BSS memory
+  rmem_t entries_mem = RMEM(memory, sizeof(memory));
+  usize ideal_size = smap_copy(&kwmap, m, entries_mem, ma);
+  assertf(ideal_size <= sizeof(memory),
+    "not enough memory %zu; need %zu", sizeof(memory), ideal_size);
+  if (ideal_size < sizeof(memory))
+    dlog("kwmap uses only %zu B memory -- trim 'memory'", ideal_size);
+
+  // // smap_cfmt prints C code for a constant static representation of m
+  // rmem_t buf = rmem_alloc(ma, rmem_avail(ma));
+  // usize n = smap_cfmt(buf.p, buf.size, m, "lolcat");
+  // dlog("kwmap:\n%.*s", (int)n, (const char*)buf.p);
+
+  dlog_keywords();
+
   return 0;
 }
 

@@ -1,6 +1,6 @@
 // operations on bits
 // SPDX-License-Identifier: Apache-2.0
-
+#pragma once
 RSM_ASSUME_NONNULL_BEGIN
 
 

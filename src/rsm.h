@@ -352,6 +352,11 @@ inline static void rmem_fill(rmem_t m, u8 byte) { __builtin_memset(m.p, byte, m.
 // rmem_zerofill fills memory with zeroes
 inline static void rmem_zerofill(rmem_t m) { __builtin_memset(m.p, 0, m.size); }
 
+// rmem_align adjusts a memory region to a given power-of-two alignment.
+// If the region is too small to be aligned, false is returned
+// and region is left unchanged.
+bool rmem_align(rmem_t* region, usize alignment);
+
 //———————————————————————————————————————————————————————————————————————————————————————
 // rmm_t is a Memory Manager.
 // The memory manager owns and manages all of the host memory.

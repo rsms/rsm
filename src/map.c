@@ -7,6 +7,7 @@
 // about 300 x86_64 instructions (20 branches), 270 arm64 instructions (35 branches.)
 //
 #include "rsmimpl.h"
+#include "map.h"
 
 #define DELMARK ((const char*)1) /* assume no key is ever at address 0x1 */
 
@@ -23,21 +24,32 @@ static u32 perfectcap(u32 len, maplf lf) {
   return CEIL_POW2(len + (u32)( (double)len*captab[lf-1] + 0.5 ));
 }
 
-smap* nullable smap_make(smap* m, rmemalloc_t* ma, u32 hint, maplf lf) {
+static smap* smap_init(
+  smap* m, rmemalloc_t* ma, rmem_t entries_mem, u32 cap, u32 hash0, maplf lf)
+{
+  assert(entries_mem.p && entries_mem.size);
+  assert(IS_ALIGN2((uintptr)entries_mem.p, _Alignof(smapent)));
+  assert(entries_mem.size >= cap * sizeof(smapent));
   m->memalloc = ma;
   m->len = 0;
-  m->cap = hint == 0 ? 8 : perfectcap(hint, lf);
+  m->cap = cap;
   // lf is a bit shift magnitude that does fast integer division
   // i.e. cap-(cap>>lf) == (u32)((double)cap*0.75)
   m->lf = lf;
-  m->gcap = m->cap - (m->cap >> m->lf);
-  m->hash0 = fastrand();
-  rmem_t entries_mem = rmem_alloc_arrayt(ma, m->cap, smapent);
+  m->gcap = cap - (cap >> lf);
+  m->hash0 = hash0;
+  m->entries_mem = entries_mem;
+  return m;
+}
+
+smap* nullable smap_make(smap* m, rmemalloc_t* ma, u32 hint, maplf lf) {
+  u32 cap = (hint == 0) ? 8 : perfectcap(hint, lf);
+  rmem_t entries_mem = rmem_alloc_arrayt(ma, cap, smapent);
   if UNLIKELY(!entries_mem.p)
     return NULL;
   rmem_zerofill(entries_mem);
-  m->entries_mem = entries_mem;
-  return m;
+  u32 hash0 = fastrand();
+  return smap_init(m, ma, entries_mem, cap, hash0, lf);
 }
 
 void smap_dispose(smap* m) {
@@ -52,7 +64,7 @@ void smap_clear(smap* m) {
   rmem_zerofill(RMEM(m->entries, m->cap*sizeof(smapent)));
 }
 
-static void smap_relocate(hashcode hash0, smapent* entries, u32 cap, smapent* ent) {
+static void smap_relocate(hash_t hash0, smapent* entries, u32 cap, smapent* ent) {
   usize index = hash_mem(ent->key, ent->keylen, hash0) & (cap - 1);
   while (entries[index].key) {
     if (streq(&entries[index], ent->key, ent->keylen))
@@ -164,12 +176,16 @@ static int cs_sort(const smapent* e1, const smapent* e2, cstate* cs) {
 }
 
 static void insert_coll(smapent* entries, u32 cap, u32 index, const smapent* e) {
+  #if DEBUG
+  u32 n = 0;
+  #endif
   while (entries[index].key) {
     assertf(!streq(&entries[index], e->key, e->keylen), "%.*s", (int)e->keylen, e->key);
     if (entries[index].key == DELMARK) // recycle deleted slot
       break;
     if (++index == cap)
       index = 0;
+    assertf(++n < cap, "no free slots");
   }
   entries[index] = *e;
 }
@@ -274,7 +290,7 @@ double smap_optimize(smap* m, usize iterations, rmemalloc_t* ma) {
     return -1.0;
   smapent* entries = entries_mem.p;
   memcpy(entries, m->entries, m->cap*sizeof(smapent));
-  hashcode best_hash0 = m->hash0;
+  hash_t best_hash0 = m->hash0;
   double best_score = -1.0;
 
   #if defined(DEBUG) && !defined(__wasm__)
@@ -362,12 +378,25 @@ usize smap_cfmt(char* buf, usize bufcap, const smap* m, const char* name) {
   s.p--; s.len--; // undo last ","
   abuf_fmt(&s,
     "};\n"
-    "static const struct{u32 cap,len,gcap;maplf lf;hashcode hash0;const smapent* ep;}\n"
+    "static const struct{u32 cap,len,gcap;maplf lf;hash_t hash0;const smapent* ep;}\n"
     "%s_data={%u,%u,%u,%u,0x%llx,%s_entries};\n"
     "static const smap* %s = (const smap*)&%s_data;",
     name, m->cap, m->len, m->gcap, m->lf, (u64)m->hash0, name, name, name
   );
   return abuf_terminate(&s);
+}
+
+
+usize smap_copy(smap* dstm, const smap* srcm, rmem_t entries_mem, rmemalloc_t* ma) {
+  uintptr init_p = (uintptr)entries_mem.p;
+  if (!rmem_align(&entries_mem, _Alignof(smapent)))
+    return 0;
+  if (entries_mem.size >= srcm->entries_mem.size) {
+    memcpy(entries_mem.p, srcm->entries_mem.p, srcm->entries_mem.size);
+    smap_init(dstm, ma, entries_mem, srcm->cap, srcm->hash0, srcm->lf);
+  }
+  usize align_offs = (usize)((uintptr)entries_mem.p - init_p);
+  return srcm->entries_mem.size + align_offs;
 }
 
 
@@ -394,7 +423,7 @@ static void dump_smapent(
   }
 
   u32 index = (u32)(e - m->entries);
-  hashcode h = hash_mem(e->key, e->keylen, m->hash0);
+  hash_t h = hash_mem(e->key, e->keylen, m->hash0);
   usize ideal_index = h & (m->cap - 1);
 
   usize highlight = 0xffffffff;
@@ -411,7 +440,7 @@ static void dump_smapent(
 
   printf("  %-5s", e->key);
   if (include_hash)
-    printf(sizeof(hashcode) > 4 ? "  0x%016lx" : "  0x%08lx", h);
+    printf(sizeof(hash_t) > 4 ? "  0x%016lx" : "  0x%08lx", h);
 
   if (ideal_index != index) {
     if (highlight != 0xffffffff) {
@@ -474,7 +503,7 @@ static void smap_test() {
 
   // // log hash values
   // for (usize i = 0; i < nsamples; i++) {
-  //   hashcode h = hash_mem(samples[i], strlen(samples[i]), m.hash0);
+  //   hash_t h = hash_mem(samples[i], strlen(samples[i]), m.hash0);
   //   printf("%8llx %4llu %-5s\n", (u64)h, (u64)h % 8, samples[i]);
   // }
 

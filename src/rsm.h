@@ -309,10 +309,10 @@ enum rop {
   RSM_OP_COUNT,
 } RSM_END_ENUM2(rop, rop_t)
 
-typedef u8 rfmtflag; // string formatting flags
+typedef u8 rfmtflag_t; // string formatting flags
 enum rfmtflag {
   RSM_FMT_COLOR = 1 << 0, // use ANSI colors
-} RSM_END_ENUM(rfmtflag)
+} RSM_END_ENUM2(rfmtflag, rfmtflag_t)
 
 typedef int rerror; // error code
 enum rerror {
@@ -557,11 +557,11 @@ RSMAPI rerror rsm_loadrom(rrom_t* rom);
 // Returns the number of characters that would have been printed if bufcap was
 // unlimited (not including the final `\0').
 RSMAPI usize rsm_fmtprog(
-  char* buf, usize bufcap, const rin_t* nullable ip, usize ilen, rfmtflag);
+  char* buf, usize bufcap, const rin_t* nullable ip, usize ilen, rfmtflag_t);
 // if pcaddp is not null, it is set to the PC advance for the instruction,
 // which is 1 for all except COPYV.
 RSMAPI usize rsm_fmtinstr(
-  char* buf, usize bufcap, rin_t, u32* nullable pcaddp, rfmtflag);
+  char* buf, usize bufcap, rin_t, u32* nullable pcaddp, rfmtflag_t);
 
 // enum related functions
 RSMAPI const char* rop_name(rop_t);      // name of an opcode

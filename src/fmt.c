@@ -17,7 +17,7 @@
 #define fs(N) ( RSM_GET_i(in) ? _fs(RSM_GET_##N##s(in)) : fr(N) )
 
 
-u32 fmtinstr(abuf_t* s, rin_t in, rfmtflag fl) {
+u32 fmtinstr(abuf_t* s, rin_t in, rfmtflag_t fl) {
   #define fi__     break;
   #define fi_A     fr(A); break;
   #define fi_Au    fu(A); break;
@@ -41,7 +41,7 @@ u32 fmtinstr(abuf_t* s, rin_t in, rfmtflag fl) {
   return 1;
 }
 
-usize rsm_fmtinstr(char* buf, usize bufcap, rin_t in, u32* pcaddp, rfmtflag fl) {
+usize rsm_fmtinstr(char* buf, usize bufcap, rin_t in, u32* pcaddp, rfmtflag_t fl) {
   abuf_t s = abuf_make(buf, bufcap);
   u32 pcadd = fmtinstr(&s, in, fl);
   if (pcaddp)
@@ -50,7 +50,7 @@ usize rsm_fmtinstr(char* buf, usize bufcap, rin_t in, u32* pcaddp, rfmtflag fl) 
 }
 
 usize rsm_fmtprog(
-  char* buf, usize bufcap, const rin_t* nullable ip, usize ilen, rfmtflag fl)
+  char* buf, usize bufcap, const rin_t* nullable ip, usize ilen, rfmtflag_t fl)
 {
   assert(ip != NULL || ilen == 0); // ok to pass NULL,0 but not NULL,>0
   abuf_t s1 = abuf_make(buf, bufcap); abuf_t* s = &s1;

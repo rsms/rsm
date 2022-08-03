@@ -50,7 +50,7 @@ struct gdata { // base: gnamed
   const void* nullable initp; // pointer to initial value, if any
   u64                  addr;  // address (valid only after layout)
   gdata* nullable      next;  // for gstate.datalist
-  rnode*               origin;
+  rnode_t*             origin;
 };
 
 // head of instruction-block structs
@@ -70,7 +70,7 @@ struct gfun { // base: gbhead
 
 struct gblock { // base: gbhead
   BLOCK_HEAD
-  rsrcpos pos;
+  rsrcpos_t pos;
 };
 
 #define SLAB_HEAD(TYPE) \
@@ -86,11 +86,11 @@ struct gfunslab {
 };
 
 struct gstate {
-  rasm*  a;       // compilation session/context
-  rarray iv;      // rinstr[]; instructions
-  rarray funs;    // gfun[]; functions
-  rarray udnames; // gref[]; pending undefined named references
-  smap   names;   // name => gnamed*
+  rasm_t* a;       // compilation session/context
+  rarray  iv;      // rinstr[]; instructions
+  rarray  funs;    // gfun[]; functions
+  rarray  udnames; // gref[]; pending undefined named references
+  smap    names;   // name => gnamed*
 
   // gdata blocks may change order and may grow with separate memory allocations.
   // Referencing and patching data is made simpler (better?) by using gdata pointers
@@ -112,7 +112,7 @@ struct gstate {
 
 struct gref {
   u32      i;     // referrer's iv offset
-  rnode*   n;     // referrer
+  rnode_t*   n;     // referrer
   grefflag flags;
   gnamed* nullable target;
 };
@@ -129,7 +129,7 @@ enum grefflag {
 static bool check_alloc(gstate* g, void* nullable p) {
   if LIKELY(p != NULL)
     return false;
-  errf(g->a, (rposrange){0}, "out of memory");
+  errf(g->a, (rposrange_t){0}, "out of memory");
   return true;
 }
 
@@ -161,7 +161,7 @@ static bool check_alloc(gstate* g, void* nullable p) {
   vp__ ? *(gnamed**)vp__ : NULL;                             \
 })
 
-static gblock* nullable find_target_gblock(gfun* fn, rnode* referrer) {
+static gblock* nullable find_target_gblock(gfun* fn, rnode_t* referrer) {
   for (u32 i = 0; i < fn->blocks.len; i++) {
     gblock* b = rarray_at(gblock, &fn->blocks, i);
     if (nodename_eq(referrer, b->name, b->namelen))
@@ -181,7 +181,7 @@ static const char* gnamedtype_name(gnamedtype t) {
 }
 
 static bool check_named_ref(
-  gstate* g, rnode* referrer, u32 referreri, grefflag flags, gnamed* target)
+  gstate* g, rnode_t* referrer, u32 referreri, grefflag flags, gnamed* target)
 {
   rop op = RSM_GET_OP(*rarray_at(rinstr, &g->iv, referreri));
   const char* expected;
@@ -259,7 +259,7 @@ static const i64 ropenc_limittab[][2] = { // ropenc limits {min,max}
   /* ABCDs */  {RSM_MIN_Ds, RSM_MAX_Ds},
 };
 
-static void patch_lastregarg(gstate* g, rnode* patcher, rinstr* in, u32 regno) {
+static void patch_lastregarg(gstate* g, rnode_t* patcher, rinstr* in, u32 regno) {
   assert(regno <= RSM_MAX_REG);
   *in = RSM_SET_i(*in, 0); // clear immediate flag
 
@@ -331,7 +331,7 @@ inline static u32 select_scratchreg(rinstr in, u32 dstreg, u32 nregargs) {
 
 // set immediate value of instruction g->iv[inindex]
 // returns true if result/patched arg is an immediate value rather than a register.
-static bool patch_imm(gstate* g, rnode* patcher, u32 inindex, u64 value) {
+static bool patch_imm(gstate* g, rnode_t* patcher, u32 inindex, u64 value) {
   assert(inindex < g->iv.len);
   rinstr* in = rarray_at(rinstr, &g->iv, inindex);
   u32 scratchreg = RSM_NREGS; // if >-1, names a reg largeval can safely use
@@ -502,7 +502,7 @@ static void resolve_udnames(gstate* g) {
 }
 
 // returns true if result arg is an immediate value rather than a register.
-static bool refnamed(gstate* g, rnode* refn, u32 refi, rop op, u32 argc, i32* argp) {
+static bool refnamed(gstate* g, rnode_t* refn, u32 refi, rop op, u32 argc, i32* argp) {
   grefflag flags = 0;
 
   #define ADDGREF(refs) ({                           \
@@ -574,7 +574,7 @@ static bool refnamed(gstate* g, rnode* refn, u32 refi, rop op, u32 argc, i32* ar
   #undef ADDGREF
 }
 
-static u8 nregno(gstate* g, rnode* n) {
+static u8 nregno(gstate* g, rnode_t* n) {
   if UNLIKELY(n->t != RT_IREG && n->t != RT_FREG) {
     ERRN(n, "expected register, got %s", tokname(n->t));
     return 0;
@@ -584,7 +584,7 @@ static u8 nregno(gstate* g, rnode* n) {
 }
 
 static void errintsize(
-  rasm* c, rposrange pr, rop op, i64 minval, i64 maxval, u64 val, bool issigned)
+  rasm_t* c, rposrange_t pr, rop op, i64 minval, i64 maxval, u64 val, bool issigned)
 {
   if (minval != 0 || issigned) {
     errf(c, pr, "value %lld out of range %lld...%lld for %s",
@@ -597,14 +597,14 @@ static void errintsize(
 // getiargs checks & reads integer arguments for an operation described by AST rnode n.
 // returns true if the last arg is an immediate value.
 static bool getiargs(
-  gstate* g, rnode* n, i32* argv, u32 wantargc, i64 minval, u64 maxval, rinstr** inp)
+  gstate* g, rnode_t* n, i32* argv, u32 wantargc, i64 minval, u64 maxval, rinstr** inp)
 {
   assert(n->t == RT_OP);
   u32 argc = 0;
   rop op = (rop)n->ival;
 
   // first argc-1 args are registers
-  rnode* arg = n->children.head;
+  rnode_t* arg = n->children.head;
   for (; argc < wantargc-1 && arg; argc++, arg = arg->next)
     argv[argc] = nregno(g, arg);
 
@@ -667,11 +667,11 @@ err_argc:
 }
 
 
-static void genop(gstate* g, rnode* n);
-static void genassign(gstate* g, rnode* n);
+static void genop(gstate* g, rnode_t* n);
+static void genassign(gstate* g, rnode_t* n);
 
 
-static void genop_call(gstate* g, rnode* n) {
+static void genop_call(gstate* g, rnode_t* n) {
   if UNLIKELY(n->children.head == NULL) {
     ERRN(n, "missing call destination");
     return;
@@ -683,12 +683,12 @@ static void genop_call(gstate* g, rnode* n) {
   //   copy R0 R5
   //   copy R1 0x3
   //   call foo
-  rnode* n_tmp;
-  rnode* arg = n->children.head->next;
+  rnode_t* n_tmp;
+  rnode_t* arg = n->children.head->next;
   if (!arg)
     goto gen_call;
-  rnode dst_tmp = {0};
-  rnode assign_tmp = {0};
+  rnode_t dst_tmp = {0};
+  rnode_t assign_tmp = {0};
   for (u32 dstreg = 0; arg; arg = arg->next, dstreg++) {
     // synthesize "dst = arg"
     if UNLIKELY(dstreg == RSM_NARGREGS) {
@@ -727,7 +727,7 @@ gen_call:
 }
 
 
-static void genop(gstate* g, rnode* n) {
+static void genop(gstate* g, rnode_t* n) {
   assert(n->t == RT_OP);
   assert(n->ival < RSM_OP_COUNT);
 
@@ -799,13 +799,13 @@ no_r:
 }
 
 
-static void genassign(gstate* g, rnode* n) {
+static void genassign(gstate* g, rnode_t* n) {
   // convert assignment to op
   // TODO: don't mutate n; instead use a stack-local copy
   assertf(n->t == RT_ASSIGN, "n->t=%s", tokname(n->t));
   n->t = RT_OP;
-  rnode* lhs = assertnotnull(n->children.head);
-  rnode* rhs = assertnotnull(lhs->next);
+  rnode_t* lhs = assertnotnull(n->children.head);
+  rnode_t* rhs = assertnotnull(lhs->next);
   assertnull(rhs->next); // n must only have two operands
 
   if (rhs->children.head) {
@@ -839,7 +839,7 @@ static void genassign(gstate* g, rnode* n) {
   return genop(g, n);
 }
 
-static void genblock(gstate* g, rnode* block) {
+static void genblock(gstate* g, rnode_t* block) {
   assert(block->t == RT_LABEL);
   assertnotnull(g->fn);
 
@@ -855,8 +855,8 @@ static void genblock(gstate* g, rnode* block) {
   // resolve pending references
   gpostresolve_pc(g, &g->fn->ulv, (gbhead*)b);
 
-  rnode* jumpn = NULL; // last unconditional jump
-  for (rnode* cn = block->children.head; cn; cn = cn->next) {
+  rnode_t* jumpn = NULL; // last unconditional jump
+  for (rnode_t* cn = block->children.head; cn; cn = cn->next) {
     if (jumpn) {
       warnf(g->a, nposrange(cn), "unreachable code");
       break;
@@ -880,7 +880,7 @@ static void names_assign(gstate* g, gnamed* entry) {
     *vp = (uintptr)entry;
 }
 
-static bool gdata_typesize(gstate* g, rnode* type, u32* alignp, u64* sizep) {
+static bool gdata_typesize(gstate* g, rnode_t* type, u32* alignp, u64* sizep) {
   switch (type->t) {
     case RT_I1:  *alignp = 1; *sizep = 1; return true;
     case RT_I8:  *alignp = 1; *sizep = 1; return true;
@@ -888,7 +888,7 @@ static bool gdata_typesize(gstate* g, rnode* type, u32* alignp, u64* sizep) {
     case RT_I32: *alignp = 4; *sizep = 4; return true;
     case RT_I64: *alignp = 8; *sizep = 8; return true;
     case RT_ARRAY: {
-      rnode* elemtype = assertnotnull(type->children.head);
+      rnode_t* elemtype = assertnotnull(type->children.head);
       u64 elemsize;
       if UNLIKELY(!gdata_typesize(g, elemtype, alignp, &elemsize))
         return false;
@@ -904,7 +904,7 @@ static bool gdata_typesize(gstate* g, rnode* type, u32* alignp, u64* sizep) {
   }
 }
 
-static void gendata(gstate* g, rnode* datn) {
+static void gendata(gstate* g, rnode_t* datn) {
   assert(datn->t == RT_DATA || datn->t == RT_CONST);
 
   // example: "data hello i32 = 123"
@@ -921,11 +921,11 @@ static void gendata(gstate* g, rnode* datn) {
   d->nrefs = 0;
   d->origin = datn;
 
-  rnode* type = assertnotnull(datn->children.head);
+  rnode_t* type = assertnotnull(datn->children.head);
   if UNLIKELY(!gdata_typesize(g, type, &d->align, &d->size))
     return;
 
-  rnode* init = type->next;
+  rnode_t* init = type->next;
   d->initp = NULL;
   if (init) {
     if (tokisintlit(init->t)) {
@@ -947,7 +947,7 @@ static void gendata(gstate* g, rnode* datn) {
   names_assign(g, (gnamed*)d);
 }
 
-static void genfun(gstate* g, rnode* fun) {
+static void genfun(gstate* g, rnode_t* fun) {
   assert(fun->t == RT_FUN);
 
   // This is the only place where we initialize a new gfun
@@ -967,9 +967,9 @@ static void genfun(gstate* g, rnode* fun) {
   gpostresolve_pc(g, &g->udnames, (gbhead*)fn);
 
   // get body by traversing the function rnode's linked list
-  rnode* params = fun->children.head;
-  rnode* results = params->next;
-  rnode* body = results->next;
+  rnode_t* params = fun->children.head;
+  rnode_t* results = params->next;
+  rnode_t* body = results->next;
   if (!body) // just a function declaration
     return;
 
@@ -981,7 +981,7 @@ static void genfun(gstate* g, rnode* fun) {
   g->fn = fn;
 
   // generate function body
-  for (rnode* cn = body->children.head; cn; cn = cn->next)
+  for (rnode_t* cn = body->children.head; cn; cn = cn->next)
     genblock(g, cn);
 
   // make sure the last instruction of the last block of a function is RET or TCALL
@@ -998,7 +998,7 @@ static void genfun(gstate* g, rnode* fun) {
     gref* ref = rarray_at(gref, &fn->ulv, i);
     if (ref->flags&REF_ANY) // there's also an entry in g->udnames
       continue;
-    rnode* n = ref->n;
+    rnode_t* n = ref->n;
     ERRN(n, "undefined label \"%.*s\"", (int)n->sval.len, n->sval.p);
   }
 
@@ -1006,7 +1006,7 @@ static void genfun(gstate* g, rnode* fun) {
   for (u32 i = 0; i < fn->blocks.len; i++) {
     gblock* b = rarray_at(gblock, &fn->blocks, i);
     if (b->nrefs == 0 && strcmp(b->name, kBlock0Name) != 0) {
-      warnf(g->a, (rposrange){.focus=b->pos}, "unused label \"%.*s\"",
+      warnf(g->a, (rposrange_t){.focus=b->pos}, "unused label \"%.*s\"",
         (int)b->namelen, b->name);
     }
   }
@@ -1060,7 +1060,7 @@ static void layout_gdata(gstate* g) {
   for (gdataslab* slab = &g->datavhead; slab && slab->len; slab = slab->next)
     datacount += slab->len;
   if UNLIKELY(!rarray_reserve(gdata*, &g->dataorder, g->a->memalloc, datacount))
-    return errf(g->a, (rposrange){0}, "out of memory");
+    return errf(g->a, (rposrange_t){0}, "out of memory");
   usize datalen = 0;
   for (gdataslab* slab = &g->datavhead; slab; slab = slab->next) {
     if (slab->len == 0)
@@ -1120,7 +1120,7 @@ static void report_unresolved(gstate* g) {
   // report unresolved references
   for (u32 i = 0; i < g->udnames.len; i++) {
     gref* ref = rarray_at(gref, &g->udnames, i);
-    rnode* n = ref->n;
+    rnode_t* n = ref->n;
     ERRN(n, "undefined name \"%.*s\"", (int)n->sval.len, n->sval.p);
   }
 
@@ -1137,10 +1137,10 @@ static void report_unresolved(gstate* g) {
   }
 }
 
-static gstate* nullable init_gstate(rasm* a) {
+static gstate* nullable init_gstate(rasm_t* a) {
   gstate* g = rasm_gstate(a);
   if (!g) {
-    g = rmem_alloc_aligned(a->memalloc, sizeof(gstate), _Alignof(gstate)).p;
+    g = rmem_alloct(a->memalloc, gstate);
     if (!g)
       return NULL;
     memset(g, 0, sizeof(gstate));
@@ -1169,7 +1169,7 @@ static gstate* nullable init_gstate(rasm* a) {
   return g;
 }
 
-rerror rasm_gen(rasm* a, rnode* module, rmemalloc_t* rommem, rrom_t* rom) {
+rerror rasm_gen(rasm_t* a, rnode_t* module, rmemalloc_t* rommem, rrom_t* rom) {
   dlog("assembling \"%s\"", a->srcname);
   assert(module->t == RT_LPAREN);
   gstate* g = init_gstate(a);
@@ -1177,7 +1177,7 @@ rerror rasm_gen(rasm* a, rnode* module, rmemalloc_t* rommem, rrom_t* rom) {
     return rerr_nomem;
 
   // generate data and functions
-  for (rnode* cn = module->children.head; cn; cn = cn->next) {
+  for (rnode_t* cn = module->children.head; cn; cn = cn->next) {
     if (cn->t == RT_DATA || cn->t == RT_CONST) {
       gendata(g, cn);
     } else {

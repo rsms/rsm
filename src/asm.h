@@ -9,8 +9,9 @@ RSM_ASSUME_NONNULL_BEGIN
 typedef struct gstate gstate;
 typedef struct pstate pstate;
 
-typedef struct rposrange rposrange;
-struct rposrange { rsrcpos start, focus, end; };
+typedef struct rposrange {
+  rsrcpos_t start, focus, end;
+} rposrange_t;
 
 // rasm._internal[0] -- negated diaghandler return value
 #define rasm_stop(a)        ( (bool)(a)->_internal[0] )
@@ -37,17 +38,17 @@ const char* tokname(rtok t);
                         (t) == RT_LABEL || (t) == RT_FUN || \
                         (t) == RT_CONST || (t) == RT_DATA )
 
-inline static bool nodename_eq(const rnode* n, const char* str, usize len) {
+inline static bool nodename_eq(const rnode_t* n, const char* str, usize len) {
   return n->sval.len == len && memcmp(n->sval.p, str, len) == 0;
 }
 
-rnode* nullable nlastchild(rnode* n);
+rnode_t* nullable nlastchild(rnode_t* n);
 
-rposrange nposrange(rnode*);
+rposrange_t nposrange(rnode_t*);
 
-void errf(rasm*, rposrange, const char* fmt, ...) ATTR_FORMAT(printf, 3, 4);
-void warnf(rasm*, rposrange, const char* fmt, ...) ATTR_FORMAT(printf, 3, 4);
-void reportv(rasm*, rposrange, int code, const char* fmt, va_list ap);
+void errf(rasm_t*, rposrange_t, const char* fmt, ...) ATTR_FORMAT(printf, 3, 4);
+void warnf(rasm_t*, rposrange_t, const char* fmt, ...) ATTR_FORMAT(printf, 3, 4);
+void reportv(rasm_t*, rposrange_t, int code, const char* fmt, va_list ap);
 
 typedef struct rrombuild {
   const rinstr* code;      // vm instructions array

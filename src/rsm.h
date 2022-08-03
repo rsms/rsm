@@ -434,11 +434,19 @@ inline static rmem_t rmem_alloc(rmemalloc_t* a, usize size) {
   return rmem_alloc_aligned(a, size, 1);
 }
 
+// rmem_alloc_arrayt allocates an element of type T
+// T* nullable rmem_alloc_arrayt(rmemalloc_t* a, TYPE T)
+#define rmem_alloct(a, T)  ( (T*)rmem_alloc_aligned((a), sizeof(T), _Alignof(T)).p )
+
+// rmem_freet frees an element of type T
+// void rmem_freet(rmemalloc_t* a, T* element)
+#define rmem_freet(a, ptr)  rmem_free((a), RMEM((ptr), sizeof(*(ptr))) )
+
 // rmem_alloc_array allocates an array of elements, checking for overflow
 rmem_t rmem_alloc_array(rmemalloc_t*, usize count, usize elemsize, usize alignment);
 
 // rmem_alloc_arrayt allocates an array of type T elements, checking for overflow
-// rmem_t rmem_alloc_arrayt(rmemalloc_t* m, usize count, TYPE T)
+// rmem_t rmem_alloc_arrayt(rmemalloc_t* a, usize count, TYPE T)
 #define rmem_alloc_arrayt(a, count, T) \
   rmem_alloc_array((a), (count), sizeof(T), _Alignof(T))
 
@@ -562,13 +570,13 @@ void rsm_unloadfile(rmem_t); // unload file loaded with rsm_loadfile
 // assembler API (optional)
 #ifndef RSM_NO_ASM
 
-typedef struct rasm    rasm;    // assembly session (think of it as one source file)
-typedef struct rnode   rnode;   // AST node
-typedef u8             rtok;    // source code token
-typedef struct rdiag   rdiag;   // diagnostic report
-typedef struct rsrcpos rsrcpos; // line & column source position
+typedef struct rasm    rasm_t;    // assembly session (think of it as one source file)
+typedef struct rnode   rnode_t;   // AST node
+typedef struct rdiag   rdiag_t;   // diagnostic report
+typedef struct rsrcpos rsrcpos_t; // line & column source position
 
 // source tokens (rtok)
+typedef u8 rtok;
 #define RSM_FOREACH_TOKEN(_) \
 _( RT_END ) \
 _( RT_COMMENT ) \
@@ -633,7 +641,7 @@ enum rtok {
 
 // rdiaghandler is called with a diagnostict report.
 // Return false to stop the process (e.g. stop assembling.)
-typedef bool(*rdiaghandler)(const rdiag*, void* nullable userdata);
+typedef bool(*rdiaghandler_t)(const rdiag_t*, void* nullable userdata);
 
 struct rdiag {
   int         code;      // error code (1=error, 0=warning)
@@ -650,8 +658,8 @@ struct rasm {
   usize          srclen;      // length of srcdata
   const char*    srcname;     // symbolic name of source (e.g. filename)
   u32            errcount;    // number of errors reported
-  rdiag          diag;        // last diagnostic report
-  rdiaghandler   diaghandler; // diagnostic report callback
+  rdiag_t        diag;        // last diagnostic report
+  rdiaghandler_t diaghandler; // diagnostic report callback
   void* nullable userdata;    // passed along to diaghandler
   void* _internal[8];
 };
@@ -661,12 +669,12 @@ struct rsrcpos {
 };
 
 struct rnode {
-  rtok            t;    // type
-  rsrcpos         pos;  // source position, or {0,0} if unknown
-  rnode* nullable next; // intrusive list link
+  rtok              t;    // type
+  rsrcpos_t         pos;  // source position, or {0,0} if unknown
+  rnode_t* nullable next; // intrusive list link
   struct {
-    rnode* nullable head;
-    rnode* nullable tail;
+    rnode_t* nullable head;
+    rnode_t* nullable tail;
   } children;
   union { // depends on value of t
     u64 ival;
@@ -679,18 +687,18 @@ struct rnode {
 // Returns AST representing the source (a->src* fields) module (NULL on memory alloc fail.)
 // Caller should check a->errcount on return and call rasm_free_rnode when done with the
 // resulting rnode.
-RSMAPI rnode* nullable rasm_parse(rasm* a);
+RSMAPI rnode_t* nullable rasm_parse(rasm_t* a);
 
 // rasm_gen builds VM code from AST.
 // Uses a->mem for temporary storage, allocates data for rom with rommem.
 // a can be reused.
-RSMAPI rerror rasm_gen(rasm* a, rnode* module, rmemalloc_t* rommem, rrom_t* rom);
+RSMAPI rerror rasm_gen(rasm_t* a, rnode_t* module, rmemalloc_t* rommem, rrom_t* rom);
 
 // rasm_dispose frees resources of a
-RSMAPI void rasm_dispose(rasm* a);
+RSMAPI void rasm_dispose(rasm_t* a);
 
 // rasm_free_rnode frees n (entire tree, including all children) back to a->mem
-RSMAPI void rasm_free_rnode(rasm* a, rnode* n);
+RSMAPI void rasm_free_rnode(rasm_t* a, rnode_t* n);
 
 #endif // RSM_NO_ASM
 

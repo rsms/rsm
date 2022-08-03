@@ -17,8 +17,8 @@ const char* tokname(rtok t) {
   return "?";
 }
 
-rnode* nullable nlastchild(rnode* n) {
-  rnode* child = n->children.head;
+rnode_t* nullable nlastchild(rnode_t* n) {
+  rnode_t* child = n->children.head;
   if (child) while (child->next)
     child = child->next;
   return child;
@@ -38,16 +38,16 @@ static u32 u32log10(u32 u) {
 }
 
 // nposrange computes the source position range for AST node n
-rposrange nposrange(rnode* n) {
-  rposrange pr = { .start=n->pos, .focus=n->pos };
+rposrange_t nposrange(rnode_t* n) {
+  rposrange_t pr = { .start=n->pos, .focus=n->pos };
   switch (n->t) {
     case RT_ASSIGN:
       if (n->children.head) {
         pr.start = n->children.head->pos;
-        rnode* lastn = n->children.head;
+        rnode_t* lastn = n->children.head;
         while (lastn->next)
           lastn = lastn->next;
-        rposrange lastpr = nposrange(lastn);
+        rposrange_t lastpr = nposrange(lastn);
         lastpr.end = lastpr.end.line ? lastpr.end : lastpr.focus;
         pr.end = pr.focus;
         if (lastpr.end.line >= pr.end.line && lastpr.end.col > pr.end.col)
@@ -73,14 +73,14 @@ rposrange nposrange(rnode* n) {
       pr.end.line = pr.focus.line;
       pr.end.col = pr.focus.col + 5 + 1 + n->sval.len; // assume single space sep
       if (n->children.head) {
-        rsrcpos endpos = nposrange(n->children.head).end;
+        rsrcpos_t endpos = nposrange(n->children.head).end;
         if (endpos.line) // note: inferred type has no srcpos
           pr.end = endpos;
       }
       break;
     case RT_DATA:
       if (n->children.head) {
-        rnode* type = n->children.head;
+        rnode_t* type = n->children.head;
         pr.end = nposrange(type).end;
       } else {
         pr.end.line = pr.focus.line;
@@ -110,12 +110,12 @@ rposrange nposrange(rnode* n) {
   return pr;
 }
 
-static void diag_add_srclines(rasm* a, rposrange pr, abuf_t* s) {
+static void diag_add_srclines(rasm_t* a, rposrange_t pr, abuf_t* s) {
   a->diag.srclines = "";
   if (abuf_avail(s) < 4 || pr.focus.line == 0 || a->srclen == 0)
     return;
 
-  rsrcpos pos = pr.focus; // TODO: use start & end
+  rsrcpos_t pos = pr.focus; // TODO: use start & end
 
   u32 nlinesbefore = 1;
   u32 nlinesafter = 1;
@@ -185,7 +185,7 @@ static void diag_add_srclines(rasm* a, rposrange pr, abuf_t* s) {
   }
 }
 
-void reportv(rasm* a, rposrange pr, int code, const char* fmt, va_list ap) {
+void reportv(rasm_t* a, rposrange_t pr, int code, const char* fmt, va_list ap) {
   if (rasm_stop(a))
     return; // previous call to diaghandler has asked us to stop
 
@@ -218,14 +218,14 @@ void reportv(rasm* a, rposrange pr, int code, const char* fmt, va_list ap) {
   rasm_stop_set(a, !keepgoing);
 }
 
-void errf(rasm* a, rposrange pr, const char* fmt, ...) {
+void errf(rasm_t* a, rposrange_t pr, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
   reportv(a, pr, 1, fmt, ap);
   va_end(ap);
 }
 
-void warnf(rasm* a, rposrange pr, const char* fmt, ...) {
+void warnf(rasm_t* a, rposrange_t pr, const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
   reportv(a, pr, 0, fmt, ap);
@@ -235,7 +235,7 @@ void warnf(rasm* a, rposrange pr, const char* fmt, ...) {
 void gstate_dispose(gstate* g);
 void pstate_dispose(pstate* p);
 
-void rasm_dispose(rasm* a) {
+void rasm_dispose(rasm_t* a) {
   gstate* g = rasm_gstate(a);
   if (g) gstate_dispose(g);
 
@@ -243,7 +243,7 @@ void rasm_dispose(rasm* a) {
   if (p) pstate_dispose(p);
 
   #ifdef DEBUG
-  memset(a, 0, sizeof(rasm));
+  memset(a, 0, sizeof(rasm_t));
   #endif
 }
 

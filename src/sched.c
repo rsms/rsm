@@ -1091,8 +1091,7 @@ static rerror s_init(S* s) {
   s->nprocs = nprocs;
   trace("s.nprocs=%u", nprocs);
   for (u32 pid = 0; pid < nprocs; pid++) {
-    rmem_t mem = rmem_alloc_aligned(s->memalloc, sizeof(P), _Alignof(P));
-    P* p = mem.p;
+    P* p = rmem_alloct(s->memalloc, P);
     if (!p) // TODO: free other P's we allocated
       return rerr_nomem;
     memset(p, 0, sizeof(P));
@@ -1139,7 +1138,7 @@ rerror rvm_main(rvm* vm, rrom_t* rom) {
 
 
 rvm* nullable rvm_create(rmemalloc_t* ma) {
-  S* s = rmem_alloc_aligned(ma, sizeof(S), _Alignof(S)).p;
+  S* s = rmem_alloct(ma, S);
   if (!s)
     return NULL;
   memset(s, 0, sizeof(S));
@@ -1161,6 +1160,6 @@ rvm* nullable rvm_create(rmemalloc_t* ma) {
 void rvm_dispose(rvm* vm) {
   S* s = (S*)vm;
   rmem_free(s->memalloc, RMEM(s->heapbase, s->heapsize));
-  rmem_free(s->memalloc, RMEM(s, sizeof(S)));
+  rmem_freet(s->memalloc, s);
 }
 

@@ -186,7 +186,7 @@ static void print_regstate(u64* iregs) {
   printf("\n");
 }
 
-static bool diaghandler(const rdiag* d, void* userdata) {
+static bool diaghandler(const rdiag_t* d, void* userdata) {
   // called by the compiler when an error occurs
   fwrite(d->msg, strlen(d->msg), 1, stderr);
   putc('\n', stderr);
@@ -200,7 +200,7 @@ static bool diaghandler(const rdiag* d, void* userdata) {
 static bool compile(
   rmemalloc_t* ma, const char* nullable srcfile, rmem_t srcdata, rrom_t* rom)
 {
-  rasm a = {
+  rasm_t a = {
     .memalloc = ma,
     .diaghandler = diaghandler,
     .srcname = srcfile ? srcfile : "stdin",
@@ -208,7 +208,7 @@ static bool compile(
     .srclen = srcdata.size,
   };
 
-  rnode* mod = rasm_parse(&a);
+  rnode_t* mod = rasm_parse(&a);
   if UNLIKELY(mod == NULL) {
     errmsg("failed to allocate memory for parser");
     return false;

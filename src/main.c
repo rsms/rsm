@@ -255,7 +255,7 @@ int main(int argc, char*const* argv) {
   // create a memory manager and a memory allocator
   usize total_mem_size = 1 * GiB; // total memory from host
   usize memalloc_size = 64 * MiB; // memory to use for allocator
-  // rest is used for runtime virtual memory
+  // rest of memory is used for runtime virtual memory
   rmm_t* mm = assertnotnull( rmm_create_host_vmmap(total_mem_size) );
   rmemalloc_t* ma = rmem_allocator_create(mm, memalloc_size);
   if (!ma) {

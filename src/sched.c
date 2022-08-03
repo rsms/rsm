@@ -170,7 +170,7 @@ struct P {
 // };
 
 struct S {
-  rvm          pub;       // public API
+  rvm_t        pub;       // public API
   rmemalloc_t* memalloc;  // memory allocator
   M            m0;        // main M (bound to the OS thread which rvm_main is called on)
   T*           t0;        // main task on m0
@@ -1108,7 +1108,7 @@ static rerr_t s_init(S* s) {
 }
 
 
-rerr_t rvm_main(rvm* vm, rrom_t* rom) {
+rerr_t rvm_main(rvm_t* vm, rrom_t* rom) {
   S* s = (S*)vm;
 
   // initialize the scheduler
@@ -1137,7 +1137,7 @@ rerr_t rvm_main(rvm* vm, rrom_t* rom) {
 }
 
 
-rvm* nullable rvm_create(rmemalloc_t* ma) {
+rvm_t* nullable rvm_create(rmemalloc_t* ma) {
   S* s = rmem_alloct(ma, S);
   if (!s)
     return NULL;
@@ -1153,11 +1153,11 @@ rvm* nullable rvm_create(rmemalloc_t* ma) {
   s->heapbase = heapmem.p;
   s->heapsize = heapmem.size;
   s->memalloc = ma;
-  return (rvm*)s;
+  return (rvm_t*)s;
 }
 
 
-void rvm_dispose(rvm* vm) {
+void rvm_dispose(rvm_t* vm) {
   S* s = (S*)vm;
   rmem_free(s->memalloc, RMEM(s->heapbase, s->heapsize));
   rmem_freet(s->memalloc, s);

@@ -510,7 +510,7 @@ typedef struct {
 } rrom_t;
 
 // rvmstatus: VM status
-typedef u8 rvmstatus;
+typedef u8 rvmstatus_t;
 enum rvmstatus {
   RVM_INIT,
   RVM_ERROR, // check rvm.error
@@ -519,13 +519,13 @@ enum rvmstatus {
 
 // rvm: VM instance
 typedef struct {
-  rvmstatus status;
-  u64       iregs[RSM_NREGS];
-  double    fregs[RSM_NREGS];
-  void*     rambase;
-  usize     ramsize;
-  void*     internal;
-} rvm;
+  rvmstatus_t status;
+  u64         iregs[RSM_NREGS];
+  double      fregs[RSM_NREGS];
+  void*       rambase;
+  usize       ramsize;
+  void*       internal;
+} rvm_t;
 
 
 // rsm_init initializes global state; must be called before using the rest of the API.
@@ -533,17 +533,17 @@ typedef struct {
 RSMAPI bool rsm_init();
 
 // rvm_create creates a new VM instance
-rvm* nullable rvm_create(rmemalloc_t*);
+rvm_t* nullable rvm_create(rmemalloc_t*);
 
 // rvm_dispose frees a VM instance
-void rvm_dispose(rvm* vm);
+void rvm_dispose(rvm_t* vm);
 
 // rvm_main loads & runs a program in a ROM image
-rerr_t rvm_main(rvm* vm, rrom_t* rom);
+rerr_t rvm_main(rvm_t* vm, rrom_t* rom);
 
 // rsm_vmexec executes a program, starting with instruction 0
 // Loads the ROM if needed.
-RSMAPI rerr_t rsm_vmexec(rvm* vm, rrom_t* rom);
+RSMAPI rerr_t rsm_vmexec(rvm_t* vm, rrom_t* rom);
 
 // rsm_loadrom parses rom->img of rom->imgsize bytes,
 // populating the rest of the fields of the rrom_t struct.

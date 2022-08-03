@@ -22,7 +22,7 @@ static_assert(U64_MAX/M_SEG_COUNT > M_SEG_SIZE, "too many segments / M_SEG_SIZE 
 
 // vmstate: internal vm state
 typedef struct {
-  rvm          pub;      // public API
+  rvm_t        pub;      // public API
   rmemalloc_t* memalloc; // memory allocator
   usize        inlen;    // number of instructions at inv
   union { usize datasize, stacktop; };  // aka
@@ -552,7 +552,7 @@ static rerr_t vm_loadrom(rrom_t* rom) {
 }
 
 
-rerr_t rsm_vmexec(rvm* vm, rrom_t* rom) {
+rerr_t rsm_vmexec(rvm_t* vm, rrom_t* rom) {
   rerr_t err = vm_loadrom(rom);
   if (err)
     return err;

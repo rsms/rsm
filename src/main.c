@@ -285,7 +285,7 @@ int main(int argc, char*const* argv) {
   // —————————————— new execution engine ——————————————
   if (opt_newexec) {
 
-    rvm* vm2 = safechecknotnull( rvm_create(ma) );
+    rvm_t* vm2 = safechecknotnull( rvm_create(ma) );
     rerr_t err2 = rvm_main(vm2, &rom);
     rvm_dispose(vm2);
     if (err2) {
@@ -302,7 +302,7 @@ int main(int argc, char*const* argv) {
       return 1;
     }
 
-    rvm vm = { .rambase=rambase, .ramsize=vm_ramsize };
+    rvm_t vm = { .rambase=rambase, .ramsize=vm_ramsize };
     rerr_t err = rsm_vmexec(&vm, &rom);
     if (err) {
       errmsg("vmexec: %s", err == rerr_nomem ? "not enough memory" : rerr_str(err));

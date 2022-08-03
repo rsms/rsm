@@ -1169,7 +1169,7 @@ static gstate* nullable init_gstate(rasm* a) {
   return g;
 }
 
-rerror rasm_gen(rasm* a, rnode* module, rmemalloc_t* rommem, rrom* rom) {
+rerror rasm_gen(rasm* a, rnode* module, rmemalloc_t* rommem, rrom_t* rom) {
   dlog("assembling \"%s\"", a->srcname);
   assert(module->t == RT_LPAREN);
   gstate* g = init_gstate(a);
@@ -1200,7 +1200,7 @@ rerror rasm_gen(rasm* a, rnode* module, rmemalloc_t* rommem, rrom* rom) {
     return rerr_invalid;
 
   // build ROM image
-  rrombuild rb = {
+  rrombuild_t rb = {
     .code = (const rinstr*)g->iv.v,
     .codelen = g->iv.len,
     .datasize = g->datasize,

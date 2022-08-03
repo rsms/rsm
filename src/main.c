@@ -198,7 +198,7 @@ static bool diaghandler(const rdiag* d, void* userdata) {
 }
 
 static bool compile(
-  rmemalloc_t* ma, const char* nullable srcfile, rmem_t srcdata, rrom* rom)
+  rmemalloc_t* ma, const char* nullable srcfile, rmem_t srcdata, rrom_t* rom)
 {
   rasm a = {
     .memalloc = ma,
@@ -269,7 +269,7 @@ int main(int argc, char*const* argv) {
     return 1;
 
   // input: load ROM or compile source
-  rrom rom = {0};
+  rrom_t rom = {0};
   if (indata.size > 4 && *(u32*)indata.p == RSM_ROM_MAGIC) {
     rom.img = indata.p;
     rom.imgsize = indata.size;

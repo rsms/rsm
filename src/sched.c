@@ -1109,7 +1109,7 @@ static rerror s_init(S* s) {
 }
 
 
-rerror rvm_main(rvm* vm, rrom* rom) {
+rerror rvm_main(rvm* vm, rrom_t* rom) {
   S* s = (S*)vm;
 
   // initialize the scheduler

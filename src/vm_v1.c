@@ -511,7 +511,7 @@ static void vmexec(VMPARAMS) {
 }
 
 #if DEBUG
-static void log_memory(rrom* rom, vmstate* vs) {
+static void log_memory(rrom_t* rom, vmstate* vs) {
   void* membase = vs->mbase[0];
   usize memsize = (usize)vs->msize[0];
   usize stacksize = vs->stackbase - vs->stacktop;
@@ -542,7 +542,7 @@ static void log_memory(rrom* rom, vmstate* vs) {
 #endif // DEBUG
 
 
-static rerror vm_loadrom(rrom* rom) {
+static rerror vm_loadrom(rrom_t* rom) {
   if (rom->code)
     return 0; // already loaded
   rerror err = rsm_loadrom(rom);
@@ -552,7 +552,7 @@ static rerror vm_loadrom(rrom* rom) {
 }
 
 
-rerror rsm_vmexec(rvm* vm, rrom* rom) {
+rerror rsm_vmexec(rvm* vm, rrom_t* rom) {
   rerror err = vm_loadrom(rom);
   if (err)
     return err;

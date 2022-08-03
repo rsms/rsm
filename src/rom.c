@@ -1,4 +1,4 @@
-// ROM stuff
+// Implements ROM functions rsm_loadrom and rom_build
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
 #include "asm.h"
@@ -17,14 +17,14 @@ enum rrom_skind {
 // --------------------------------------------------------------------------------------
 // ROM loader
 
-#define LPARAMS  rrom* rom, const u8* p, const u8* end, u64 size
+#define LPARAMS  rrom_t* rom, const u8* p, const u8* end, u64 size
 #define LARGS    rom, p, end, size
 #define POFFS    ( (usize)((const void*)p - (const void*)rom->img) )
 #define perr(fmt, args...) ({ \
   log("error while loading rom, at offset %zu: " fmt, POFFS, ##args); \
   rerr_invalid; })
 
-rerror leb_u64_read(u64* resultp, u32 nbit, const u8** input, const u8* inputend) {
+static rerror leb_u64_read(u64* resultp, u32 nbit, const u8** input, const u8* inputend) {
   rerror err = rerr_invalid;
   u64 v = 0;
   u32 shift = 0;
@@ -100,7 +100,7 @@ static rerror load_section(LPARAMS) {
   }
 }
 
-rerror rsm_loadrom(rrom* rom) {
+rerror rsm_loadrom(rrom_t* rom) {
   // default values
   rom->codelen   = 0;
   rom->datasize  = 0;
@@ -164,11 +164,11 @@ _LEB_DEF_WRITE(leb_u64_write, u64, LEB_NBYTE_64, _LEB_MORE_U)
 // _LEB_DEF_WRITE(leb_i32_write, i32, LEB_NBYTE_32, _LEB_MORE_S)
 
 
-static void calc_DATA(rrombuild* rb, usize* bsize, usize* align) {
+static void calc_DATA(rrombuild_t* rb, usize* bsize, usize* align) {
   if (rb->datasize)
     *bsize = 1 + rb->datasize; // 1+ for "align u8"
 }
-static u8* build_DATA(rrombuild* rb, rrom* rom, u8* p, rerror* errp) {
+static u8* build_DATA(rrombuild_t* rb, rrom_t* rom, u8* p, rerror* errp) {
   assert(rb->dataalign != 0);
   assert(CEIL_POW2(rb->dataalign) == rb->dataalign);
   *p++ = rb->dataalign == 1 ? 1 : ILOG2(rb->dataalign);
@@ -182,11 +182,11 @@ static u8* build_DATA(rrombuild* rb, rrom* rom, u8* p, rerror* errp) {
   return p;
 }
 
-static void calc_CODE(rrombuild* rb, usize* bsize, usize* align) {
+static void calc_CODE(rrombuild_t* rb, usize* bsize, usize* align) {
   *bsize = rb->codelen * sizeof(rinstr);
   *align = CODE_ALIGNMENT;
 }
-static u8* build_CODE(rrombuild* rb, rrom* rom, u8* p, rerror* errp) {
+static u8* build_CODE(rrombuild_t* rb, rrom_t* rom, u8* p, rerror* errp) {
   rom->code = (const rinstr*)p;
   rom->codelen = rb->codelen;
   memcpy(p, rb->code, rb->codelen*sizeof(rinstr));
@@ -195,8 +195,8 @@ static u8* build_CODE(rrombuild* rb, rrom* rom, u8* p, rerror* errp) {
 }
 
 
-rerror rom_build(rrombuild* rb, rmemalloc_t* ma, rrom* rom) {
-  memset(rom, 0, sizeof(rrom)); // in case of error
+rerror rom_build(rrombuild_t* rb, rmemalloc_t* ma, rrom_t* rom) {
+  memset(rom, 0, sizeof(rrom_t)); // in case of error
   rom->dataalign = 1;
 
   // Calculate image size

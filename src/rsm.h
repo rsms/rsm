@@ -480,7 +480,7 @@ typedef struct {
   u8 data[];
 } rromimg;
 
-// rrom: ROM (read only media); the container for an RSM program
+// rrom_t: ROM (read only media); the container for an RSM program
 typedef struct {
   // ROM image
   rromimg* img;
@@ -493,7 +493,7 @@ typedef struct {
   const void*   data;      // data segment initializer (pointer into img)
   usize         datasize;  // data segment size
   u32           dataalign; // data segment alignment (in bytes)
-} rrom;
+} rrom_t;
 
 // rvmstatus: VM status
 typedef u8 rvmstatus;
@@ -525,15 +525,15 @@ rvm* nullable rvm_create(rmemalloc_t*);
 void rvm_dispose(rvm* vm);
 
 // rvm_main loads & runs a program in a ROM image
-rerror rvm_main(rvm* vm, rrom* rom);
+rerror rvm_main(rvm* vm, rrom_t* rom);
 
 // rsm_vmexec executes a program, starting with instruction 0
 // Loads the ROM if needed.
-RSMAPI rerror rsm_vmexec(rvm* vm, rrom* rom);
+RSMAPI rerror rsm_vmexec(rvm* vm, rrom_t* rom);
 
 // rsm_loadrom parses rom->img of rom->imgsize bytes,
-// populating the rest of the fields of the rrom struct.
-RSMAPI rerror rsm_loadrom(rrom* rom);
+// populating the rest of the fields of the rrom_t struct.
+RSMAPI rerror rsm_loadrom(rrom_t* rom);
 
 // rsm_fmtprog formats an array of instructions ip as "assembly" text to buf.
 // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th
@@ -684,7 +684,7 @@ RSMAPI rnode* nullable rasm_parse(rasm* a);
 // rasm_gen builds VM code from AST.
 // Uses a->mem for temporary storage, allocates data for rom with rommem.
 // a can be reused.
-RSMAPI rerror rasm_gen(rasm* a, rnode* module, rmemalloc_t* rommem, rrom* rom);
+RSMAPI rerror rasm_gen(rasm* a, rnode* module, rmemalloc_t* rommem, rrom_t* rom);
 
 // rasm_dispose frees resources of a
 RSMAPI void rasm_dispose(rasm* a);

@@ -25,7 +25,7 @@ struct pstate {
   rsrcpos_t   startpos;   // source start position of current token
   const char* linestart;  // current source position line start pointer (for column)
   u32         lineno;     // current source position line
-  rtok        tok;        // current token
+  rtok_t      tok;        // current token
   bool        insertsemi; // insert RT_SEMI before next newline
   bool        isneg;      // true when parsing a negative number
   bufslabs    bufslabs;
@@ -227,7 +227,7 @@ static void sname_or_kw(pstate* p) { // "foo"
     return;
   p->tok = *vp & 0xff;
   if (*vp > 0xff)
-    p->ival = (u64)(*vp >> sizeof(rtok)*8);
+    p->ival = (u64)(*vp >> sizeof(rtok_t)*8);
 }
 
 static u32 sstring_multiline(pstate* p, const char* start, const char* end) {
@@ -592,7 +592,7 @@ static void sadvance(pstate* p) { // scan the next token
   #define sadvance(p) ({ sadvance(p); logpstate(p); (p)->tok; })
   static void logpstate(pstate* p) {
     u32 line = p->startpos.line, col = p->startpos.col;
-    rtok t = p->tok;
+    rtok_t t = p->tok;
     const char* tname = tokname(t);
     const char* tvalp = p->tokstart;
     int tvalc = (int)toklen(p);
@@ -625,14 +625,14 @@ static void sadvance(pstate* p) { // scan the next token
   }
 #endif
 
-static bool got(pstate* p, rtok t);
+static bool got(pstate* p, rtok_t t);
 
 // sfastforward advances the scanner until one of the tokens in stoplist is encountered.
 // stoplist should be NULL-terminated.
-static void sfastforward(pstate* p, const rtok* stoplist) {
+static void sfastforward(pstate* p, const rtok_t* stoplist) {
   const char* inp = p->inp;
   while (p->tok != RT_END) {
-    const rtok* lp = stoplist;
+    const rtok_t* lp = stoplist;
     while (*lp) {
       if (*lp++ == p->tok)
         goto end;
@@ -645,7 +645,7 @@ end:
 }
 
 static void sfastforward_semi(pstate* p) {
-  const rtok stoplist[] = { RT_SEMI, 0 };
+  const rtok_t stoplist[] = { RT_SEMI, 0 };
   sfastforward(p, stoplist);
 }
 
@@ -665,7 +665,7 @@ static void perrunexpected(
 }
 
 // got comsumes the next token if p->tok == t
-static bool got(pstate* p, rtok t) {
+static bool got(pstate* p, rtok_t t) {
   if (p->tok != t)
     return false;
   sadvance(p);
@@ -674,7 +674,7 @@ static bool got(pstate* p, rtok t) {
 
 // eat comsumes the next token if it's t, reporting a syntax error if p->tok != t
 // advances the scanner to the next semicolon on error.
-static void eat(pstate* p, rtok t) {
+static void eat(pstate* p, rtok_t t) {
   if UNLIKELY(p->tok != t) {
     perrunexpected(p, NULL, tokname(t), tokname(p->tok));
     sfastforward_semi(p);
@@ -684,7 +684,7 @@ static void eat(pstate* p, rtok t) {
 }
 
 // expect reports a syntax error if p->tok != t
-static void expecttok(pstate* p, rtok t) {
+static void expecttok(pstate* p, rtok_t t) {
   if UNLIKELY(p->tok != t)
     perrunexpected(p, NULL, tokname(t), tokname(p->tok));
 }
@@ -718,7 +718,7 @@ void rasm_free_rnode(rasm_t* a, rnode_t* n) {
 static rnode_t last_resort_node = {0};
 
 // mk* functions makes new nodes
-static rnode_t* mknodet(pstate* p, rtok t) {
+static rnode_t* mknodet(pstate* p, rtok_t t) {
   rnode_t* n = rmem_alloct(p->a->memalloc, rnode_t);
   if UNLIKELY(n == NULL) {
     errf(p->a, (rposrange_t){0}, "out of memory");
@@ -745,7 +745,7 @@ static rnode_t* mkarraytype(pstate* p, u64 size, rnode_t* elemtype) {
 }
 
 static rnode_t* infer_type(pstate* p, rnode_t* expr, bool useregsize) {
-  rtok t = 0;
+  rtok_t t = 0;
   switch (expr->t) {
     case RT_INTLIT2:
     case RT_INTLIT:
@@ -1009,7 +1009,7 @@ static rnode_t* pblockbody(PPARAMS, rnode_t* block) {
       //   } else {
       //     perrunexpected(p, NULL, "operation or assignment", tokname(p->tok));
       //   }
-      //   const rtok stoplist[] = { RT_SEMI, 0 };
+      //   const rtok_t stoplist[] = { RT_SEMI, 0 };
       //   sfastforward(p, stoplist);
       //   continue;
       // }
@@ -1433,7 +1433,7 @@ rerr_t init_asmparse() {
 
   #define _(op, enc, res, kw, ...) \
     vp = assertnotnull(smap_assign(m, kw, strlen(kw))); \
-    *vp = (RT_OP | ((uintptr)rop_##op << (sizeof(rtok)*8)));
+    *vp = (RT_OP | ((uintptr)rop_##op << (sizeof(rtok_t)*8)));
   RSM_FOREACH_OP(_)
   #undef _
 

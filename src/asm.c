@@ -6,7 +6,7 @@
 
 #ifndef RSM_NO_ASM
 
-const char* tokname(rtok t) {
+const char* tokname(rtok_t t) {
   switch (t) {
   #define _(name, ...) case name: return &#name[3]; // [3] to skip "RT_" prefix
   RSM_FOREACH_TOKEN(_)

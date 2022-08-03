@@ -581,8 +581,8 @@ typedef struct rnode   rnode_t;   // AST node
 typedef struct rdiag   rdiag_t;   // diagnostic report
 typedef struct rsrcpos rsrcpos_t; // line & column source position
 
-// source tokens (rtok)
-typedef u8 rtok;
+// source tokens (rtok_t)
+typedef u8 rtok_t;
 #define RSM_FOREACH_TOKEN(_) \
 _( RT_END ) \
 _( RT_COMMENT ) \
@@ -643,7 +643,7 @@ enum rtok {
   RSM_FOREACH_KEYWORD_TOKEN(_)
   #undef _
   rtok_COUNT
-} RSM_END_ENUM(rtok)
+} RSM_END_ENUM2(rtok, rtok_t)
 
 // rdiaghandler is called with a diagnostict report.
 // Return false to stop the process (e.g. stop assembling.)
@@ -675,7 +675,7 @@ struct rsrcpos {
 };
 
 struct rnode {
-  rtok              t;    // type
+  rtok_t            t;    // type
   rsrcpos_t         pos;  // source position, or {0,0} if unknown
   rnode_t* nullable next; // intrusive list link
   struct {

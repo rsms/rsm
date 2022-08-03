@@ -25,7 +25,7 @@ typedef struct rposrange {
 #define rasm_pstate(a)        ( (pstate*)(a)->_internal[2] )
 #define rasm_pstate_set(a,v)  ( *(pstate**)&(a)->_internal[2] = (v) )
 
-const char* tokname(rtok t);
+const char* tokname(rtok_t t);
 
 // tokis* returns true if t is classified as such in the language
 #define tokistype(t)    ( RT_I1 <= (t) && (t) <= RT_I64 )

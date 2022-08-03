@@ -235,8 +235,8 @@ typedef unsigned long       usize;
 
 #define rsm_same_type(a, b) __builtin_types_compatible_p(__typeof__(a), __typeof__(b))
 
-#define MAX(a,b) ({__typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a > _b ? _a : _b; })
-#define MIN(a,b) ({__typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a < _b ? _a : _b; })
+#define MAX(a,b) ({__typeof__(a) _a = (a); __typeof__(b) _b = (b); _a > _b ? _a : _b; })
+#define MIN(a,b) ({__typeof__(a) _a = (a); __typeof__(b) _b = (b); _a < _b ? _a : _b; })
   // turns into CMP + CMOV{L,G} on x86_64
   // turns into CMP + CSEL on arm64
 
@@ -521,9 +521,13 @@ typedef __builtin_va_list va_list;
   sizeof(u32) < sizeof(z__) ? (u32)MIN((__typeof__(z__))U32_MAX,z__) : (u32)z__; \
 })
 
-#define kiB 1024u
-#define MiB 0x100000u   /* 1024*1024 */
-#define GiB 0x40000000u /* 1024*1024*1024 */
+// kibibyte magnitudes for making code easier to read
+#define kiB 1024lu
+#define MiB 0x100000lu   /* 1024^2 */
+#define GiB 0x40000000lu /* 1024^3 */
+#define TiB 0x10000000000llu /* ... */
+#define PiB 0x4000000000000llu
+#define EiB 0x1000000000000000llu
 
 // ======================================================================================
 // panic & assert

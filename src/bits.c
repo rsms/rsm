@@ -165,12 +165,14 @@ usize bitset_find_unset_range(
 
     // else: bucket has some free space; scan its bits
     trace("** buckets[%zu] = %zx  PARTIAL", bucket, buckets[bucket]);
-
-    usize bucket_val = buckets[bucket];
-    usize nbits = start_bit; // number of bits we've looked at
-    bucket_val >>= nbits;    // remove bits we've looked at from bucket_val
-
-    while (nbits < bucket_bits) {
+    for (
+      usize nbits = start_bit, // number of bits we've seen
+      bucket_val = buckets[bucket] >> start_bit // value with bits we've seen removed
+      ;
+      nbits < bucket_bits
+      ;
+      //
+    ) {
       trace("  nbits %zu, freelen %zu, bucket_val:\n          %s",
         nbits, freelen, debug_fmt_bits(&bucket_val, sizeof(bucket_val)*8 - nbits));
 
@@ -188,8 +190,7 @@ usize bitset_find_unset_range(
         // rest of bucket is free
         trace("    bucket_val = 0");
         freelen += bucket_bits - nbits;
-        nbits = bucket_bits; // end the while loop
-        continue;
+        break;
       }
 
       // count trailing zeroes (i.e. "free bits")

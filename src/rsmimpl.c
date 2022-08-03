@@ -242,7 +242,7 @@ rerror rerror_errno(int e) {
 }
 
 
-const char* rop_name(rop op) {
+const char* rop_name(rop_t op) {
   switch (op) {
     #define _(name, enc, res, asmname, ...) case rop_##name: return asmname;
     RSM_FOREACH_OP(_)

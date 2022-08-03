@@ -61,10 +61,13 @@
   #define RSM_ASSUME_NONNULL_END
 #endif
 #if __has_attribute(__packed__)
-  #define RSM_END_ENUM(NAME) __attribute__((__packed__)); \
-    _Static_assert(sizeof(enum NAME) <= sizeof(NAME), "too many " #NAME " values");
+  #define RSM_END_ENUM(NAME)  RSM_END_ENUM2(NAME, NAME)
+  #define RSM_END_ENUM2(ENUM_NAME, TYPENAME) __attribute__((__packed__)); \
+    _Static_assert(sizeof(enum ENUM_NAME) <= sizeof(TYPENAME), \
+      "too many enum " #ENUM_NAME " values");
 #else
   #define RSM_END_ENUM(NAME) ;
+  #define RSM_END_ENUM2(ENUM_NAME, TYPENAME) ;
 #endif
 #if __has_attribute(warn_unused_result)
   #define RSM_WARN_UNUSED_RESULT __attribute__((warn_unused_result))
@@ -230,13 +233,13 @@ _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 #define RSM_SET_ARGN(i,pos,size,v) \
   ( ((i) & RSM_MASK0(size,pos)) | ( (((rin_t)v) << pos) & RSM_MASK1(size,pos)) )
 
-// rop RSM_GET_OP(rin_t)  -- get opcode
-// rop RSM_GET_OPi(rin_t) -- get opcode with immediate flag
+// rop_t RSM_GET_OP(rin_t)  -- get opcode
+// rop_t RSM_GET_OPi(rin_t) -- get opcode with immediate flag
 // bool RSM_GET_i(rin_t)  -- get immediate flag
 // u32 RSM_GET_A(rin_t)   -- get register number
 // u32 RSM_GET_Au(rin_t)  -- get full-size unsigned immediate value
 // i32 RSM_GET_As(rin_t)  -- get full-size signed immediate value
-#define RSM_GET_OP(i)  ((rop)( (rin_t)(i) & RSM_MASK1(RSM_SIZE_OP,0) ))
+#define RSM_GET_OP(i)  ((rop_t)( (rin_t)(i) & RSM_MASK1(RSM_SIZE_OP,0) ))
 #define RSM_GET_OPi(i) RSM_GET_ARGN(i, 0, RSM_SIZE_OP + RSM_SIZE_i) // OP and i
 #define RSM_GET_i(i)   RSM_GET_ARGN(i, RSM_POS_i, RSM_SIZE_i)
 #define RSM_GET_A(i)   RSM_GET_ARGN(i, RSM_POS_A, RSM_SIZE_A)
@@ -252,7 +255,7 @@ _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 #define RSM_GET_Cs(i)  ((int)(RSM_GET_Cu(i) - (RSM_MAX_Cu / 2)))
 #define RSM_GET_Ds(i)  ((int)(RSM_GET_Du(i) - (RSM_MAX_Du / 2)))
 
-// rin_t RSM_SET_OP(rin_t, rop op)
+// rin_t RSM_SET_OP(rin_t, rop_t op)
 // rin_t RSM_SET_i(rin_t,  bool isimm)
 // rin_t RSM_SET_A(rin_t,  u32 regno)
 // rin_t RSM_SET_Au(rin_t, u32 uimmval)
@@ -298,13 +301,13 @@ _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 // RSM_PAGE_SIZE is the size in bytes of one RSM virtual memory page
 #define RSM_PAGE_SIZE 4096u
 
-typedef u8 rop; // opcode
+typedef u8 rop_t; // opcode
 enum rop {
   #define _(name, ...) rop_##name,
   RSM_FOREACH_OP(_)
   #undef _
   RSM_OP_COUNT,
-} RSM_END_ENUM(rop)
+} RSM_END_ENUM2(rop, rop_t)
 
 typedef u8 rfmtflag; // string formatting flags
 enum rfmtflag {
@@ -561,7 +564,7 @@ RSMAPI usize rsm_fmtinstr(
   char* buf, usize bufcap, rin_t, u32* nullable pcaddp, rfmtflag);
 
 // enum related functions
-RSMAPI const char* rop_name(rop);      // name of an opcode
+RSMAPI const char* rop_name(rop_t);      // name of an opcode
 RSMAPI const char* rerror_str(rerror); // short description of an error
 
 // rsm_loadfile loads a file into memory

@@ -183,7 +183,7 @@ static const char* gnamedtype_name(gnamedtype t) {
 static bool check_named_ref(
   gstate* g, rnode_t* referrer, u32 referreri, grefflag flags, gnamed* target)
 {
-  rop op = RSM_GET_OP(*rarray_at(rin_t, &g->iv, referreri));
+  rop_t op = RSM_GET_OP(*rarray_at(rin_t, &g->iv, referreri));
   const char* expected;
   switch (op) {
     case rop_CALL:
@@ -304,7 +304,7 @@ static void patch_lastregarg(gstate* g, rnode_t* patcher, rin_t* in, u32 regno) 
 }
 
 // returns false if memory allocation failed
-static bool make_bigv(gstate* g, rop op, rin_t* inp, u32 dstreg, u64 value) {
+static bool make_bigv(gstate* g, rop_t op, rin_t* inp, u32 dstreg, u64 value) {
   static_assert(sizeof(rin_t) == sizeof(u32), "");
   *inp = RSM_MAKE_ABv(op, dstreg, 1 + (value > U32_MAX));
   rin_t* imm1 = GARRAY_PUSH_OR_RET(rin_t, &g->iv, false);
@@ -502,7 +502,7 @@ static void resolve_udnames(gstate* g) {
 }
 
 // returns true if result arg is an immediate value rather than a register.
-static bool refnamed(gstate* g, rnode_t* refn, u32 refi, rop op, u32 argc, i32* argp) {
+static bool refnamed(gstate* g, rnode_t* refn, u32 refi, rop_t op, u32 argc, i32* argp) {
   grefflag flags = 0;
 
   #define ADDGREF(refs) ({                           \
@@ -584,7 +584,7 @@ static u8 nregno(gstate* g, rnode_t* n) {
 }
 
 static void errintsize(
-  rasm_t* c, rposrange_t pr, rop op, i64 minval, i64 maxval, u64 val, bool issigned)
+  rasm_t* c, rposrange_t pr, rop_t op, i64 minval, i64 maxval, u64 val, bool issigned)
 {
   if (minval != 0 || issigned) {
     errf(c, pr, "value %lld out of range %lld...%lld for %s",
@@ -601,7 +601,7 @@ static bool getiargs(
 {
   assert(n->t == RT_OP);
   u32 argc = 0;
-  rop op = (rop)n->ival;
+  rop_t op = (rop_t)n->ival;
 
   // first argc-1 args are registers
   rnode_t* arg = n->children.head;
@@ -731,7 +731,7 @@ static void genop(gstate* g, rnode_t* n) {
   assert(n->t == RT_OP);
   assert(n->ival < RSM_OP_COUNT);
 
-  rop op = (rop)n->ival;
+  rop_t op = (rop_t)n->ival;
   if (op == rop_CALL)
     return genop_call(g, n);
 
@@ -863,7 +863,7 @@ static void genblock(gstate* g, rnode_t* block) {
     }
     switch (cn->t) {
       case RT_OP:
-        if ((rop)cn->ival == rop_JUMP || (rop)cn->ival == rop_RET)
+        if ((rop_t)cn->ival == rop_JUMP || (rop_t)cn->ival == rop_RET)
           jumpn = cn;
         genop(g, cn); break;
       case RT_ASSIGN:

@@ -75,7 +75,7 @@ static_assert(sizeof(rnode_t) <= SLABHEAP_MAX_SIZE, "slabheap miss!");
 static smap kwmap = {0}; // keywords map
 
 
-static ropres rop_result(rop op) {
+static ropres rop_result(rop_t op) {
   switch (op) {
     #define _(name, enc, res, ...) case rop_##name: return ropres_##res;
     RSM_FOREACH_OP(_)

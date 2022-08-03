@@ -87,7 +87,7 @@ struct gfunslab {
 
 struct gstate {
   rasm_t* a;       // compilation session/context
-  rarray  iv;      // rinstr[]; instructions
+  rarray  iv;      // rin_t[]; instructions
   rarray  funs;    // gfun[]; functions
   rarray  udnames; // gref[]; pending undefined named references
   smap    names;   // name => gnamed*
@@ -183,7 +183,7 @@ static const char* gnamedtype_name(gnamedtype t) {
 static bool check_named_ref(
   gstate* g, rnode_t* referrer, u32 referreri, grefflag flags, gnamed* target)
 {
-  rop op = RSM_GET_OP(*rarray_at(rinstr, &g->iv, referreri));
+  rop op = RSM_GET_OP(*rarray_at(rin_t, &g->iv, referreri));
   const char* expected;
   switch (op) {
     case rop_CALL:
@@ -259,7 +259,7 @@ static const i64 ropenc_limittab[][2] = { // ropenc limits {min,max}
   /* ABCDs */  {RSM_MIN_Ds, RSM_MAX_Ds},
 };
 
-static void patch_lastregarg(gstate* g, rnode_t* patcher, rinstr* in, u32 regno) {
+static void patch_lastregarg(gstate* g, rnode_t* patcher, rin_t* in, u32 regno) {
   assert(regno <= RSM_MAX_REG);
   *in = RSM_SET_i(*in, 0); // clear immediate flag
 
@@ -304,14 +304,14 @@ static void patch_lastregarg(gstate* g, rnode_t* patcher, rinstr* in, u32 regno)
 }
 
 // returns false if memory allocation failed
-static bool make_bigv(gstate* g, rop op, rinstr* inp, u32 dstreg, u64 value) {
-  static_assert(sizeof(rinstr) == sizeof(u32), "");
+static bool make_bigv(gstate* g, rop op, rin_t* inp, u32 dstreg, u64 value) {
+  static_assert(sizeof(rin_t) == sizeof(u32), "");
   *inp = RSM_MAKE_ABv(op, dstreg, 1 + (value > U32_MAX));
-  rinstr* imm1 = GARRAY_PUSH_OR_RET(rinstr, &g->iv, false);
+  rin_t* imm1 = GARRAY_PUSH_OR_RET(rin_t, &g->iv, false);
   if (value <= U32_MAX) {
     *imm1 = (u32)value;
   } else {
-    rinstr* imm2 = GARRAY_PUSH_OR_RET(rinstr, &g->iv, false);
+    rin_t* imm2 = GARRAY_PUSH_OR_RET(rin_t, &g->iv, false);
     *imm1 = (value >> 32) & U32_MAX;
     *imm2 = value & U32_MAX;
   }
@@ -320,7 +320,7 @@ static bool make_bigv(gstate* g, rop op, rinstr* inp, u32 dstreg, u64 value) {
 
 // select_scratchreg is used to check for interference with dstreg in arguments.
 // If dstreg is used for any of the arguments, RSM_NREGS is returned instead of dstreg.
-inline static u32 select_scratchreg(rinstr in, u32 dstreg, u32 nregargs) {
+inline static u32 select_scratchreg(rin_t in, u32 dstreg, u32 nregargs) {
   if ( (nregargs > 2 && RSM_GET_B(in) == dstreg) ||
        (nregargs > 3 && RSM_GET_C(in) == dstreg) )
   {
@@ -333,7 +333,7 @@ inline static u32 select_scratchreg(rinstr in, u32 dstreg, u32 nregargs) {
 // returns true if result/patched arg is an immediate value rather than a register.
 static bool patch_imm(gstate* g, rnode_t* patcher, u32 inindex, u64 value) {
   assert(inindex < g->iv.len);
-  rinstr* in = rarray_at(rinstr, &g->iv, inindex);
+  rin_t* in = rarray_at(rin_t, &g->iv, inindex);
   u32 scratchreg = RSM_NREGS; // if >-1, names a reg largeval can safely use
 
   #define SCRATCHREG_A_nil RSM_NREGS
@@ -404,7 +404,7 @@ largeval:
   assertf(ropenc_limittab[openctab[rop_COPY]][0]==0, "COPY imm is assumed to be unsigned");
   u64 copymax = (u64)ropenc_limittab[openctab[rop_COPY]][1];
   u32 subinindex = g->iv.len;
-  rinstr* inp = GARRAY_PUSH_OR_RET(rinstr, &g->iv, false);
+  rin_t* inp = GARRAY_PUSH_OR_RET(rin_t, &g->iv, false);
   if (value <= copymax) {
     // yes we can -- single copy instruction
     *inp = RSM_MAKE_ABu(rop_COPY, scratchreg, (u32)value);
@@ -422,7 +422,7 @@ largeval:
   // then replace that instruction instead of patching it.
   if (RSM_GET_OP(g->iv.v[inindex]) == rop_COPY) {
     // replace
-    rarray_remove(rinstr, &g->iv, inindex, 1);
+    rarray_remove(rin_t, &g->iv, inindex, 1);
     subinindex--; // fixup the "source" index of our synthesized instruction(s)
     isimm = true;
   } else {
@@ -432,7 +432,7 @@ largeval:
   }
 
   // move inp...immN above patchee
-  rarray_move(rinstr, &g->iv, inindex, subinindex, g->iv.len);
+  rarray_move(rin_t, &g->iv, inindex, subinindex, g->iv.len);
 
   return isimm;
 }
@@ -553,7 +553,7 @@ static bool refnamed(gstate* g, rnode_t* refn, u32 refi, rop op, u32 argc, i32* 
       const void* initp = assertnotnull(((gdata*)target)->initp);
       bool isimm = patch_imm(g, refn, refi, *(const u64*)initp);
       // load argument since the caller will overwrite it
-      rinstr in = *rarray_at(rinstr, &g->iv, refi);
+      rin_t in = *rarray_at(rin_t, &g->iv, refi);
       switch (argc) {
         case 1: *argp = isimm ? RSM_GET_Au(in) : RSM_GET_A(in); return isimm;
         case 2: *argp = isimm ? RSM_GET_Bu(in) : RSM_GET_B(in); return isimm;
@@ -597,7 +597,7 @@ static void errintsize(
 // getiargs checks & reads integer arguments for an operation described by AST rnode n.
 // returns true if the last arg is an immediate value.
 static bool getiargs(
-  gstate* g, rnode_t* n, i32* argv, u32 wantargc, i64 minval, u64 maxval, rinstr** inp)
+  gstate* g, rnode_t* n, i32* argv, u32 wantargc, i64 minval, u64 maxval, rin_t** inp)
 {
   assert(n->t == RT_OP);
   u32 argc = 0;
@@ -627,7 +627,7 @@ static bool getiargs(
   case RT_NAME: {
     bool isimm = refnamed(g, arg, g->iv.len - 1, op, argc+1, &argv[argc]);
     // update instruction in case a patch caused instructions to be generated
-    *inp = rarray_at(rinstr, &g->iv, g->iv.len - 1);
+    *inp = rarray_at(rin_t, &g->iv, g->iv.len - 1);
     return isimm;
   }
 
@@ -714,7 +714,7 @@ gen_call:
   n->children.head->next = NULL;
 
   // generate CALL instruction
-  rinstr* in = GARRAY_PUSH_OR_RET(rinstr, &g->iv);
+  rin_t* in = GARRAY_PUSH_OR_RET(rin_t, &g->iv);
   i32 genarg;
   if (getiargs(g, n, &genarg, 1, 0, RSM_MAX_Au, &in)) {
     *in = RSM_MAKE_Au(rop_CALL, genarg);
@@ -735,7 +735,7 @@ static void genop(gstate* g, rnode_t* n) {
   if (op == rop_CALL)
     return genop_call(g, n);
 
-  rinstr* in = GARRAY_PUSH_OR_RET(rinstr, &g->iv);
+  rin_t* in = GARRAY_PUSH_OR_RET(rin_t, &g->iv);
   *in = RSM_MAKE__(op);
   i32 arg[4]; // ABCD args to RSM_MAKE_* macros
 
@@ -986,11 +986,11 @@ static void genfun(gstate* g, rnode_t* fun) {
 
   // make sure the last instruction of the last block of a function is RET or TCALL
   if (fn->i == g->iv.len) { // no function body
-    *GARRAY_PUSH_OR_RET(rinstr, &g->iv) = RSM_MAKE__(rop_RET);
+    *GARRAY_PUSH_OR_RET(rin_t, &g->iv) = RSM_MAKE__(rop_RET);
   } else {
-    rinstr endin = *rarray_at(rinstr, &g->iv, g->iv.len - 1);
+    rin_t endin = *rarray_at(rin_t, &g->iv, g->iv.len - 1);
     if (RSM_GET_OP(endin) != rop_RET && RSM_GET_OP(endin) != rop_JUMP)
-      *GARRAY_PUSH_OR_RET(rinstr, &g->iv) = RSM_MAKE__(rop_RET);
+      *GARRAY_PUSH_OR_RET(rin_t, &g->iv) = RSM_MAKE__(rop_RET);
   }
 
   // report unresolved labels
@@ -1148,7 +1148,7 @@ static gstate* nullable init_gstate(rasm_t* a) {
     g->a = a;
     smap_make(&g->names, a->memalloc, 16, MAPLF_2);
     // preallocate instruction buffer
-    rarray_grow(&g->iv, a->memalloc, sizeof(rinstr), 512/sizeof(rinstr));
+    rarray_grow(&g->iv, a->memalloc, sizeof(rin_t), 512/sizeof(rin_t));
   } else {
     // recycle gstate
     g->udnames.len = 0;
@@ -1201,7 +1201,7 @@ rerror rasm_gen(rasm_t* a, rnode_t* module, rmemalloc_t* rommem, rrom_t* rom) {
 
   // build ROM image
   rrombuild_t rb = {
-    .code = (const rinstr*)g->iv.v,
+    .code = (const rin_t*)g->iv.v,
     .codelen = g->iv.len,
     .datasize = g->datasize,
     .dataalign = g->dataalign,

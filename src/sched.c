@@ -112,10 +112,10 @@ struct T {
   T* nullable parent;    // task that spawned this task
   T* nullable schedlink; // next task to be scheduled
 
-  usize         pc;     // program counter; next instruction = iv[pc]
-  usize         instrc; // instruction count
-  const rinstr* instrv; // instruction array
-  const void*   rodata; // global read-only data (from ROM)
+  usize        pc;     // program counter; next instruction = iv[pc]
+  usize        instrc; // instruction count
+  const rin_t* instrv; // instruction array
+  const void*  rodata; // global read-only data (from ROM)
 
   void*   sp;       // saved SP register value used by m_switchtask
   uintptr stacktop; // end of stack (lowest valid stack address)
@@ -211,7 +211,7 @@ static ALWAYS_INLINE T* t_get() { return _g_t; }
 
 
 // vm interperter functions signature
-#define VMPARAMS T* t, u64* iregs, const rinstr* inv, usize pc
+#define VMPARAMS T* t, u64* iregs, const rin_t* inv, usize pc
 #define VMARGS   t, iregs, inv, pc
 
 
@@ -477,7 +477,7 @@ static u64 _read(VMPARAMS, u64 fd, u64 addr, u64 size) {
 
 // —————————— vm syscall
 
-static void scall(VMPARAMS, u8 ar, rinstr in) {
+static void scall(VMPARAMS, u8 ar, rin_t in) {
   dlog("scall not implemented");
 }
 
@@ -577,7 +577,7 @@ static void t_vmexec(VMPARAMS) {
   for (;;) {
     // load the next instruction and advance program counter
     assertf(pc < t->instrc, "pc overrun %lu", pc); vmexec_logstate(VMARGS);
-    rinstr in = inv[pc++];
+    rin_t in = inv[pc++];
     // preload arguments A and B as most instructions need it
     u8 ar = RSM_GET_A(in);
     u8 br = RSM_GET_B(in);
@@ -924,7 +924,7 @@ static T* nullable s_alloctask(S* s, usize stacksize) {
 // of 0 means to allocate a stack of default standard size.
 // Put it on the queue of T's waiting to run.
 // The compiler turns a go statement into a call to this.
-static rerror s_spawn(S* s, const rinstr* iv, usize ic, const void* rodata, usize pc) {
+static rerror s_spawn(S* s, const rin_t* iv, usize ic, const void* rodata, usize pc) {
   T* t = t_get();
   M* m = t->m;
   rerror err = 0;

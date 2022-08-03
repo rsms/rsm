@@ -51,11 +51,11 @@ void warnf(rasm_t*, rposrange_t, const char* fmt, ...) ATTR_FORMAT(printf, 3, 4)
 void reportv(rasm_t*, rposrange_t, int code, const char* fmt, va_list ap);
 
 typedef struct rrombuild {
-  const rinstr* code;      // vm instructions array
-  usize         codelen;   // vm instructions array length
-  usize         datasize;  // data segment size
-  u8            dataalign; // data segment alignment
-  void*         userdata;
+  const rin_t* code;      // vm instructions array
+  usize        codelen;   // vm instructions array length
+  usize        datasize;  // data segment size
+  u8           dataalign; // data segment alignment
+  void*        userdata;
   rerror(*filldata)(void* dst, void* userdata);
 } rrombuild_t;
 

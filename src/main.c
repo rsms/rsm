@@ -152,7 +152,7 @@ static bool loadfile(
   return false;
 }
 
-static void print_asm(rmemalloc_t* ma, const rinstr* iv, usize icount) {
+static void print_asm(rmemalloc_t* ma, const rin_t* iv, usize icount) {
   rmem_t m = rmem_must_alloc(ma, 4096);
   rfmtflag fl = isatty(1) ? RSM_FMT_COLOR : 0;
   usize n = rsm_fmtprog(m.p, m.size, iv, icount, fl);

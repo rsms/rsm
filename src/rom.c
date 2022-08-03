@@ -12,7 +12,7 @@ enum rrom_skind {
   rrom_skind_MAX = RSM_ROM_CODE,
 } RSM_END_ENUM(rrom_skind)
 
-#define CODE_ALIGNMENT sizeof(rinstr) // alignment of CODE section body
+#define CODE_ALIGNMENT sizeof(rin_t) // alignment of CODE section body
 
 // --------------------------------------------------------------------------------------
 // ROM loader
@@ -183,14 +183,14 @@ static u8* build_DATA(rrombuild_t* rb, rrom_t* rom, u8* p, rerror* errp) {
 }
 
 static void calc_CODE(rrombuild_t* rb, usize* bsize, usize* align) {
-  *bsize = rb->codelen * sizeof(rinstr);
+  *bsize = rb->codelen * sizeof(rin_t);
   *align = CODE_ALIGNMENT;
 }
 static u8* build_CODE(rrombuild_t* rb, rrom_t* rom, u8* p, rerror* errp) {
-  rom->code = (const rinstr*)p;
+  rom->code = (const rin_t*)p;
   rom->codelen = rb->codelen;
-  memcpy(p, rb->code, rb->codelen*sizeof(rinstr));
-  p += rb->codelen*sizeof(rinstr);
+  memcpy(p, rb->code, rb->codelen*sizeof(rin_t));
+  p += rb->codelen*sizeof(rin_t);
   return p;
 }
 

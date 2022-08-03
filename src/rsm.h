@@ -85,7 +85,7 @@ RSM_ASSUME_NONNULL_BEGIN
 // PC and jump- & branch destinations are expressed in #instructions rather than bytes.
 // There is room for 256 operations and 32+32 (int+float) registers (8 bit OP, 5 bit reg)
 // Most instructions accept reg or immediate (i bit is set) as last argument.
-typedef u32 rinstr;
+typedef u32 rin_t;
 //
 //        ┌───────────────┬─────────┬─────────┬─────────┬─┬───────────────┐
 //  bit   │3 3 2 2 2 2 2 2│2 2 2 2 1│1 1 1 1 1│1 1 1 1  │ │               │
@@ -219,21 +219,24 @@ _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 #define RSM_NARGREGS 8 /* number of regs to use for arguments (R0...R{RSM_NARGREGS}-1) */
 #define RSM_NTMPREGS 19 /* R0…(RSM_NTMPREGS-1) are callee-owned/caller-save */
 
-// u32 RSM_GET_ARGN(rinstr, uint pos, uint size)
-// rinstr RSM_SET_ARGN(rinstr, uint pos, uint size, uint val)
-#define RSM_MASK1(n,p)  ( ( ~( (~(rinstr)0) << (n) ) ) << (p) ) /* n 1 bits at position p */
-#define RSM_MASK0(n,p)  (~RSM_MASK1(n,p))  /* n 0 bits at position p */
-#define RSM_GET_ARGN(i,pos,size) ((u32)( ((i) >> (pos)) & RSM_MASK1(size,0) ))
+// u32 RSM_GET_ARGN(rin_t, uint pos, uint size)
+// rin_t RSM_SET_ARGN(rin_t, uint pos, uint size, uint val)
+#define RSM_MASK1(n,p) \
+  ( ( ~( (~(rin_t)0) << (n) ) ) << (p) ) /* n 1 bits at position p */
+#define RSM_MASK0(n,p) \
+  (~RSM_MASK1(n,p))  /* n 0 bits at position p */
+#define RSM_GET_ARGN(i,pos,size) \
+  ((u32)( ((i) >> (pos)) & RSM_MASK1(size,0) ))
 #define RSM_SET_ARGN(i,pos,size,v) \
-  ( ((i) & RSM_MASK0(size,pos)) | ( (((rinstr)v) << pos) & RSM_MASK1(size,pos)) )
+  ( ((i) & RSM_MASK0(size,pos)) | ( (((rin_t)v) << pos) & RSM_MASK1(size,pos)) )
 
-// rop RSM_GET_OP(rinstr)  -- get opcode
-// rop RSM_GET_OPi(rinstr) -- get opcode with immediate flag
-// bool RSM_GET_i(rinstr)  -- get immediate flag
-// u32 RSM_GET_A(rinstr)   -- get register number
-// u32 RSM_GET_Au(rinstr)  -- get full-size unsigned immediate value
-// i32 RSM_GET_As(rinstr)  -- get full-size signed immediate value
-#define RSM_GET_OP(i)  ((rop)( (rinstr)(i) & RSM_MASK1(RSM_SIZE_OP,0) ))
+// rop RSM_GET_OP(rin_t)  -- get opcode
+// rop RSM_GET_OPi(rin_t) -- get opcode with immediate flag
+// bool RSM_GET_i(rin_t)  -- get immediate flag
+// u32 RSM_GET_A(rin_t)   -- get register number
+// u32 RSM_GET_Au(rin_t)  -- get full-size unsigned immediate value
+// i32 RSM_GET_As(rin_t)  -- get full-size signed immediate value
+#define RSM_GET_OP(i)  ((rop)( (rin_t)(i) & RSM_MASK1(RSM_SIZE_OP,0) ))
 #define RSM_GET_OPi(i) RSM_GET_ARGN(i, 0, RSM_SIZE_OP + RSM_SIZE_i) // OP and i
 #define RSM_GET_i(i)   RSM_GET_ARGN(i, RSM_POS_i, RSM_SIZE_i)
 #define RSM_GET_A(i)   RSM_GET_ARGN(i, RSM_POS_A, RSM_SIZE_A)
@@ -249,11 +252,11 @@ _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 #define RSM_GET_Cs(i)  ((int)(RSM_GET_Cu(i) - (RSM_MAX_Cu / 2)))
 #define RSM_GET_Ds(i)  ((int)(RSM_GET_Du(i) - (RSM_MAX_Du / 2)))
 
-// rinstr RSM_SET_OP(rinstr, rop op)
-// rinstr RSM_SET_i(rinstr,  bool isimm)
-// rinstr RSM_SET_A(rinstr,  u32 regno)
-// rinstr RSM_SET_Au(rinstr, u32 uimmval)
-// rinstr RSM_SET_As(rinstr, i32 simmval)
+// rin_t RSM_SET_OP(rin_t, rop op)
+// rin_t RSM_SET_i(rin_t,  bool isimm)
+// rin_t RSM_SET_A(rin_t,  u32 regno)
+// rin_t RSM_SET_Au(rin_t, u32 uimmval)
+// rin_t RSM_SET_As(rin_t, i32 simmval)
 #define RSM_SET_OP(i,v)  RSM_SET_ARGN(i, 0,         RSM_SIZE_OP, v)
 #define RSM_SET_i(i,v)   RSM_SET_ARGN(i, RSM_POS_i, RSM_SIZE_i,  v)
 #define RSM_SET_A(i,v)   RSM_SET_ARGN(i, RSM_POS_A, RSM_SIZE_A,  v)
@@ -264,16 +267,16 @@ _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 #define RSM_SET_Bu(i,v)  RSM_SET_ARGN(i, RSM_POS_B, RSM_SIZE_Bi, v)
 #define RSM_SET_Cu(i,v)  RSM_SET_ARGN(i, RSM_POS_C, RSM_SIZE_Ci, v)
 #define RSM_SET_Du(i,v)  RSM_SET_ARGN(i, RSM_POS_D, RSM_SIZE_Di, v)
-#define RSM_SET_As(i,v)  RSM_SET_Au(i, ((rinstr)(v)) + (RSM_MAX_Au / 2))
-#define RSM_SET_Bs(i,v)  RSM_SET_Bu(i, ((rinstr)(v)) + (RSM_MAX_Bu / 2))
-#define RSM_SET_Cs(i,v)  RSM_SET_Cu(i, ((rinstr)(v)) + (RSM_MAX_Cu / 2))
-#define RSM_SET_Ds(i,v)  RSM_SET_Du(i, ((rinstr)(v)) + (RSM_MAX_Du / 2))
+#define RSM_SET_As(i,v)  RSM_SET_Au(i, ((rin_t)(v)) + (RSM_MAX_Au / 2))
+#define RSM_SET_Bs(i,v)  RSM_SET_Bu(i, ((rin_t)(v)) + (RSM_MAX_Bu / 2))
+#define RSM_SET_Cs(i,v)  RSM_SET_Cu(i, ((rin_t)(v)) + (RSM_MAX_Cu / 2))
+#define RSM_SET_Ds(i,v)  RSM_SET_Du(i, ((rin_t)(v)) + (RSM_MAX_Du / 2))
 
-#define RSM_MAKE__(op)              ((rinstr)op)
-#define RSM_MAKE_A(op,a)          ( ((rinstr)op)           | (((rinstr)a) << RSM_POS_A) )
-#define RSM_MAKE_AB(op,a,b)       ( RSM_MAKE_A(op,a)       | (((rinstr)b) << RSM_POS_B) )
-#define RSM_MAKE_ABC(op,a,b,c)    ( RSM_MAKE_AB(op,a,b)    | (((rinstr)c) << RSM_POS_C) )
-#define RSM_MAKE_ABCD(op,a,b,c,d) ( RSM_MAKE_ABC(op,a,b,c) | (((rinstr)d) << RSM_POS_D) )
+#define RSM_MAKE__(op)              ((rin_t)op)
+#define RSM_MAKE_A(op,a)          ( ((rin_t)op)           | (((rin_t)a) << RSM_POS_A) )
+#define RSM_MAKE_AB(op,a,b)       ( RSM_MAKE_A(op,a)       | (((rin_t)b) << RSM_POS_B) )
+#define RSM_MAKE_ABC(op,a,b,c)    ( RSM_MAKE_AB(op,a,b)    | (((rin_t)c) << RSM_POS_C) )
+#define RSM_MAKE_ABCD(op,a,b,c,d) ( RSM_MAKE_ABC(op,a,b,c) | (((rin_t)d) << RSM_POS_D) )
 
 #define RSM_MAKE_Au(op,a)          (RSM_MAKE_A(op,a)          | (1 << RSM_POS_i))
 #define RSM_MAKE_ABu(op,a,b)       (RSM_MAKE_AB(op,a,b)       | (1 << RSM_POS_i))
@@ -281,10 +284,10 @@ _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 #define RSM_MAKE_ABCu(op,a,b,c)    (RSM_MAKE_ABC(op,a,b,c)    | (1 << RSM_POS_i))
 #define RSM_MAKE_ABCDu(op,a,b,c,d) (RSM_MAKE_ABCD(op,a,b,c,d) | (1 << RSM_POS_i))
 
-#define RSM_MAKE_As(op,a)          RSM_MAKE_Au(op,((rinstr)(a))          + (RSM_MAX_Au / 2))
-#define RSM_MAKE_ABs(op,a,b)       RSM_MAKE_ABu(op,a,((rinstr)(b))       + (RSM_MAX_Bu / 2))
-#define RSM_MAKE_ABCs(op,a,b,c)    RSM_MAKE_ABCu(op,a,b,((rinstr)(c))    + (RSM_MAX_Cu / 2))
-#define RSM_MAKE_ABCDs(op,a,b,c,d) RSM_MAKE_ABCDu(op,a,b,c,((rinstr)(d)) + (RSM_MAX_Du / 2))
+#define RSM_MAKE_As(op,a)          RSM_MAKE_Au(op,((rin_t)(a))          + (RSM_MAX_Au / 2))
+#define RSM_MAKE_ABs(op,a,b)       RSM_MAKE_ABu(op,a,((rin_t)(b))       + (RSM_MAX_Bu / 2))
+#define RSM_MAKE_ABCs(op,a,b,c)    RSM_MAKE_ABCu(op,a,b,((rin_t)(c))    + (RSM_MAX_Cu / 2))
+#define RSM_MAKE_ABCDs(op,a,b,c,d) RSM_MAKE_ABCDu(op,a,b,c,((rin_t)(d)) + (RSM_MAX_Du / 2))
 
 #if RSM_LITTLE_ENDIAN
   #define RSM_ROM_MAGIC 0x52534d00 // "RSM\0"
@@ -496,7 +499,7 @@ typedef struct {
   rmem_t     imgmem;  // img memory region (for use with rmem_free)
 
   // fields populated on demand by rsm_loadrom
-  const rinstr* code;      // vm instructions array (pointer into img)
+  const rin_t* code;      // vm instructions array (pointer into img)
   usize         codelen;   // vm instructions array length
   const void*   data;      // data segment initializer (pointer into img)
   usize         datasize;  // data segment size
@@ -551,11 +554,11 @@ RSMAPI rerror rsm_loadrom(rrom_t* rom);
 // Returns the number of characters that would have been printed if bufcap was
 // unlimited (not including the final `\0').
 RSMAPI usize rsm_fmtprog(
-  char* buf, usize bufcap, const rinstr* nullable ip, usize ilen, rfmtflag);
+  char* buf, usize bufcap, const rin_t* nullable ip, usize ilen, rfmtflag);
 // if pcaddp is not null, it is set to the PC advance for the instruction,
 // which is 1 for all except COPYV.
 RSMAPI usize rsm_fmtinstr(
-  char* buf, usize bufcap, rinstr, u32* nullable pcaddp, rfmtflag);
+  char* buf, usize bufcap, rin_t, u32* nullable pcaddp, rfmtflag);
 
 // enum related functions
 RSMAPI const char* rop_name(rop);      // name of an opcode

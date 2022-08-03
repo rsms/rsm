@@ -34,7 +34,7 @@ typedef struct {
 static_assert(offsetof(vmstate,pub) == 0, "vmstate.pub is not first member");
 
 // vm interperter functions signature
-#define VMPARAMS vmstate* vs, u64* iregs, const rinstr* inv, usize pc
+#define VMPARAMS vmstate* vs, u64* iregs, const rin_t* inv, usize pc
 #define VMARGS   vs, iregs, inv, pc
 
 #if defined(DEBUG) && !defined(RSM_NO_LIBC)
@@ -301,7 +301,7 @@ static u64 dev_open(VMPARAMS, u64 devid) {
 // END memory-mapped devices experiment
 //————————————————————————————————————————————————————————————————————————————————————————
 
-static void scall(VMPARAMS, u8 ar, rinstr in) {
+static void scall(VMPARAMS, u8 ar, rin_t in) {
   dlog("scall not implemented");
 }
 
@@ -408,7 +408,7 @@ static void vmexec(VMPARAMS) {
   for (;;) {
     // load the next instruction and advance program counter
     assertf(pc < vs->inlen, "pc overrun %lu", pc); logstate(VMARGS);
-    rinstr in = inv[pc++];
+    rin_t in = inv[pc++];
     // preload arguments A and B as most instructions need it
     u8 ar = RSM_GET_A(in);
     u8 br = RSM_GET_B(in);

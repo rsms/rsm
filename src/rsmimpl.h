@@ -783,7 +783,7 @@ bool osvmem_free(void* ptr, usize nbytes);
 typedef struct abuf abuf_t;
 
 // fmtinstr appends to s a printable representation of in
-u32 fmtinstr(abuf_t* s, rinstr in, rfmtflag fl);
+u32 fmtinstr(abuf_t* s, rin_t in, rfmtflag fl);
 
 // unixtime stores the number of seconds + nanoseconds since Jan 1 1970 00:00:00 UTC
 // at *sec and *nsec

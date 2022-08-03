@@ -293,7 +293,9 @@ static void heap_init(heap_t* h, u8* p, usize size  DEBUG_ID_PARAM) {
   h->chunks = p;
   DEBUG_ID_ASSIGN(h->debug_id);
   trace("[heap %zu] init (chunk_cap %zu)", h->debug_id, chunk_cap);
-  bitset_init(&h->chunk_use, p + (chunk_cap * CHUNK_SIZE), chunk_cap);
+  void* bitset_start = p + (chunk_cap * CHUNK_SIZE);
+  memset(bitset_start, 0, chunk_cap / 8);
+  bitset_init(&h->chunk_use, bitset_start, chunk_cap);
 }
 
 

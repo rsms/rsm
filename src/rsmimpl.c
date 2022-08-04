@@ -199,20 +199,28 @@ char abuf_zeroc = 0;
 
 u32 _rsm_floor_pow2_32(u32 x) {
   x += !x;
-  if ( x == ~0u )
-    return ~0u;
-  if ((x) > ((x) << 1))
-    return (~0u >> 1) + 1;
+  if (x == ~0u) return ~0u;
+  if (x > (x << 1)) return (~0u >> 1) + 1;
   return 1u << (rsm_fls(x) - 1);
 }
 
 u64 _rsm_floor_pow2_64(u64 x) {
   x += !x;
-  if ( x == ~0llu )
-    return ~0llu;
-  if ((x) > ((x) << 1))
-    return (~0llu >> 1) + 1;
+  if (x == ~0llu) return ~0llu;
+  if (x > (x << 1)) return (~0llu >> 1) + 1;
   return 1llu << (rsm_fls(x) - 1);
+}
+
+u32 _rsm_ceil_pow2_32(u32 x) {
+  if (x <= 1u) return 1u;
+  if (x > (x << 1)) return ~(u32)0u;
+  return 1u << ( (int)(sizeof(x) * 8) - rsm_clz((u32)(x - 1u)) );
+}
+
+u64 _rsm_ceil_pow2_64(u64 x) {
+  if (x <= 1llu) return 1llu;
+  if (x > (x << 1)) return ~(u64)0llu;
+  return 1llu << ( (int)(sizeof(x) * 8) - rsm_clz((u64)(x - 1llu)) );
 }
 
 

@@ -153,6 +153,7 @@ _( SHL   , ABCu , reg , "shl"   /* RA = RB << Cu                                
 _( SHRS  , ABCu , reg , "shrs"  /* RA = RB >> Cu -- sign-replicating (arithmetic)   */)\
 _( SHRU  , ABCu , reg , "shru"  /* RA = RB >> Cu -- zero-replicating (logical)      */)\
 _( BINV  , ABu  , reg , "binv"  /* RA = ~Bu      -- bitwise complement, invert bits */)\
+_( NOT   , ABu  , reg , "not"   /* RA = !Bu      -- boolean negation                */)\
 \
 _( EQ    , ABCu , reg , "eq"   /* RA = RB == Cu */)\
 _( NEQ   , ABCu , reg , "neq"  /* RA = RB != Cu */)\
@@ -594,7 +595,7 @@ _( RT_STRLIT ) /* "foo" */ \
 _( RT_ARRAY  ) /* T[] */ \
 // end RSM_FOREACH_TOKEN
 // RSM_FOREACH_BINOP_TOKEN maps an infix binary operation to opcodes,
-// allowing "x + y" as an alternative to "add x y"
+// allowing e.g. "x + y" as an alternative to "add x y"
 #define RSM_FOREACH_BINOP_TOKEN(_) /* token, unsigned_op, signed_op */\
 _( RT_PLUS  , ADD  , ADD  ) /* + */ \
 _( RT_MINUS , SUB  , SUB  ) /* - */ \

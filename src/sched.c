@@ -622,6 +622,7 @@ static void t_vmexec(VMPARAMS) {
     #define do_SHRS(C) check_shift(C); RA = (u64)((i64)RB >> C)
     #define do_SHRU(C) check_shift(C); RA = RB >> C
     #define do_BINV(B) RA = ~B
+    #define do_NOT(B)  RA = !B
 
     #define do_EQ(C)   RA = RB == C
     #define do_NEQ(C)  RA = RB != C

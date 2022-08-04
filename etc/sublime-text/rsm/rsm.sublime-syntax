@@ -146,6 +146,7 @@ contexts:
           | shrs
           | shru
           | binv
+          | not
 
           | eq
           | neq

@@ -164,11 +164,25 @@ static void print_asm(rmemalloc_t* ma, const rin_t* iv, usize icount) {
   rmem_free(ma, m);
 }
 
+static void print_regstate_x64(bool pad, u64 v) {
+  int w = ( // (OMG I'm ashamed of this "shitty log16" code...)
+    v > 0xfffffffffffffff ? 16 : v > 0xffffffffffffff ? 15 :
+    v > 0xfffffffffffff ? 14 :   v > 0xffffffffffff ? 13 :
+    v > 0xfffffffffff ? 12 :     v > 0xffffffffff ? 11 :
+    v > 0xfffffffff ? 10 :       v > 0xffffffff ? 9 :
+    v > 0xfffffff ? 8 :          v > 0xffffff ? 7 :
+    v > 0xfffff ? 6 :            v > 0xffff ? 5 :
+    v > 0xfff ? 4 :              v > 0xff ? 3 :
+    v > 0xf ? 2 :                         1
+  );
+  printf(pad ? " %*s0x%llx" : "%*s0x%llx", 18 - w, "", v);
+}
+
 static void print_regstate(u64* iregs) {
   printf("register state:\n");
   for(u32 i=0;i<4;i++)
     printf(i==3 ? " R%u" : i ? " R%-19u" : "                      R%-19u", i);
-  printf("\nU64 "); for(u32 i=0;i<4;i++) printf(i ? " %20llx" : "%20llx", iregs[i]);
+  printf("\nU64 "); for (u32 i=0;i<4;i++) print_regstate_x64(i, iregs[i]);
   printf("\nU64 "); for(u32 i=0;i<4;i++) printf(i ? " %20llu" : "%20llu", iregs[i]);
   printf("\nS64 "); for(u32 i=0;i<4;i++) printf(i ? " %20lld" : "%20lld", (i64)iregs[i]);
   printf("\nS32 "); for(u32 i=0;i<4;i++) printf(i ? " %20d"   : "%20d",   (i32)iregs[i]);
@@ -177,7 +191,7 @@ static void print_regstate(u64* iregs) {
   printf("\n\n");
   for(u32 i=4;i<8;i++)
     printf(i==7 ? " R%u" : i>4 ? " R%-19u" : "                      R%-19u", i);
-  printf("\nU64 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20llx" : "%20llx", iregs[i]);
+  printf("\nU64 "); for(u32 i=4;i<8;i++) print_regstate_x64(i>4, iregs[i]);
   printf("\nU64 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20llu" : "%20llu", iregs[i]);
   printf("\nS64 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20lld" : "%20lld", (i64)iregs[i]);
   printf("\nS32 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20d"   : "%20d",   (i32)iregs[i]);
@@ -241,10 +255,10 @@ int main(int argc, char*const* argv) {
   if (!rsm_init()) return 1;
 
   // vm execution state (can be initialized with e.g. -R3=0xff)
-  u64 iregs[RSM_NREGS] = {0};
+  rvm_t vm = {0};
 
   // parse command-line options
-  int argi = parse_cli_opts(argc, argv, iregs);
+  int argi = parse_cli_opts(argc, argv, vm.iregs);
   const char* infile = NULL;
   if (argi < argc) { // <srcfile> [R0 [R1 ...]]
     infile = strcmp(argv[argi],"-")==0 ? NULL : argv[argi];
@@ -296,13 +310,12 @@ int main(int argc, char*const* argv) {
   // —————————————— old execution engine ——————————————
   } else {
     // allocate memory and execute program
-    void* rambase = osvmem_alloc(vm_ramsize);
-    if UNLIKELY(rambase == NULL) {
+    vm.ramsize = vm_ramsize;
+    vm.rambase = osvmem_alloc(vm_ramsize);
+    if UNLIKELY(vm.rambase == NULL) {
       errmsg("failed to allocate %zu B of memory", vm_ramsize);
       return 1;
     }
-
-    rvm_t vm = { .rambase=rambase, .ramsize=vm_ramsize };
     rerr_t err = rsm_vmexec(&vm, &rom);
     if (err) {
       errmsg("vmexec: %s", err == rerr_nomem ? "not enough memory" : rerr_str(err));
@@ -314,7 +327,7 @@ int main(int argc, char*const* argv) {
     char duration[25];
     fmtduration(duration, nanotime() - time);
     log("Execution finished in %s", duration);
-    print_regstate(iregs);
+    print_regstate(vm.iregs);
   }
 
   return 0;

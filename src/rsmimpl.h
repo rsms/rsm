@@ -454,7 +454,8 @@ u64 _rsm_floor_pow2_64(u64 x);
     (__typeof__(x))1 : \
     ( (x) > ((x) << 1) ) ? \
       ~(__typeof__(x))0 : \
-      (__typeof__(x))1 << ((__typeof__(x))(sizeof(x)*8) - RSM_CLZ_X((x) - 1)) \
+      (__typeof__(x))1 << ( \
+        (__typeof__(x))(sizeof(x)*8) - RSM_CLZ_X((__typeof__(x))((x) - 1)) ) \
 )
 
 

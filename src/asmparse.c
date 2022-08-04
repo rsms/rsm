@@ -1424,6 +1424,7 @@ rerr_t init_asmparse() {
   smap tmpmap_;
   smap* m = smap_make(&tmpmap_, ma, kwcount, MAPLF_2);
   if UNLIKELY(m == NULL) {
+    log("%s", __FUNCTION__);
     assertf(0, "sizeof(membuf) too small");
     return rerr_nomem;
   }

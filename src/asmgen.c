@@ -465,7 +465,7 @@ static void gpostresolve_pc(gstate* g, rarray* refs, gbhead* b) {
 }
 
 // called after entire AST has been processed; resolve data references
-static void resolve_udnames(gstate* g) {
+static void resolve_undefined_names(gstate* g) {
   for (u32 i = 0; i < g->udnames.len; i++ ) {
     gref* ref = rarray_at(gref, &g->udnames, i);
 
@@ -482,7 +482,13 @@ static void resolve_udnames(gstate* g) {
         continue;
       }
     }
-    if (target->namedtype == GNAMED_T_CONST) panic("TODO");
+
+    if (target->namedtype == GNAMED_T_CONST) {
+      // TODO patch constant uses
+      ERRN(ref->n, "constant must be declared before it's referenced");
+      continue;
+    }
+
     if (target->namedtype != GNAMED_T_DATA) {
       ERRN(ref->n, "%.*s is not data", (int)namelen, name);
       continue;
@@ -594,6 +600,12 @@ static void errintsize(
   } else {
     errf(c, pr, "value %llu out of range 0...%lld for %s", val, maxval, rop_name(op));
   }
+}
+
+static void names_assign(gstate* g, gnamed* entry) {
+  uintptr* vp = smap_assign(&g->names, entry->name, entry->namelen);
+  if (!check_alloc(g, vp))
+    *vp = (uintptr)entry;
 }
 
 // getiargs checks & reads integer arguments for an operation described by AST rnode n.
@@ -841,47 +853,6 @@ static void genassign(gstate* g, rnode_t* n) {
   return genop(g, n);
 }
 
-static void genblock(gstate* g, rnode_t* block) {
-  assert(block->t == RT_LABEL);
-  assertnotnull(g->fn);
-
-  // Register block. This is the only place where we initialize a new gblock
-  gblock* b = GARRAY_PUSH_OR_RET(gblock, &g->fn->blocks);
-  b->namedtype = GNAMED_T_BLOCK;
-  b->name = block->sval.p;
-  b->namelen = block->sval.len;
-  b->nrefs = 0;
-  b->i = g->iv.len;
-  b->pos = block->pos;
-
-  // resolve pending references
-  gpostresolve_pc(g, &g->fn->ulv, (gbhead*)b);
-
-  rnode_t* jumpn = NULL; // last unconditional jump
-  for (rnode_t* cn = block->children.head; cn; cn = cn->next) {
-    if (jumpn) {
-      warnf(g->a, nposrange(cn), "unreachable code");
-      break;
-    }
-    switch (cn->t) {
-      case RT_OP:
-        if ((rop_t)cn->ival == rop_JUMP || (rop_t)cn->ival == rop_RET)
-          jumpn = cn;
-        genop(g, cn); break;
-      case RT_ASSIGN:
-        genassign(g, cn); break;
-      default:
-        ERRN(cn, "invalid block element %s", tokname(cn->t));
-    }
-  }
-}
-
-static void names_assign(gstate* g, gnamed* entry) {
-  uintptr* vp = smap_assign(&g->names, entry->name, entry->namelen);
-  if (!check_alloc(g, vp))
-    *vp = (uintptr)entry;
-}
-
 static bool gdata_typesize(gstate* g, rnode_t* type, u32* alignp, u64* sizep) {
   switch (type->t) {
     case RT_I1:  *alignp = 1; *sizep = 1; return true;
@@ -947,6 +918,44 @@ static void gendata(gstate* g, rnode_t* datn) {
   // TODO: check that init value fits in type
 
   names_assign(g, (gnamed*)d);
+}
+
+static void genblock(gstate* g, rnode_t* block) {
+  assert(block->t == RT_LABEL);
+  assertnotnull(g->fn);
+
+  // Register block. This is the only place where we initialize a new gblock
+  gblock* b = GARRAY_PUSH_OR_RET(gblock, &g->fn->blocks);
+  b->namedtype = GNAMED_T_BLOCK;
+  b->name = block->sval.p;
+  b->namelen = block->sval.len;
+  b->nrefs = 0;
+  b->i = g->iv.len;
+  b->pos = block->pos;
+
+  // resolve pending references
+  gpostresolve_pc(g, &g->fn->ulv, (gbhead*)b);
+
+  rnode_t* jumpn = NULL; // last unconditional jump
+  for (rnode_t* cn = block->children.head; cn; cn = cn->next) {
+    if (jumpn) {
+      warnf(g->a, nposrange(cn), "unreachable code");
+      break;
+    }
+    switch (cn->t) {
+      case RT_OP:
+        if ((rop_t)cn->ival == rop_JUMP || (rop_t)cn->ival == rop_RET)
+          jumpn = cn;
+        genop(g, cn); break;
+      case RT_ASSIGN:
+        genassign(g, cn); break;
+      case RT_DATA:
+      case RT_CONST:
+        gendata(g, cn); break;
+      default:
+        ERRN(cn, "invalid block element %s", tokname(cn->t));
+    }
+  }
 }
 
 static void genfun(gstate* g, rnode_t* fun) {
@@ -1192,7 +1201,7 @@ rerr_t rasm_gen(rasm_t* a, rnode_t* module, rmemalloc_t* rommem, rrom_t* rom) {
 
   // compute data layout and resolve data references
   layout_gdata(g);
-  resolve_udnames(g);
+  resolve_undefined_names(g);
 
   // report unresolved references
   report_unresolved(g);

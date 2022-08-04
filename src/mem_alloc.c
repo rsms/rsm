@@ -18,10 +18,17 @@
 // subheap is allocated and added to the subheaps list.
 //
 
-// RMEM_TRACE: uncomment to enable logging a lot of info via dlog
+// RMEM_TRACE: define to enable logging a lot of info via dlog
 //#define RMEM_TRACE
 
-// RMEM_RUN_TEST_ON_INIT: uncomment to run tests during exe init in DEBUG builds
+// RMEM_PEDANTIC_CHECKS: define to enable pedantic allocation checks (slow!)
+//#define RMEM_PEDANTIC_CHECKS
+#if !RSM_SAFE && defined(RMEM_PEDANTIC_CHECKS)
+  // no effect in unsafe builds
+  #undef RMEM_PEDANTIC_CHECKS
+#endif
+
+// RMEM_RUN_TEST_ON_INIT: define to run tests during exe init in DEBUG builds
 #define RMEM_RUN_TEST_ON_INIT
 
 // _SCRUB_BYTE defines a byte value that, upon allocating or freeing a region,
@@ -80,8 +87,28 @@ static_assert(IS_POW2(HEAP_MAX_ALIGN), "");
   #define HEAP_IDEAL_ALIGN  HEAP_ALIGN
 #endif
 
+
 #define SAFECHECK_VALID_REGION(region) \
   safecheckf(RMEM_IS_VALID(region), "invalid region " RMEM_FMT, RMEM_FMT_ARGS(region))
+
+
+// RMEM_IS_INTERSECTING returns true if r1 and r2 intersect.
+//   r1.start < r2.end && r2.start < r1.end
+//
+//   r1           |————————————|       YES
+//   r2  |————————————|
+//
+//   r1  |————————————|                YES
+//   r2           |————————————|
+//
+//   r1  |————————————|                 NO
+//   r2               |————————————|
+//
+#define RMEM_IS_INTERSECTING(r1, r2) ( \
+  (uintptr)(r1).p < ((uintptr)(r2).p + (r2).size) && \
+  (uintptr)(r2).p < ((uintptr)(r1).p + (r1).size) \
+)
+
 
 // debug_id
 #ifdef RMEM_TRACE
@@ -178,6 +205,29 @@ static_assert(sizeof(subheap_t) <= PAGE_SIZE, "");
 
 
 #define CHUNK_MASK  (~((uintptr)CHUNK_SIZE - 1))
+
+#ifdef RMEM_PEDANTIC_CHECKS
+  static bool rmem_debug_is_allocated(rmemalloc_t* a, rmem_t region);
+
+  #define RMEM_PEDANTIC_SAFECHECK_ALLOCATED(allocator, ptr, size) { \
+    rmem_t region__ = RMEM((ptr), (size)); \
+    safecheckf( \
+      rmem_debug_is_allocated((allocator), region__), \
+      "RMEM_PEDANTIC_CHECKS should be allocated but is free " RMEM_FMT, \
+      RMEM_FMT_ARGS(region__)); \
+  }
+
+  #define RMEM_PEDANTIC_SAFECHECK_FREE(allocator, ptr, size) { \
+    rmem_t region__ = RMEM((ptr), (size)); \
+    safecheckf( \
+      !rmem_debug_is_allocated((allocator), region__), \
+      "RMEM_PEDANTIC_CHECKS should be free but is allocated: " RMEM_FMT,  \
+      RMEM_FMT_ARGS(region__)); \
+  }
+#else
+  #define RMEM_PEDANTIC_SAFECHECK_ALLOCATED(allocator, ptr, size) ((void)0)
+  #define RMEM_PEDANTIC_SAFECHECK_FREE(allocator, ptr, size) ((void)0)
+#endif
 
 
 #if DEBUG
@@ -319,7 +369,9 @@ inline static usize heap_cap(const heap_t* h) {
 // heap_alloc finds space in the heap h that is at least *sizep bytes.
 // Returns NULL if there's no space, otherwise it returns a pointer to the allocated
 // region and updates *sizep to the effective byte size of the region.
-static void* nullable heap_alloc(heap_t* h, usize* sizep, usize alignment) {
+static void* nullable heap_alloc(
+  rmemalloc_t* a, heap_t* h, usize* sizep, usize alignment)
+{
   // nchunks: the number of chunks we need.
   // We add an extra once since integer division rounds down but we need
   // the "ceiling", enough chunks to fit meta_size and *sizep.
@@ -358,9 +410,6 @@ static void* nullable heap_alloc(heap_t* h, usize* sizep, usize alignment) {
     return NULL;
 
   // We found a range of free chunks!
-  // Update the bitset to mark the chunks as "in use"
-  bitset_set_range(&h->chunk_use, chunk_index, chunk_len, true);
-
   // Increment total number of chunks "in use" in the heap
   h->chunk_len += chunk_len;
 
@@ -374,6 +423,11 @@ static void* nullable heap_alloc(heap_t* h, usize* sizep, usize alignment) {
   // dlog("usable size   %5zu", chunk_len * CHUNK_SIZE);
   assert(chunk_len * CHUNK_SIZE >= *sizep);
   *sizep = chunk_len * CHUNK_SIZE;
+
+  RMEM_PEDANTIC_SAFECHECK_FREE(a, ptr, *sizep);
+
+  // Update the bitset to mark the chunks as "in use"
+  bitset_set_range(&h->chunk_use, chunk_index, chunk_len, true);
 
   // fill allocated memory with scrub bytes (if enabled)
   if (RMEM_ALLOC_SCRUB_BYTE)
@@ -417,8 +471,10 @@ inline static void subheap_init(subheap_t* sh, u8* base, usize size  DEBUG_ID_PA
   heap_init(&sh->heap, base, size  DEBUG_ID_ARG);
 }
 
-inline static void* nullable subheap_alloc(subheap_t* sh, usize* size, usize alignment) {
-  return heap_alloc(&sh->heap, size, alignment);
+inline static void* nullable subheap_alloc(
+  rmemalloc_t* a, subheap_t* sh, usize* size, usize alignment)
+{
+  return heap_alloc(a, &sh->heap, size, alignment);
 }
 
 inline static usize subheap_avail(const subheap_t* sh) {
@@ -523,7 +579,7 @@ static bool rmem_add_subheap(rmemalloc_t* a, void* storage, usize size) {
 static void* nullable rmem_heapalloc(rmemalloc_t* a, usize* size, usize alignment) {
   ilist_for_each(lent, &a->subheaps) {
     subheap_t* sh = ilist_entry(lent, subheap_t, list_entry);
-    void* ptr = subheap_alloc(sh, size, alignment);
+    void* ptr = subheap_alloc(a, sh, size, alignment);
     if (ptr)
       return ptr;
   }
@@ -535,6 +591,7 @@ static bool rmem_expand(rmemalloc_t* a, usize minsize);
 static bool free_to_subheaps(rmemalloc_t* a, void* ptr, usize size);
 
 
+//———————————————————————————————————————————————————————————————————————————————————————
 #ifdef RMEM_SLABHEAP_ENABLE
 
 
@@ -607,6 +664,11 @@ static slabblock_t* nullable slabheap_grow(rmemalloc_t* a, slabheap_t* sh) {
 }
 
 
+inline static uintptr slabheap_block_data_addr(slabheap_t* sh, slabblock_t* block) {
+  return ALIGN2((uintptr)block + sizeof(slabblock_t), sh->size);
+}
+
+
 static void* nullable slabheap_alloc(rmemalloc_t* a, slabheap_t* sh) {
   slabblock_t* block = sh->usable;
 
@@ -622,7 +684,7 @@ static void* nullable slabheap_alloc(rmemalloc_t* a, slabheap_t* sh) {
   // No chunk to recycle; allocate a new one from the block
   if UNLIKELY(chunk == NULL) {
     assertf(block->cap - block->len > 0, "full block %p found on sh->usable!", block);
-    uintptr data_addr = ALIGN2((uintptr)block + sizeof(slabblock_t), sh->size);
+    uintptr data_addr = slabheap_block_data_addr(sh, block);
     assertf(data_addr % sh->size == 0, "misaligned data_addr %p", (void*)data_addr);
     chunk = (slabchunk_t*)( data_addr + (block->len * sh->size) );
     chunk->next = NULL; // for "block->recycle = chunk->next" later on
@@ -644,7 +706,7 @@ static void* nullable slabheap_alloc(rmemalloc_t* a, slabheap_t* sh) {
   }
 
   #ifdef RMEM_TRACE
-  uintptr data_addr = ALIGN2((uintptr)block + sizeof(slabblock_t), sh->size);
+  uintptr data_addr = slabheap_block_data_addr(sh, block);
   trace("[slab %zu] allocating chunk %zu %p from block %p",
     sh->size, ((uintptr)chunk - data_addr) / sh->size, chunk, block);
   #endif
@@ -687,6 +749,97 @@ static void slabheap_free(rmemalloc_t* a, slabheap_t* sh, void* ptr) {
 
 
 #endif // RMEM_SLABHEAP_ENABLE
+//———————————————————————————————————————————————————————————————————————————————————————
+#ifdef RMEM_PEDANTIC_CHECKS
+
+#ifdef RMEM_SLABHEAP_ENABLE
+
+// returns 0 if not allocated, 1 if allocated and -1 if region is not part of sh
+static int slabheap_debug_is_allocated(rmemalloc_t* a, slabheap_t* sh, rmem_t region) {
+  assert(region.size > 0);
+
+  // first check if the region is in one of the fully allocated blocks
+  for (slabblock_t* block = sh->full; block; block = block->next) {
+    if (RMEM_IS_INTERSECTING(region, RMEM(block, SLABHEAP_BLOCK_SIZE)))
+      return 1; // region is allocated
+  }
+
+  // search usable blocks
+  for (slabblock_t* block = sh->usable; block; block = block->next) {
+    if (RMEM_IS_INTERSECTING(region, RMEM(block, SLABHEAP_BLOCK_SIZE))) {
+      // search free recycle-able chunks within the usable block
+      for (slabchunk_t* chunk = block->recycle; chunk; chunk = chunk->next) {
+        if (RMEM_IS_INTERSECTING(region, RMEM(chunk, sh->size)))
+          return 0; // region is not allocated
+      }
+      // check if the region is inside the unallocated (never used) part of the slab
+      uintptr data_addr = slabheap_block_data_addr(sh, block);
+      data_addr += (uintptr)(block->len * sh->size);
+      usize unalloc_size = (block->cap - block->len) * sh->size;
+      rmem_t unalloc_region = RMEM((void*)data_addr, unalloc_size);
+      if (RMEM_IS_INTERSECTING(region, unalloc_region))
+        return 0; // region is not allocated
+      return 1; // region is allocated
+    }
+  }
+
+  return -1; // region is not part of this slabheap
+}
+
+#endif // RMEM_SLABHEAP_ENABLE
+
+
+// returns 0 if not allocated, 1 if allocated and -1 if region is not part of sh
+static int subheap_debug_is_allocated(rmemalloc_t* a, subheap_t* sh, rmem_t region) {
+  assert(region.size > 0);
+  heap_t* h = &sh->heap;
+
+  // first check if the region is this heap
+  rmem_t heap_region = RMEM(h->chunks, h->chunk_cap * CHUNK_SIZE);
+  if (!RMEM_IS_INTERSECTING(region, heap_region))
+    return -1; // region is not part of this heap
+
+  uintptr chunk_addr = (uintptr)region.p & CHUNK_MASK;
+  uintptr chunk_index = (chunk_addr - (uintptr)h->chunks) / CHUNK_SIZE;
+  usize chunk_end = chunk_index + (region.size / CHUNK_SIZE);
+
+  while (chunk_index < chunk_end) {
+    if (bitset_get(&h->chunk_use, chunk_index))
+      return 1; // allocated
+    chunk_index++;
+  }
+
+  // all chunks in the region are free
+  return 0;
+}
+
+
+static bool rmem_debug_is_allocated(rmemalloc_t* a, rmem_t region) {
+  #ifdef RMEM_SLABHEAP_ENABLE
+    const usize slabsize = CEIL_POW2(ALIGN2(region.size, SLABHEAP_MIN_SIZE));
+    usize slab_index = ILOG2(slabsize) - ILOG2(SLABHEAP_MIN_SIZE);
+    if (slab_index < SLABHEAP_COUNT) {
+      slabheap_t* sh = &a->slabheaps[slab_index];
+      int r = slabheap_debug_is_allocated(a, sh, region);
+      if (r > -1)
+        return r;
+      // if r=-1 then region is not part of this slabheap (valid in low-memory scenarios)
+    }
+  #endif
+  // scan subheaps
+  ilist_for_each(lent, &a->subheaps) {
+    subheap_t* sh = ilist_entry(lent, subheap_t, list_entry);
+    int r = subheap_debug_is_allocated(a, sh, region);
+    if (r > -1)
+      return r;
+  }
+  assertf(0, RMEM_FMT " not in this allocator", RMEM_FMT_ARGS(region));
+  return 0;
+}
+
+
+#endif // RMEM_PEDANTIC_CHECKS
+//———————————————————————————————————————————————————————————————————————————————————————
 
 
 // rmem_alloc_aligned attempts to allocate *size bytes.
@@ -731,6 +884,7 @@ rmem_t rmem_alloc_aligned(rmemalloc_t* a, usize size, usize alignment) {
   }
 
 end:
+  if (ptr) RMEM_PEDANTIC_SAFECHECK_ALLOCATED(a, ptr, size);
   RHMutexUnlock(&a->lock);
   trace("allocated region " RMEM_FMT, RMEM_FMT_ARGS(RMEM(ptr, size)));
   return (rmem_t){ .p=ptr, .size=size };
@@ -759,10 +913,6 @@ rmem_t rmem_alloc_array(rmemalloc_t* a, usize count, usize elemsize, usize align
 
 
 static bool free_to_subheaps(rmemalloc_t* a, void* ptr, usize size) {
-  #ifdef RMEM_SLABHEAP_ENABLE
-  assert(size > SLABHEAP_MAX_SIZE);
-  #endif
-
   ilist_for_each(lent, &a->subheaps) {
     subheap_t* sh = ilist_entry(lent, subheap_t, list_entry);
     if (heap_contains(&sh->heap, ptr, size)) {
@@ -792,8 +942,9 @@ void rmem_free(rmemalloc_t* a, rmem_t region) {
     safecheckf(0, "rmem_free: invalid region " RMEM_FMT, RMEM_FMT_ARGS(region));
 
 end:
-  trace("freed region " RMEM_FMT, RMEM_FMT_ARGS(region));
+  RMEM_PEDANTIC_SAFECHECK_FREE(a, region.p, region.size);
   RHMutexUnlock(&a->lock);
+  trace("freed region " RMEM_FMT, RMEM_FMT_ARGS(region));
 }
 
 
@@ -835,13 +986,6 @@ bool rmem_resize(rmemalloc_t* a, rmem_t* region, usize newsize) {
   rmem_t new_region = rmem_alloc_aligned(a, newsize, alignment);
   if (!new_region.p)
     return false;
-
-  // r1 |...........|
-  // r2        |............|
-  #define RMEM_IS_INTERSECTING(r1, r2) ( \
-    (uintptr)(r1).p <= ((uintptr)(r2).p + (uintptr)(r2).size) && \
-    (uintptr)(r2).p <= ((uintptr)(r1).p + (uintptr)(r1).size) \
-  )
 
   assertf(!RMEM_IS_INTERSECTING(new_region, *region),
     "bug in rmem_alloc_aligned: allocated non-free memory."
@@ -970,9 +1114,10 @@ static rmemalloc_t* nullable rmem_allocator_init(
   // TODO: tune these sizes once we have some stats on usage.
   #ifdef RMEM_SLABHEAP_ENABLE
     for (usize i = 0; i < SLABHEAP_COUNT; i++) {
-      a->slabheaps[i].size = 1lu << (i + ILOG2(SLABHEAP_MIN_SIZE));
-      a->slabheaps[i].usable = NULL;
-      a->slabheaps[i].full = NULL;
+      slabheap_t* sh = &a->slabheaps[i];
+      sh->size = 1lu << (i + ILOG2(SLABHEAP_MIN_SIZE));
+      sh->usable = NULL;
+      sh->full = NULL;
       trace("init slabheaps[%zu] (%zu B)", i, a->slabheaps[i].size);
     }
   #endif

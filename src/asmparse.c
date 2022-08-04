@@ -4,6 +4,7 @@
 #include "rsmimpl.h"
 #include "map.h"
 #include "asm.h"
+#include "abuf.h"
 
 //#define LOG_TOKENS // define to log() token scanning
 //#define LOG_AST    // define to log() parsed top-level ast nodes
@@ -317,10 +318,8 @@ static void sstring_buffered(pstate* p, u32 extralen, bool ismultiline) {
   if UNLIKELY(len == U32_MAX - extralen)
     return serr(p, "string literal too large");
   char* dst = bufslab_alloc(&p->bufslabs, p->a->memalloc, len);
-  if UNLIKELY(!dst) {
-    serr(p, "unable to allocate memory for string literal");
-    return;
-  }
+  if UNLIKELY(!dst)
+    return serr(p, "unable to allocate memory for string literal");
 
   p->sval.p = dst;
   p->sval.len = len;
@@ -343,8 +342,22 @@ static void sstring_buffered(pstate* p, u32 extralen, bool ismultiline) {
         FLUSH_BUF(src);
         src++;
         switch (*src) {
-          case 'n': *dst++ = 0xA; break;
-          default:  *dst++ = *src; break; // verbatim
+          case '"': case '\'': case '\\': *dst++ = *src; break; // verbatim
+          case '0':  *dst++ = (u8)0;   break;
+          case 'a':  *dst++ = (u8)0x7; break;
+          case 'b':  *dst++ = (u8)0x8; break;
+          case 't':  *dst++ = (u8)0x9; break;
+          case 'n':  *dst++ = (u8)0xA; break;
+          case 'v':  *dst++ = (u8)0xB; break;
+          case 'f':  *dst++ = (u8)0xC; break;
+          case 'r':  *dst++ = (u8)0xD; break;
+          case 'x': // \xXX
+          case 'u': // \uXXXX
+          case 'U': // \UXXXXXXXX
+            // TODO: \x-style escape sequences
+            return serr(p, "string literal escape \"\\%c\" not yet supported", *src);
+          default:
+            return serr(p, "invalid escape \"\\%c\" in string literal", *src);
         }
         chunkstart = ++src;
         break;
@@ -622,7 +635,7 @@ static void sadvance(pstate* p) { // scan the next token
           line, col, tname, tvalc, tvalp, (i64)p->ival, p->ival);
 
       case RT_STRLIT: {
-        abuf s = abuf_make(buf, sizeof(buf));
+        abuf_t s = abuf_make(buf, sizeof(buf));
         abuf_repr(&s, p->sval.p, p->sval.len);
         abuf_terminate(&s);
         return log("%3u:%-3u %-12s \"%s\"", line, col, tname, buf);
@@ -1278,7 +1291,7 @@ rnode_t* nullable rasm_parse(rasm_t* a) {
     FMT_HEAD = 1 << 0, // is list head
   } RSM_END_ENUM(fmtflag)
 
-  static void fmtnode1(abuf* s, rnode_t* n, usize indent, fmtflag fl) {
+  static void fmtnode1(abuf_t* s, rnode_t* n, usize indent, fmtflag fl) {
     if ((fl & FMT_HEAD) == 0) {
       abuf_c(s, '\n');
       for (usize i = 0; i < indent; i++)
@@ -1324,7 +1337,7 @@ rnode_t* nullable rasm_parse(rasm_t* a) {
         abuf_append(s, n->sval.p, n->sval.len); break;
 
       case RT_OP:
-        abuf_str(s, rop_name((rop)n->ival)); break;
+        abuf_str(s, rop_name((rop_t)n->ival)); break;
 
       case RT_SINTLIT2:  abuf_c(s, '-'); FALLTHROUGH;
       case RT_INTLIT2:   abuf_str(s, "0b"); abuf_u64(s, n->ival, 2); break;
@@ -1362,8 +1375,15 @@ rnode_t* nullable rasm_parse(rasm_t* a) {
       case RT_LT2:
       case RT_GT2:
       case RT_GT3:
+      case RT_EQ:
+      case RT_NEQ:
       case RT_LT:
       case RT_GT:
+      case RT_LTE:
+      case RT_GTE:
+
+      case RT_TILDE:
+      case RT_NOT:
 
       case RT_I1:
       case RT_I8:
@@ -1385,7 +1405,7 @@ rnode_t* nullable rasm_parse(rasm_t* a) {
   }
 
   static usize fmtnode(char* buf, usize bufcap, rnode_t* n) {
-    abuf s = abuf_make(buf, bufcap);
+    abuf_t s = abuf_make(buf, bufcap);
     fmtnode1(&s, n, 0, FMT_HEAD);
     return abuf_terminate(&s);
   }

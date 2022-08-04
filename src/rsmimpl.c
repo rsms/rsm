@@ -326,6 +326,7 @@ rerr_t read_stdin_data(rmemalloc_t* ma, usize maxlen, rmem_t* data_out) {
       }
     }
     *data_out = dst;
+    data_out->size = len;
     return 0;
   #endif
 }

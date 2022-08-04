@@ -343,13 +343,10 @@ typedef unsigned long       usize;
 // If x is 0, the result is undefined.
 #define rsm_clz(x) ( \
   __builtin_constant_p(x) ? RSM_CLZ_X(x) : \
-  _Generic((x), \
-    i8:    __builtin_clz,   u8:    __builtin_clz, \
-    i16:   __builtin_clz,   u16:   __builtin_clz, \
-    i32:   __builtin_clz,   u32:   __builtin_clz, \
-    isize: __builtin_clzl,  usize: __builtin_clzl, \
-    i64:   __builtin_clzll, u64:   __builtin_clzll \
-  )(x) \
+  sizeof(x) == 1 ? __builtin_clz(x) - 24 : \
+  sizeof(x) == 2 ? __builtin_clz(x) - 16 : \
+  sizeof(x) == 4 ? __builtin_clz(x) : \
+                   __builtin_clzll(x) \
 )
 
 // RSM_CLZ_X constant-expression count number of leading 0-bits

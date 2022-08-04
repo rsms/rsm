@@ -1,16 +1,18 @@
 // prints the first N Fibonacci numbers
 // E.g. rsm -R0=10 fib.rsm => 1 1 2 3 5 8 13 21 34 55
-
+// Pseudo-code to explain the implementation:
+//   fun fib(n i64) i64 {
+//     var curr, prev u64 = 0, 0
+//     while (n--)
+//       const value = curr + prev
+//       prev = value ? curr : 1
+//       curr = value
+//       println_u64(curr)
+//     curr
+//   }
+//
 fun fib(n i64) i64 {
-  //| var curr, prev u64 = 0, 0
-  //| while (n--)
-  //|   const value = curr + prev
-  //|   prev = value ? curr : 1
-  //|   curr = value
-  //| curr
-  data lf_str = "\n"
-  data sp_str = " "
-  // use caller-owned registers to avoid push/pop around calls
+  // Use caller-owned registers to avoid saving around call
   R19 = R0 // n
   R20 = 0  // curr
   R21 = 1  // prev
@@ -19,25 +21,25 @@ loop:
   R1  = ! R0      // tmp = !value
   R21 = R20 + R1  // prev = value ? curr : 1
   R20 = R0        // curr = value
-  call print_u64 R20
-  call print sp_str 1
+  call println_u64 R20
   R19 = R19 - 1   // n--
   if R19 loop     // loop if n > 0
 // end
-  call print lf_str 1
   R0 = R20
   ret
 }
 
-const STDOUT = 1
-
-// print_u64 writes a u64 as decimal number to stdout.
+// print_u64 writes a u64 as decimal number and a linebreak.
 // returns 0 on success, 1 on failed or short write.
-fun print_u64(value i64) ok i1 {
+fun println_u64(value i64) ok i1 {
+  const STDOUT = 1
   const ZERO_CHAR = 0x30
-  // largest u64 base-10 is 20 bytes long "18446744073709551615"
+  const LF_CHAR = 0x0A
+  // max u64 decimal number is 20 bytes long "18446744073709551615"
   SP = sub SP 24  // reserve 24B of stack space (8B aligned)
-  R1 = SP + 24    // define string storage memory address
+  R1 = SP + 23    // define string storage memory address
+  R2 = LF_CHAR    // load address of line feed character
+  store1 R2 R1 0  // store " " (space) to end of string
 loop:
   R1 = R1 - 1     // decrement storage address
   R2 = R0 % 10 ; R2 = R2 + ZERO_CHAR // ch = '0' + (value % 10)
@@ -48,10 +50,4 @@ loop:
   R2 = SP + 24 ; R2 = R2 - R1 // count bytes (start - end)
   R0 = write R1 R2 STDOUT
   SP = add SP 24 // restore stack pointer
-}
-
-// returns 0 on success, 1 on failed or short write
-fun print(addr i64, size i64) ok i1 {
-  R0 = write R0 R1 STDOUT
-  R0 = lts R0 R1
 }

@@ -37,20 +37,23 @@ static_assert(offsetof(vmstate,pub) == 0, "vmstate.pub is not first member");
 #define VMPARAMS vmstate* vs, u64* iregs, const rin_t* inv, usize pc
 #define VMARGS   vs, iregs, inv, pc
 
+
 #if defined(DEBUG) && !defined(RSM_NO_LIBC)
   #include <stdio.h>
   static void logstate_header() {
     fprintf(stderr, "\e[2m");
     for (int i = 0; i < 6; i++)
       fprintf(stderr, "  " REG_FMTNAME_PAT, REG_FMTNAME(i));
-    fprintf(stderr, "  │  PC  INSTRUCTION\e[22m\n");
+    fprintf(stderr, "    \e[9%cmSP\e[39m  │  PC  INSTRUCTION\e[22m\n",
+      REG_FMTCOLORC(RSM_MAX_REG));
   }
   static void logstate(VMPARAMS) {
     for (int i = 0; i < 6; i++)
       fprintf(stderr, REG_FMTVAL_PAT("%4llx"), REG_FMTVAL(i, iregs[i]));
     char buf[128];
     rsm_fmtinstr(buf, sizeof(buf), inv[pc], NULL, RSM_FMT_COLOR);
-    fprintf(stderr, "  │ %3ld  %s\n", pc, buf);
+    fprintf(stderr, REG_FMTVAL_PAT("%6llx") "  │ %3ld  %s\n",
+      REG_FMTVAL(RSM_MAX_REG, iregs[RSM_MAX_REG]), pc, buf);
   }
   #ifdef DEBUG_VM_LOG_LOADSTORE
     #define log_loadstore dlog
@@ -62,6 +65,7 @@ static_assert(offsetof(vmstate,pub) == 0, "vmstate.pub is not first member");
   #define logstate_header(...) ((void)0)
   #define log_loadstore(...)   ((void)0)
 #endif
+
 
 // constants
 #define STK_ALIGN    8           // stack alignment (== sizeof(u64))

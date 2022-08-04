@@ -263,16 +263,14 @@ static ALWAYS_INLINE T* t_get() { return _g_t; }
   #include <stdio.h>
   static void vmexec_logstate_header() {
     fprintf(stderr, "\e[2m");
-    for (int i = 0; i < 6; i++) {
-      fprintf(stderr, "  " REG_FMTNAME_PAT, REG_FMTNAME(i));
-    }
+    for (int i = 0; i < 6; i++)
+      fprintf(stderr, "   " REG_FMTNAME_PAT, REG_FMTNAME(i));
     fprintf(stderr, "    \e[9%cmSP\e[39m  │  PC  INSTRUCTION\e[22m\n",
       REG_FMTCOLORC(RSM_MAX_REG));
   }
   static void vmexec_logstate(VMPARAMS) {
-    for (int i = 0; i < 6; i++) {
-      fprintf(stderr, REG_FMTVAL_PAT("%4llx"), REG_FMTVAL(i, iregs[i]));
-    }
+    for (int i = 0; i < 6; i++)
+      fprintf(stderr, REG_FMTVAL_PAT("%5llx"), REG_FMTVAL(i, iregs[i]));
     char buf[128];
     rsm_fmtinstr(buf, sizeof(buf), inv[pc], NULL, RSM_FMT_COLOR);
     fprintf(stderr, REG_FMTVAL_PAT("%6llx") "  │ %3ld  %s\n",

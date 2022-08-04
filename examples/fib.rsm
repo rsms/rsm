@@ -13,9 +13,10 @@
 //
 fun fib(n i64) i64 {
   // Use caller-owned registers to avoid saving around call
-  R19 = R0 // n
-  R20 = 0  // curr
-  R21 = 1  // prev
+  ifz R0 end // return 0 if n == 0
+  R19 = R0   // n
+  R20 = 0    // curr
+  R21 = 1    // prev
 loop:
   R0  = R20 + R21 // value = curr + prev
   R1  = ! R0      // tmp = !value
@@ -24,8 +25,8 @@ loop:
   call println_u64 R20
   R19 = R19 - 1   // n--
   if R19 loop     // loop if n > 0
-// end
   R0 = R20
+end:
   ret
 }
 

@@ -111,9 +111,9 @@ struct gstate {
 };
 
 struct gref {
-  u32      i;     // referrer's iv offset
-  rnode_t*   n;     // referrer
-  grefflag flags;
+  u32              i;     // referrer's iv offset
+  rnode_t*         n;     // referrer
+  grefflag         flags;
   gnamed* nullable target;
 };
 
@@ -501,16 +501,18 @@ static void resolve_udnames(gstate* g) {
   g->udnames.len = 0;
 }
 
+
 // returns true if result arg is an immediate value rather than a register.
 static bool refnamed(gstate* g, rnode_t* refn, u32 refi, rop_t op, u32 argc, i32* argp) {
   grefflag flags = 0;
 
-  #define ADDGREF(refs) ({                           \
-    gref* ref = GARRAY_PUSH_OR_RET(gref, (refs), 0); \
-    ref->i = refi;                                   \
-    ref->n = assertnotnull(refn);                    \
-    ref->flags = flags;                              \
-    ref;                                             \
+  #define ADDGREF(refs) ({                             \
+    gref* ref__ = GARRAY_PUSH_OR_RET(gref, (refs), 0); \
+    ref__->i = refi;                                   \
+    ref__->n = assertnotnull(refn);                    \
+    ref__->flags = flags;                              \
+    ref__->target = NULL;                              \
+    ref__;                                             \
   })
 
   assert(refn->sval.len > 0);

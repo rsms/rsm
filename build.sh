@@ -10,26 +10,34 @@ WATCH_ADDL_FILES=()
 _WATCHED=
 RUN=
 NINJA_ARGS=()
+NON_WATCH_ARGS=()
 TESTING_ENABLED=
 STRIP=false
+DEBUGGABLE=false
 
-while [[ $# -gt 0 ]]; do case "$1" in
-  -v)      NINJA_ARGS+=(-v); shift ;;
-  -w)      WATCH=1; shift ;;
-  -_w_)    _WATCHED=1; shift ;;
-  -wf=*)   WATCH=1; WATCH_ADDL_FILES+=( "${1:4}" ); shift ;;
-  -run=*)  RUN=${1:5}; shift ;;
-  -debug)  BUILD_MODE=debug; TESTING_ENABLED=1; shift ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -w)      WATCH=1; shift; continue ;;
+    -_w_)    _WATCHED=1; shift; continue ;;
+    -wf=*)   WATCH=1; WATCH_ADDL_FILES+=( "${1:4}" ); shift; continue ;;
+    -run=*)  RUN=${1:5}; shift; continue ;;
+  esac
+  NON_WATCH_ARGS+=( "$1" )
+  case "$1" in
   -safe)   BUILD_MODE=safe; TESTING_ENABLED=; shift ;;
   -fast)   BUILD_MODE=fast; TESTING_ENABLED=; shift ;;
-  -strip)  STRIP=true; shift ;;
+  -debug)  BUILD_MODE=debug; TESTING_ENABLED=1; DEBUGGABLE=true; shift ;;
+  -strip)  STRIP=true; DEBUGGABLE=false; shift ;;
+  -g)      DEBUGGABLE=true; shift ;;
+  -v)      NINJA_ARGS+=(-v); shift ;;
   -h|-help|--help) cat << _END
-usage: $0 [options] [<target> ...]
+usage: $0 [options] [--] [<target> ...]
 options:
   -safe      Build optimized product with some assertions enabled (default)
   -fast      Build optimized product without any assertions
   -debug     Build debug product
   -strip     Do not include debug data
+  -g         Make the build debuggable (debug symbols + basic opt only)
   -w         Rebuild as sources change
   -wf=<file> Watch <file> for changes (can be provided multiple times)
   -run=<cmd> Run <cmd> after successful build
@@ -40,6 +48,7 @@ _END
   -*) _err "unknown option: $1" ;;
   *) break ;;
 esac; done
+
 
 # -w to enter "watch & build & run" mode
 if [ -n "$WATCH" ]; then
@@ -67,7 +76,7 @@ if [ -n "$WATCH" ]; then
   while true; do
     printf "\x1bc"  # clear screen ("scroll to top" style)
     BUILD_OK=1
-    ${SHELL:-bash} "./$(basename "$0")" -_w_ "-$BUILD_MODE" "${NINJA_ARGS[@]}" "$@" || BUILD_OK=
+    ${SHELL:-bash} "./$(basename "$0")" -_w_ "${NON_WATCH_ARGS[@]}" "$@" || BUILD_OK=
     printf "\e[2m> watching files for changes...\e[m\n"
     if [ -n "$BUILD_OK" -a -n "$RUN" ]; then
       export ASAN_OPTIONS=detect_stack_use_after_return=1
@@ -142,19 +151,22 @@ if $DEBUG; then
   CFLAGS+=( -O0 -DDEBUG -ferror-limit=6 )
 else
   CFLAGS+=( -DNDEBUG )
-  CFLAGS_HOST+=( -O3 -mtune=native -fomit-frame-pointer )
-  CFLAGS_WASM+=( -Oz )
-  LDFLAGS_WASM+=( -O3 --lto-O3 --no-lto-legacy-pass-manager )
-  LDFLAGS_HOST+=( -dead_strip )
   # LDFLAGS_WASM+=( -z stack-size=$[128 * 1024] ) # larger stack, smaller heap
-  $CC_IS_CLANG && CFLAGS+=( -flto )
-  $CC_IS_CLANG && LDFLAGS_HOST+=( -flto )
+  CFLAGS_HOST+=( -O3 -mtune=native )
+  CFLAGS_WASM+=( -Oz )
+  if ! $DEBUGGABLE; then
+    CFLAGS_HOST+=( -fomit-frame-pointer )
+    LDFLAGS_HOST+=( -dead_strip )
+    LDFLAGS_WASM+=( -O3 --lto-O3 --no-lto-legacy-pass-manager )
+    $CC_IS_CLANG && CFLAGS+=( -flto )
+    $CC_IS_CLANG && LDFLAGS_HOST+=( -flto )
+  fi
 fi
 
 if $STRIP; then
   LDFLAGS_WASM+=( --compress-relocations --strip-debug )
   LDFLAGS_HOST+=( -Wl,-s )
-else
+elif $DEBUGGABLE; then
   CFLAGS+=( -g -feliminate-unused-debug-types )
 fi
 

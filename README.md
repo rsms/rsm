@@ -29,9 +29,10 @@ TODO
 
 ## Building & running
 
-```
+```sh
 ./build.sh -debug
-./out/rsm -R0=15 examples/factorial.rsm
+./out/rsm -d -R0=15 examples/factorial.rsm
+# R0 will contain the result 1307674368000
 ```
 
 You'll need the following things to build rsm:
@@ -42,16 +43,16 @@ You'll need the following things to build rsm:
 You can use `rsm` as a really awkward calculator:
 
 ```sh
-$ echo 'fun x() { R0 = R0 * 2; ret; }' | out/rsm -R0=123
-246
+$ echo 'fun x() { R0 = R0 * 2; ret; }' | out/rsm -d -R0=123
+# R0 will contain the result 246
 ```
 
 RSM assembly can be compiled into a ROM file which can later be executed:
 
 ```sh
 $ echo 'fun x() { R0 = R0 * 2; ret; }' | out/rsm -o multiply.rom
-$ out/rsm -R0=123 multiply.rom
-246
+$ out/rsm -d -R0=123 multiply.rom
+# R0 will contain the result 246
 ```
 
 ## Example
@@ -61,17 +62,17 @@ $ cat <<EXAMPLE > example.rsm
 fun factorial(i32) i32 {
     R1 = R0        // ACC = n (argument 0)
     R0 = 1         // RES (return value 0)
-    brz R1 end     // if n==0 goto end
+    ifz R1 end     // if n==0 goto end
   b1:              // <- [b0] b1
     R0 = R1 * R0   // RES = ACC * RES
     R1 = R1 - 1    // ACC = ACC - 1
-    br R1 b1       // if n!=0 goto b1
+    if R1 b1       // if n!=0 goto b1
   end:             // <- b0 [b1]
     ret            // RES is at R0
 }
 EXAMPLE
-$ out/rsm -R0=15 example.rsm
-1307674368000
+$ out/rsm -d -R0=15 example.rsm
+# R0 will contain the result1307674368000
 ```
 
 See the `examples/` directory for more.

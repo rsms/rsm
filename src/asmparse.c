@@ -95,6 +95,13 @@ static rnode_t* appendchild(rnode_t* parent, rnode_t* child) {
   return parent;
 }
 
+static rnode_t* setchildren1(rnode_t* parent, rnode_t* child1) {
+  parent->children.head = child1;
+  parent->children.tail = child1;
+  assert(child1->next == NULL);
+  return parent;
+}
+
 static rnode_t* setchildren2(rnode_t* parent, rnode_t* child1, rnode_t* nullable child2) {
   parent->children.head = child1;
   parent->children.tail = child2 ? child2 : child1;
@@ -280,6 +287,7 @@ static u32 sstring_multiline(pstate* p, const char* start, const char* end) {
   }
   return extralen;
 }
+
 
 static void sstring_buffered(pstate* p, u32 extralen, bool ismultiline) {
   const char* src = p->tokstart + 1;
@@ -517,9 +525,10 @@ static void sadvance(pstate* p) { // scan the next token
     case '&': p->tok = RT_AMP; return;
     case '|': p->tok = RT_PIPE; return;
     case '^': p->tok = RT_HAT; return;
+    case '~': p->tok = RT_TILDE; return;
     case '!':
       if (*p->inp == '=') { p->inp++; p->tok = RT_NEQ; return; } // !=
-      return serr(p, "unexpected token \"!\"");
+      p->tok = RT_NOT; return; // !
     case '=':
       if (*p->inp == '=') { p->inp++; p->tok = RT_EQ; return; } // ==
       p->tok = RT_ASSIGN; return; // =
@@ -946,21 +955,6 @@ static rnode_t* poperands(PPARAMS, rnode_t* n) {
   return n;
 }
 
-// static rnode_t* pcall(PPARAMS, rnode_t* n) {
-//   dlog("CALL");
-//   // call destination is the only operand
-//   rnode_t* operand = poperand(PARGS);
-//   appendchild(n, operand);
-
-//   // [sugar] remaining operands prepended as args R0...
-//   while (p->tok != RT_SEMI && p->tok != RT_END) {
-//     rnode_t* arg = poperand(PARGS);
-//     appendchild(n, operand);
-//   }
-
-//   if (n->children.head) for (rnode_t* arg = )
-// }
-
 // operation = op operand*
 static rnode_t* prefix_op(PPARAMS) {
   rnode_t* n = prefix_int(PARGS);
@@ -969,7 +963,24 @@ static rnode_t* prefix_op(PPARAMS) {
   return poperands(PARGS, n);
 }
 
-// binop = operand ("-" | "+" | "*" | "/") operand
+// unaryop = unary_op operand
+static rnode_t* prefix_unaryop(PPARAMS) {
+  rnode_t* n = mknode(p);
+  sadvance(p);
+  rnode_t* operand = poperand(PARGS);
+  // set n->ival by mapping token to opcode
+  switch (n->t) {
+    #define _(TOK, op_u, op_s) \
+      case TOK: n->ival = nsigned(operand) ? rop_##op_s : rop_##op_u; break;
+    RSM_FOREACH_UNARYOP_TOKEN(_)
+    #undef _
+    default: assertf(0,"n->t %u (%s)", n->t, tokname(n->t));
+  }
+  n->t = RT_OP;
+  return setchildren1(n, operand);
+}
+
+// binop = operand binary_op operand
 static rnode_t* infix_binop(PPARAMS, rnode_t* lhs) {
   rnode_t* n = mknode(p);
   sadvance(p);
@@ -1128,6 +1139,10 @@ static const parselet_t parsetab[rtok_COUNT] = {
 
   #define _(tok, ...) [tok] = {NULL, infix_binop, PREC_BINOP},
   RSM_FOREACH_BINOP_TOKEN(_)
+  #undef _
+
+  #define _(tok, ...) [tok] = {prefix_unaryop, NULL, PREC_UNARY_PREFIX},
+  RSM_FOREACH_UNARYOP_TOKEN(_)
   #undef _
 
   [RT_INTLIT2]   = {prefix_int, NULL, 0},

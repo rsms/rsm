@@ -11,6 +11,7 @@ const char* tokname(rtok_t t) {
   #define _(name, ...) case name: return &#name[3]; // [3] to skip "RT_" prefix
   RSM_FOREACH_TOKEN(_)
   RSM_FOREACH_BINOP_TOKEN(_)
+  RSM_FOREACH_UNARYOP_TOKEN(_)
   RSM_FOREACH_KEYWORD_TOKEN(_)
   #undef _
   }

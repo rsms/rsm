@@ -615,6 +615,12 @@ _( RT_GT    , GTU  , GTS  ) /* > */ \
 _( RT_LTE   , LTEU , LTES ) /* <= */ \
 _( RT_GTE   , GTEU , GTES ) /* >= */ \
 // end RSM_FOREACH_BINOP_TOKEN
+// RSM_FOREACH_UNARYOP_TOKEN maps a prefix binary operation to opcodes,
+// allowing e.g. "~x" as an alternative to "binv x"
+#define RSM_FOREACH_UNARYOP_TOKEN(_) /* token, unsigned_op, signed_op */\
+_( RT_TILDE , BINV , BINV ) /* ~ */ \
+_( RT_NOT   , NOT  , NOT  ) /* ! */ \
+// end RSM_FOREACH_UNARYOP_TOKEN
 #define RSM_FOREACH_KEYWORD_TOKEN(_) \
 _( RT_I1   , "i1"   ) \
 _( RT_I8   , "i8"   ) \
@@ -629,6 +635,7 @@ enum rtok {
   #define _(name, ...) name,
   RSM_FOREACH_TOKEN(_)
   RSM_FOREACH_BINOP_TOKEN(_)
+  RSM_FOREACH_UNARYOP_TOKEN(_)
   RSM_FOREACH_KEYWORD_TOKEN(_)
   #undef _
   rtok_COUNT

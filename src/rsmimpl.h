@@ -729,7 +729,8 @@ void rsm_qsort(void* base, usize nmemb, usize size, rsm_qsort_cmp cmp, void* nul
 // --------------------------------------------------------------------------------------
 // internal utility functions, like a string buffer. Not namespaced. See util.c
 
-#define PAGE_SIZE  RSM_PAGE_SIZE
+#define PAGE_SIZE       RSM_PAGE_SIZE
+#define PAGE_SIZE_BITS  12u /* ILOG2(PAGE_SIZE) */
 
 #define UTF8_SELF  0x80 // UTF-8 "self" byte constant
 

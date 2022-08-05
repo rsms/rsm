@@ -194,6 +194,16 @@ static_assert(PAGE_SIZE >= sizeof(u64), "PAGE_SIZE too small");
 static_assert(PAGE_SIZE <= 65536,       "PAGE_SIZE too large");
 
 
+static_assert(ALIGN2_X(9, 2) == 10, "");
+static_assert(ALIGN2_X(9, 4) == 12, "");
+static_assert(ALIGN2_X(9, 8) == 16, "");
+static_assert(ALIGN2_X(9, 16) == 16, "");
+static_assert(ALIGN2_X(9, 32) == 32, "");
+
+
+static_assert(ILOG2(PAGE_SIZE) == PAGE_SIZE_BITS, "update PAGE_SIZE_BITS");
+
+
 char abuf_zeroc = 0;
 
 

@@ -56,7 +56,7 @@
 #define RMEM_SLABHEAP_ENABLE
 
 // RMEM_SLABHEAP_ENABLE_EAGER_ALLOC: define to allocate slab space up front
-// Note: test_rmem assumes expects this to NOT be defined.
+// Note: test_rmem_alloc assumes expects this to NOT be defined.
 //#define RMEM_SLABHEAP_ENABLE_EAGER_ALLOC
 
 // SLABHEAP_COUNT dictates the slabheap size classes in increasing pow2, starting
@@ -1310,7 +1310,7 @@ const char* rmem_scrubcheck(void* ptr, usize size) {
 
 
 #if defined(RMEM_RUN_TEST_ON_INIT) && DEBUG
-static void test_rmem() {
+static void test_rmem_alloc() {
   // verbose?
   //#define tlog dlog
   #ifndef tlog
@@ -1328,8 +1328,7 @@ static void test_rmem() {
     usize allocator_size = ALIGN2(sizeof(rmemalloc_t), PAGE_SIZE);
     usize memsize = CEIL_POW2((allocator_size / PAGE_SIZE) + 8) * PAGE_SIZE;
     tlog("memsize %zu (%zu pages)", memsize, memsize / PAGE_SIZE);
-    void* memp = assertnotnull( osvmem_alloc(memsize) );
-    rmm_t* mm = assertnotnull( rmm_create(memp, memsize) );
+    rmm_t* mm = assertnotnull( rmm_create_host_vmmap(memsize) );
 
     usize npages = rmm_avail_total(mm);
     while (npages--)
@@ -1337,7 +1336,6 @@ static void test_rmem() {
 
     assertnull( rmem_allocator_create(mm, 0) );
 
-    osvmem_free(memp, memsize);
     rmm_dispose(mm);
   }
 
@@ -1346,8 +1344,7 @@ static void test_rmem() {
     tlog("————————————————————————————————");
     usize allocator_size = ALIGN2(sizeof(rmemalloc_t), PAGE_SIZE);
     usize memsize = CEIL_POW2((allocator_size / PAGE_SIZE) + 8) * PAGE_SIZE;
-    void* memp = assertnotnull( osvmem_alloc(memsize) );
-    rmm_t* mm = assertnotnull( rmm_create(memp, memsize) );
+    rmm_t* mm = assertnotnull( rmm_create_host_vmmap(memsize) );
 
     // allocate all pages but what's required for the allocator
     // (must allocate one at a time since rmm_allocpages needs pow2(count))
@@ -1362,7 +1359,6 @@ static void test_rmem() {
     assertf(rmem_avail(a) < PAGE_SIZE, "rmem_avail(a) => %zu", rmem_avail(a));
 
     rmem_allocator_free(a);
-    osvmem_free(memp, memsize);
     rmm_dispose(mm);
   }
 
@@ -1370,8 +1366,7 @@ static void test_rmem() {
   {
     tlog("————————————————————————————————");
     usize memsize = (SLABHEAP_BLOCK_SIZE * 2) + PAGE_SIZE*3;
-    void* memp = assertnotnull( osvmem_alloc(memsize) );
-    rmm_t* mm = assertnotnull( rmm_create(memp, memsize) );
+    rmm_t* mm = assertnotnull( rmm_create_host_vmmap(memsize) );
 
     // create an allocator
     rmemalloc_t* a = rmem_allocator_create(mm, rmm_avail_maxregion(mm) * PAGE_SIZE);
@@ -1388,15 +1383,13 @@ static void test_rmem() {
 
     rmem_allocator_free(a);
     rmm_dispose(mm);
-    osvmem_free(memp, memsize);
   }
 
   // test "expand fails (out of memory) by requesting more pages from mm"
   {
     tlog("————————————————————————————————");
     usize memsize = (SLABHEAP_BLOCK_SIZE * 2) + PAGE_SIZE*3;
-    void* memp = assertnotnull( osvmem_alloc(memsize) );
-    rmm_t* mm = assertnotnull( rmm_create(memp, memsize) );
+    rmm_t* mm = assertnotnull( rmm_create_host_vmmap(memsize) );
 
     // create an allocator
     rmemalloc_t* a = rmem_allocator_create(mm, rmm_avail_maxregion(mm) * PAGE_SIZE);
@@ -1407,15 +1400,13 @@ static void test_rmem() {
 
     rmem_allocator_free(a);
     rmm_dispose(mm);
-    osvmem_free(memp, memsize);
   }
 
   // test "expand succeeds by requesting more pages from mm"
   {
     tlog("————————————————————————————————");
     usize memsize = (SLABHEAP_BLOCK_SIZE * 16) + PAGE_SIZE*3;
-    void* memp = assertnotnull( osvmem_alloc(memsize) );
-    rmm_t* mm = assertnotnull( rmm_create(memp, memsize) );
+    rmm_t* mm = assertnotnull( rmm_create_host_vmmap(memsize) );
 
     // create an allocator
     rmemalloc_t* a = rmem_allocator_create(mm, SLABHEAP_BLOCK_SIZE * 2);
@@ -1427,7 +1418,6 @@ static void test_rmem() {
 
     rmem_allocator_free(a);
     rmm_dispose(mm);
-    osvmem_free(memp, memsize);
   }
 
   { // invalid regions
@@ -1460,7 +1450,7 @@ static void test_rmem() {
   // create a memory manager
   tlog("————————————————————————————————");
   usize memsize = 16 * MiB;
-  rmm_t* mm = rmm_create(assertnotnull( osvmem_alloc(memsize) ), memsize);
+  rmm_t* mm = assertnotnull( rmm_create_host_vmmap(memsize) );
 
   // create an allocator with ~4MiB initial memory
   rmemalloc_t* a = assertnotnull( rmem_allocator_create(mm, 4 * MiB) );
@@ -1583,7 +1573,6 @@ static void test_rmem() {
 
   rmem_allocator_free(a);
   rmm_dispose(mm);
-  osvmem_free((void*)rmm_startaddr(mm), memsize);
 
   dlog("————————— END %s —————————", __FUNCTION__);
 }
@@ -1592,7 +1581,7 @@ static void test_rmem() {
 
 rerr_t init_rmem() {
   #if defined(RMEM_RUN_TEST_ON_INIT) && DEBUG
-  test_rmem();
+  test_rmem_alloc();
   #endif
   // currently nothing to initialize
   return 0;

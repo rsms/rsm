@@ -376,7 +376,6 @@ typedef struct rmm_ rmm_t;
 rmm_t* nullable rmm_create(void* memp, usize memsize);
 rmm_t* nullable rmm_create_host_vmmap(usize memsize);
 void rmm_dispose(rmm_t*);
-bool rmm_dispose_host_vmmap(rmm_t* mm);
 void* nullable rmm_allocpages(rmm_t*, usize npages);
 void rmm_freepages(rmm_t* restrict mm, void* restrict ptr);
 uintptr rmm_startaddr(const rmm_t*);

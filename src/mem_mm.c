@@ -57,10 +57,10 @@
 // MAX_ORDER_NPAGES: number of pages that can fit into the largest order
 #define MAX_ORDER_NPAGES  (1lu << MAX_ORDER)
 
-// RMM_TRACE: uncomment to enable logging a lot of info via dlog
+// RMM_TRACE: define to enable logging a lot of info via dlog
 //#define RMM_TRACE
 
-// RMM_RUN_TEST_ON_INIT: uncomment to run tests during init_mm
+// RMM_RUN_TEST_ON_INIT: define to run tests during init_mm
 #define RMM_RUN_TEST_ON_INIT
 
 
@@ -72,6 +72,7 @@ typedef struct rmm_ {
   u8*     bitsets[MAX_ORDER + 1];
   ilist_t freelists[MAX_ORDER + 1];
   //usize nalloc[MAX_ORDER + 1]; // number of allocations per order
+  bool owns_host_vmmap; // true if rmm_dispose should call osvmem_free
 } rmm_t;
 
 
@@ -297,6 +298,7 @@ rmm_t* nullable rmm_create(void* memp, usize memsize) {
   // start                            end
   //
   rmm_t* mm = (rmm_t*)ALIGN2_FLOOR(end - sizeof(rmm_t), _Alignof(rmm_t));
+  mm->owns_host_vmmap = false;
   trace("mm at      %p … %p (%zu B)", mm, (void*)mm + sizeof(rmm_t), sizeof(rmm_t));
 
   // adjust memsize to the usable space at start (memsize = mm - start)
@@ -422,24 +424,27 @@ out_of_memory:
 }
 
 
-void rmm_dispose(rmm_t* mm) {
-  // nothing to do, but maybe in the future
-}
-
-
 rmm_t* nullable rmm_create_host_vmmap(usize memsize) {
-  void* p = osvmem_alloc(memsize);
-  if (!p)
+  void* ptr = osvmem_alloc(memsize);
+  if (!ptr)
     return NULL;
-  return rmm_create(p, memsize);
+  rmm_t* mm = rmm_create(ptr, memsize);
+  if (!mm) {
+    osvmem_free(ptr, memsize);
+    return NULL;
+  }
+  mm->owns_host_vmmap = true;
+  return mm;
 }
 
 
-bool rmm_dispose_host_vmmap(rmm_t* mm) {
-  rmm_dispose(mm);
+void rmm_dispose(rmm_t* mm) {
+  if (!mm->owns_host_vmmap)
+    return;
   void* ptr = (void*)rmm_startaddr(mm);
   usize size = ALIGN2(mm->end_addr - mm->start_addr, mem_pagesize());
-  return osvmem_free(ptr, size);
+  if (!osvmem_free(ptr, size))
+    dlog("rmm_dispose failed to release memory back to host with osvmem_free");
 }
 
 

@@ -95,7 +95,7 @@ typedef unsigned long       usize;
   #define ALWAYS_INLINE inline
 #endif
 #if __has_attribute(noinline)
-  #define NOINLINE __attribute__((noinline)) inline
+  #define NOINLINE __attribute__((noinline))
 #else
   #define NOINLINE
 #endif
@@ -773,7 +773,8 @@ noreturn void _panic(const char* file, int line, const char* fun, const char* fm
 //   "freed"   possibly "use after free"
 const char* rmem_scrubcheck(void* ptr, usize size);
 
-usize mem_pagesize();
+// host memory functions
+usize os_pagesize();
 void* nullable osvmem_alloc(usize nbytes);
 bool osvmem_free(void* ptr, usize nbytes);
 

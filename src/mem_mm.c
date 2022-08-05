@@ -442,7 +442,7 @@ void rmm_dispose(rmm_t* mm) {
   if (!mm->owns_host_vmmap)
     return;
   void* ptr = (void*)rmm_startaddr(mm);
-  usize size = ALIGN2(mm->end_addr - mm->start_addr, mem_pagesize());
+  usize size = ALIGN2(mm->end_addr - mm->start_addr, os_pagesize());
   if (!osvmem_free(ptr, size))
     dlog("rmm_dispose failed to release memory back to host with osvmem_free");
 }
@@ -509,7 +509,7 @@ static void test_rmm() {
 
 rerr_t init_mm() {
   // check that PAGE_SIZE is an even multiple (or divisor) of host pagesize
-  usize host_pagesize = mem_pagesize();
+  usize host_pagesize = os_pagesize();
   if (host_pagesize % PAGE_SIZE && PAGE_SIZE % host_pagesize) {
     assertf(0, "PAGE_SIZE (%u) not a multiple of host page size (%zu)",
       PAGE_SIZE, host_pagesize);

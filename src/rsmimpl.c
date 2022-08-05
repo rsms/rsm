@@ -493,7 +493,7 @@ noreturn void _panic(const char* file, int line, const char* fun, const char* fm
 }
 
 
-usize mem_pagesize() {
+usize os_pagesize() {
   return (usize)MEM_PAGESIZE;
 }
 

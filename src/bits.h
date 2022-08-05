@@ -5,7 +5,7 @@ RSM_ASSUME_NONNULL_BEGIN
 
 
 inline static bool bit_get(const void* bits, usize bit) {
-  return ((u8*)bits)[bit / 8] & (1lu << (bit % 8));
+  return !!( ((u8*)bits)[bit / 8] & (1lu << (bit % 8)) );
 }
 
 inline static void bit_set(void* bits, usize bit) {

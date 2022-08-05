@@ -253,7 +253,7 @@ typedef unsigned long       usize;
   ( (x) + atmp__ ) & ~atmp__; \
 })
 #define ALIGN2_X(x,a) ( \
-  ( (x) + ((__typeof__(x))(a) - 1) ) & ~((__typeof__(x))(a) - 1); \
+  ( (x) + ((__typeof__(x))(a) - 1) ) & ~((__typeof__(x))(a) - 1) \
 )
 
 // T ALIGN2_FLOOR<T>(T x, anyuint a) rounds down x to nearest a

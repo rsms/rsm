@@ -238,7 +238,7 @@ static uintptr vm_cache_add(vm_cache_t* cache, u64 vaddr, uintptr haddr) {
 
 
 uintptr _vm_cache_miss(vm_cache_t* cache, vm_pagedir_t* pagedir, u64 vaddr, vm_op_t op) {
-  trace("%s 0x%llx", __FUNCTION__, vaddr);
+  trace("%s 0x%llx op=0x%x", __FUNCTION__, vaddr, op);
 
   // check validity
   if UNLIKELY(VM_ADDR_MIN > vaddr || vaddr > VM_ADDR_MAX) {
@@ -247,10 +247,9 @@ uintptr _vm_cache_miss(vm_cache_t* cache, vm_pagedir_t* pagedir, u64 vaddr, vm_o
   }
 
   // check alignment
-  u64 alignment = op & 0xff;
-  if UNLIKELY(!IS_ALIGN2(vaddr, alignment)) {
-    const char* opname = (op >> 8) == VM_OP_LOAD ? "load from" : "store to";
-    panic("misaligned %lluB %s 0x%llx", alignment, opname, vaddr);
+  if UNLIKELY(!IS_ALIGN2(vaddr, VM_OP_ALIGNMENT(op))) {
+    const char* opname = VM_OP_TYPE(op) == VM_OP_LOAD ? "load from" : "store to";
+    panic("misaligned %uB %s 0x%llx", VM_OP_ALIGNMENT(op), opname, vaddr);
   }
 
   u64 vfn = VM_VFN(vaddr);
@@ -347,7 +346,7 @@ static void test_vm() {
     // loading the same address, which is 4B aligned, with a type of stronger
     // alignment will cause a cache miss and subsequent alignment error.
     // ——WIP—— (see vm_translate)
-    //value = (u64)VM_LOAD(u64, cache, pagedir, vaddr);
+    value = (u64)VM_LOAD(u64, cache, pagedir, vaddr);
   }
 
 

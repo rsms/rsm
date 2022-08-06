@@ -230,6 +230,8 @@ enum vm_op {
   VM_OP_LOAD_64  = VM_OP_LOAD + 64,
   VM_OP_LOAD_128 = VM_OP_LOAD + 128,
 };
+#define VM_OP_ALIGNMENT(op) ( (op) & 0xff ) /* e.g. 2, 4, 8 ... */
+#define VM_OP_TYPE(op)      ( (op) & (~0u << 8) ) /* e.g. VM_OP_LOAD, VM_OP_STORE */
 
 
 // vm_pagedir_init initializes a new vm_pagedir_t, sourcing backing memory from mm.

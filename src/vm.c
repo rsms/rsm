@@ -311,24 +311,6 @@ static void test_vm() {
   //   vm_cache_del(cache, vaddr);
   // }
 
-  // u64 addr = 0xffffffffffffffff;
-  // u64 mask = 0xff000;
-  // // 0000000000000000000000000000000000000000000011111111000000000000
-  // // mask = (u64)(addr) & VM_ADDR_PAGE_MASK;
-  // // mask = ~0llu << PAGE_SIZE_BITS;
-  // mask = VM_ADDR_PAGE_MASK;
-  // // 0000000000000000111111111111111111111111111111111111000000000000
-  // //
-  // mask = VM_CACHE_INDEX_VFN_MASK;
-  // //
-  u64 index = VM_CACHE_INDEX_VFN_MASK;
-  // dlog("addr   %s", debug_fmt_bits(&addr, 64));
-  // dlog("mask   %s", debug_fmt_bits(&mask, 64));
-  dlog("index  %s", debug_fmt_bits(&index, 64));
-  // dlog("       %llu", index);
-
-  // panic("LOLCAT");
-
 
   { // do full real lookup with cache
     u64 vaddr = 0xdeadbee4;
@@ -346,7 +328,7 @@ static void test_vm() {
     // loading the same address, which is 4B aligned, with a type of stronger
     // alignment will cause a cache miss and subsequent alignment error.
     // ——WIP—— (see vm_translate)
-    value = (u64)VM_LOAD(u64, cache, pagedir, vaddr);
+    //value = (u64)VM_LOAD(u64, cache, pagedir, vaddr);
   }
 
 

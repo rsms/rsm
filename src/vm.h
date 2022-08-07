@@ -86,10 +86,11 @@ RSM_ASSUME_NONNULL_BEGIN
 // to be very efficient. We can't just sprinkle if...else checks around.
 //
 // So what we do is this trick by comparing the tag of the cache entry;
-// we simply AND the virtual address with a cache entry's tag:
-// if the result is the page address--i.e. the address without page offset--we know
-// that it is both a valid cache entry for this page and that the address's alignment
-// is correct. Since we don't mask out the bottom (alignment-1) bits, if the address
+// we simply AND the virtual address with the TAG_MASK for the operation's alignment
+// requirement and then compare the result with the cache entry's tag:
+// if they are equal we know that it is both a valid cache entry for this page
+// _and_ that the address's alignment is correct.
+// Since we don't mask out the bottom (alignment-1) bits, if the address
 // has invalid alignment, the bottom bits will be set in the resulting tag and the
 // check will fail (and we take a slow path to figure out what's going on.)
 //

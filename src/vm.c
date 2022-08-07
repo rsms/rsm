@@ -185,7 +185,7 @@ static vm_pte_t vm_pagedir_lookup_pte(vm_pagedir_t* pagedir, u64 vfn) {
 
 
 #ifdef VM_TRACE
-  static const char* debug_fmt_bits(const void* bits, usize len) {
+  UNUSED static const char* debug_fmt_bits(const void* bits, usize len) {
     static char bufs[2][128];
     static int nbuf = 0;
     char* buf = bufs[nbuf++ % 2];
@@ -232,7 +232,7 @@ static uintptr vm_cache_add(vm_cache_t* cache, u64 vaddr, uintptr haddr) {
   assertf(IS_ALIGN2(haddr, PAGE_SIZE), "haddr is not a page address %p", (void*)haddr);
   vm_cache_ent_t* entry = VM_CACHE_ENTRY(cache, vaddr);
   entry->haddr = haddr;
-  entry->tag = (u64)(vaddr) & VM_ADDR_PAGE_MASK;
+  entry->tag = VM_PAGE_ADDR(vaddr);
   return haddr;
 }
 

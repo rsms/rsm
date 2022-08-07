@@ -272,7 +272,7 @@ uintptr vm_cache_lookup(vm_cache_t*, u64 vaddr);
 // _vm_cache_miss is called by vm_translate to resolve vaddr using a page directory.
 // The address is checked for alignment according to vm_op_t.
 // Finally, the entry is added to to the cache.
-// Returns the resolved host page address.
+// Returns vm_cache_ent_t.haddr_diff
 uintptr _vm_cache_miss(vm_cache_t*, vm_pagedir_t*, u64 vaddr, vm_op_t);
 
 

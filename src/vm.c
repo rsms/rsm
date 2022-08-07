@@ -346,7 +346,6 @@ static void test_vm() {
 rerr_t init_vmem() {
   #if defined(VM_RUN_TEST_ON_INIT) && DEBUG
   test_vm();
-  // return rerr_canceled;
   #endif
 
   return 0;

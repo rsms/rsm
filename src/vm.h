@@ -141,8 +141,8 @@ RSM_ASSUME_NONNULL_BEGIN
 //      - resolve host page address (hpaddr) in the page directory.
 //      - update the cache entry (set haddr & tag as described earlier.)
 //
-// So, we can implement the cache lookup in only 10 x86_64 or arm64 instructions,
-// which includes a conditional branch and a call to _vm_cache_miss.
+// So, we can implement the cache lookup in only a few (~10) instructions,
+// with a conditional branch and a call to _vm_cache_miss.
 //
 #define VM_CACHE_TAG_MASK(align)  ( VM_ADDR_PAGE_MASK ^ ((u64)(align) - 1llu) )
 

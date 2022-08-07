@@ -205,8 +205,8 @@ typedef struct {
 
 // vm_cache_ent_t is the type of vm_cache_t entries
 typedef struct {
-  uintptr haddr; // address of host page
-  u64     tag;   // virtual address tag
+  u64 haddr_diff; // diff between host page address & virtual page address
+  u64 tag;        // virtual address tag
 } vm_cache_ent_t;
 
 // vm_cache_t is a translation cache (aka TLB; Translation Lookaside Buffer.)
@@ -301,12 +301,12 @@ ALWAYS_INLINE static uintptr vm_translate(
   vm_cache_t* cache, vm_pagedir_t* pagedir, u64 vaddr, u64 align, vm_op_t op)
 {
   u64 index = VM_VFN(vaddr) & VM_CACHE_INDEX_VFN_MASK;
-  u64 tag = vaddr & (VM_ADDR_PAGE_MASK ^ (align - 1llu));
-  return (
-    UNLIKELY(cache->entries[index].tag != tag) ?
-      _vm_cache_miss(cache, pagedir, vaddr, op) :
-      cache->entries[index].haddr
-  ) + VM_ADDR_OFFSET(vaddr);
+  u64 actual_tag = cache->entries[index].tag;
+  u64 expected_tag = vaddr & (VM_ADDR_PAGE_MASK ^ (align - 1llu));
+  uintptr haddr_diff = UNLIKELY( actual_tag != expected_tag ) ?
+    _vm_cache_miss(cache, pagedir, vaddr, op) :
+    cache->entries[index].haddr_diff;
+  return (uintptr)(haddr_diff + vaddr);
 }
 
 

@@ -185,7 +185,7 @@ static vm_pte_t vm_pagedir_lookup_pte(vm_pagedir_t* pagedir, u64 vfn) {
 
 
 #ifdef VM_TRACE
-  UNUSED static const char* debug_fmt_bits(const void* bits, usize len) {
+  UNUSED static const char* fmtbits(const void* bits, usize len) {
     static char bufs[2][128];
     static int nbuf = 0;
     char* buf = bufs[nbuf++ % 2];
@@ -224,45 +224,58 @@ uintptr vm_cache_lookup(vm_cache_t* cache, u64 vaddr) {
   u64 is_valid = entry->tag == (vaddr & VM_CACHE_TAG_MASK(1));
 
   // return the host address (or 0x0 if tag is invalid)
-  return (entry->haddr + VM_ADDR_OFFSET(vaddr)) * is_valid;
+  return (entry->haddr_diff + VM_ADDR_OFFSET(vaddr)) * is_valid;
 }
 
 
-static uintptr vm_cache_add(vm_cache_t* cache, u64 vaddr, uintptr haddr) {
-  assertf(IS_ALIGN2(haddr, PAGE_SIZE), "haddr is not a page address %p", (void*)haddr);
-  vm_cache_ent_t* entry = VM_CACHE_ENTRY(cache, vaddr);
-  entry->haddr = haddr;
-  entry->tag = VM_PAGE_ADDR(vaddr);
-  return haddr;
+// returns vm_cache_ent_t.haddr_diff
+static uintptr vm_cache_add(vm_cache_t* cache, u64 vpaddr, uintptr hpaddr) {
+  assertf(IS_ALIGN2(vpaddr, PAGE_SIZE), "vpaddr not a page address 0x%llx", vpaddr);
+  assertf(IS_ALIGN2(hpaddr, PAGE_SIZE), "hpaddr not a page address %p", (void*)hpaddr);
+
+  vm_cache_ent_t* entry = VM_CACHE_ENTRY(cache, vpaddr);
+  entry->haddr_diff = (u64)hpaddr - vpaddr;
+  entry->tag = vpaddr;
+
+  trace("%s 0x%llx => {.haddr_diff=0x%llx, .tag=0x%llx}",
+    __FUNCTION__, vpaddr, entry->haddr_diff, entry->tag);
+
+  return entry->haddr_diff;
 }
 
 
+// returns vm_cache_ent_t.haddr_diff
 uintptr _vm_cache_miss(vm_cache_t* cache, vm_pagedir_t* pagedir, u64 vaddr, vm_op_t op) {
   trace("%s 0x%llx op=0x%x", __FUNCTION__, vaddr, op);
 
   // check validity
   if UNLIKELY(VM_ADDR_MIN > vaddr || vaddr > VM_ADDR_MAX) {
-    panic("invalid address 0x%llx (out of range)", vaddr);
+    panic("invalid address 0x%llx (out of range)", vaddr); // FIXME
     return 0;
   }
 
   // check alignment
   if UNLIKELY(!IS_ALIGN2(vaddr, VM_OP_ALIGNMENT(op))) {
     const char* opname = VM_OP_TYPE(op) == VM_OP_LOAD ? "load from" : "store to";
-    panic("misaligned %uB %s 0x%llx", VM_OP_ALIGNMENT(op), opname, vaddr);
+    panic("misaligned %uB %s 0x%llx", VM_OP_ALIGNMENT(op), opname, vaddr); // FIXME
   }
 
-  u64 vfn = VM_VFN(vaddr);
-  vm_pte_t pte = vm_pagedir_lookup_pte(pagedir, vfn);
-  uintptr haddr = (uintptr)(pte.outaddr << PAGE_SIZE_BITS);
-  trace("%s 0x%llx -> %p", __FUNCTION__, vaddr, (void*)haddr);
+  // get page table entry for the virtual page address (lookup via VFN)
+  vm_pte_t pte = vm_pagedir_lookup_pte(pagedir, VM_VFN(vaddr));
+  uintptr hpaddr = (uintptr)(pte.outaddr << PAGE_SIZE_BITS); // host page address
 
-  if UNLIKELY(haddr == 0) {
+  trace("%s 0x%llx -> %p", __FUNCTION__, vaddr, (void*)hpaddr);
+
+  // check if the lookup failed
+  if UNLIKELY(hpaddr == 0) {
     trace("invalid address 0x%llx (vm_pagedir_lookup_pte failed)", vaddr);
     return 0;
   }
 
-  return vm_cache_add(cache, vaddr, haddr);
+  // add to cache
+  // TODO: in the future, check pte "uncacheable" bit here
+  u64 vpaddr = VM_PAGE_ADDR(vaddr);
+  return vm_cache_add(cache, vpaddr, hpaddr);
 }
 
 
@@ -277,6 +290,30 @@ static void test_vm() {
   dlog("VFN_BITS:       %5u", VFN_BITS);
   dlog("VM_PTAB_LEVELS:    %5u", VM_PTAB_LEVELS);
   dlog("VM_PTAB_BITS:      %5u", VM_PTAB_BITS);
+
+  { // test the "store host page address diff in cache" logic
+    const struct { u64 vaddr, hpage; } tests[] = {
+      { 0xdeadbee4, 0x1065f0000 },
+      { 0x1065f0000, 0xdeadbee4 },
+    };
+    for (usize i = 0; i < countof(tests); i++) {
+      u64 vaddr = tests[i].vaddr;
+      u64 hpage = tests[i].hpage;
+      u64 vpage = vaddr & VM_ADDR_PAGE_MASK; // VM_PAGE_ADDR(vaddr)
+      u64 diff = hpage - vpage;
+      u64 haddr = diff + vaddr;
+      u64 haddr_expected = hpage + VM_ADDR_OFFSET(vaddr);
+
+      // log("vaddr  0x%-10llx %s", vaddr, fmtbits(&vaddr,64));
+      // log("vpage  0x%-10llx %s", vpage, fmtbits(&vpage,64));
+      // log("hpage  0x%-10llx %s", hpage, fmtbits(&hpage,64));
+      // log("diff   0x%-10llx %s",  diff, fmtbits(&diff,64));
+      // log("haddr  0x%-10llx %s", haddr, fmtbits(&haddr,64));
+      // log("haddr′ 0x%-10llx %s", haddr_expected, fmtbits(&haddr_expected,64));
+
+      assert(haddr == haddr_expected);
+    }
+  }
 
   // create a memory manager
   usize memsize = 4 * MiB;
@@ -330,7 +367,6 @@ static void test_vm() {
     // ——WIP—— (see vm_translate)
     //value = (u64)VM_LOAD(u64, cache, pagedir, vaddr);
   }
-
 
   // // allocate all pages (should panic just shy of rmm_avail_total pages)
   // for (u64 vaddr = VM_ADDR_MIN; vaddr <= VM_ADDR_MAX; vaddr += PAGE_SIZE) {

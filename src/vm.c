@@ -210,26 +210,19 @@ void vm_cache_invalidate(vm_cache_t* cache) {
 }
 
 
-uintptr vm_cache_lookup(vm_cache_t* cache, u64 vaddr) {
-  u64 vfn = VM_VFN(vaddr); // vaddr_to_vfn()
-
-  // calculate hash index; the bottom VM_CACHE_INDEX_BITS bits of the VFN.
-  // e.g. 0xdeadbeef => VFN 0xdeadb => hash index 0xdb (219)
-  usize index = (usize)(vfn & VM_CACHE_INDEX_VFN_MASK);
-
-  // load the hash table entry
-  vm_cache_ent_t* entry = &cache->entries[index];
-
-  // check tag value
-  u64 is_valid = entry->tag == (vaddr & VM_CACHE_TAG_MASK(1));
-
-  // return the host address (or 0x0 if tag is invalid)
-  return (entry->haddr_diff + VM_ADDR_OFFSET(vaddr)) * is_valid;
+// vm_cache_lookup looks up the host page address for a virtual address.
+// Returns the host address, or 0 if the virtual page is not present in the cache.
+static uintptr vm_cache_lookup(vm_cache_t* cache, u64 vaddr, u64 alignment) {
+  u64 index = VM_VFN(vaddr) & VM_CACHE_INDEX_VFN_MASK;
+  u64 actual_tag = cache->entries[index].tag;
+  u64 expected_tag = vaddr & (VM_ADDR_PAGE_MASK ^ (alignment - 1llu));
+  u64 is_valid = actual_tag == expected_tag;
+  return (uintptr)(cache->entries[index].haddr_diff + vaddr) * is_valid;
 }
 
 
 // returns vm_cache_ent_t.haddr_diff
-static uintptr vm_cache_add(vm_cache_t* cache, u64 vpaddr, uintptr hpaddr) {
+static u64 vm_cache_add(vm_cache_t* cache, u64 vpaddr, uintptr hpaddr) {
   assertf(IS_ALIGN2(vpaddr, PAGE_SIZE), "vpaddr not a page address 0x%llx", vpaddr);
   assertf(IS_ALIGN2(hpaddr, PAGE_SIZE), "hpaddr not a page address %p", (void*)hpaddr);
 
@@ -245,7 +238,7 @@ static uintptr vm_cache_add(vm_cache_t* cache, u64 vpaddr, uintptr hpaddr) {
 
 
 // returns vm_cache_ent_t.haddr_diff
-uintptr _vm_cache_miss(vm_cache_t* cache, vm_pagedir_t* pagedir, u64 vaddr, vm_op_t op) {
+u64 _vm_cache_miss(vm_cache_t* cache, vm_pagedir_t* pagedir, u64 vaddr, vm_op_t op) {
   trace("%s 0x%llx op=0x%x", __FUNCTION__, vaddr, op);
 
   // check validity
@@ -338,18 +331,19 @@ static void test_vm() {
   //   dlog("vaddr 0x%llx => host address 0x%lx (page 0x%lx)", vaddr, haddr, hpage);
   // }
 
-  // // look up address in cache
-  // { u64 vaddr = 0xdeadbeef;
-  //   uintptr haddr = vm_cache_lookup(cache, vaddr);
-  //   dlog("vm_cache_lookup(0x%llx) => %p", vaddr, (void*)haddr);
-  //   vm_cache_add(cache, vaddr, 0x1044f0ee0);
-  //   haddr = vm_cache_lookup(cache, vaddr);
-  //   dlog("vm_cache_lookup(0x%llx) => %p", vaddr, (void*)haddr);
-  //   vm_cache_del(cache, vaddr);
-  // }
+  // make sure cache lookups work
+  { u64 vaddr = 0xdeadbeef;
+    assert(vm_cache_lookup(cache, vaddr, 1) == 0);
+    vm_cache_add(cache, VM_PAGE_ADDR(vaddr), 0x1044f000);
+    uintptr haddr = vm_cache_lookup(cache, vaddr, 1);
+    //dlog("vm_cache_lookup(0x%llx) => %p", vaddr, (void*)haddr);
+    assert(haddr == 0x1044feef);
+    vm_cache_invalidate_one(cache, vaddr);
+    assert(vm_cache_lookup(cache, vaddr, 1) == 0);
+  }
 
 
-  { // do full real lookup with cache
+  { // perform full real memory operations with virtual memory
     u64 vaddr = 0xdeadbee4;
     u32 value = 12345;
     dlog("VM_STORE(u32, 0x%llx, %u)", vaddr, value);

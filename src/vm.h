@@ -265,15 +265,11 @@ ALWAYS_INLINE void vm_cache_invalidate_one(vm_cache_t* cache, u64 vaddr) {
   VM_CACHE_ENTRY(cache, vaddr)->tag = VM_CACHE_DEL_TAG;
 }
 
-// vm_cache_lookup looks up the host page address for a virtual address.
-// Returns 0 if the virtual page is not present in the cache.
-uintptr vm_cache_lookup(vm_cache_t*, u64 vaddr);
-
 // _vm_cache_miss is called by vm_translate to resolve vaddr using a page directory.
 // The address is checked for alignment according to vm_op_t.
 // Finally, the entry is added to to the cache.
 // Returns vm_cache_ent_t.haddr_diff
-uintptr _vm_cache_miss(vm_cache_t*, vm_pagedir_t*, u64 vaddr, vm_op_t);
+u64 _vm_cache_miss(vm_cache_t*, vm_pagedir_t*, u64 vaddr, vm_op_t);
 
 
 // VM_STORE performs a store to host memory using a virtual address.
@@ -303,7 +299,7 @@ ALWAYS_INLINE static uintptr vm_translate(
   u64 index = VM_VFN(vaddr) & VM_CACHE_INDEX_VFN_MASK;
   u64 actual_tag = cache->entries[index].tag;
   u64 expected_tag = vaddr & (VM_ADDR_PAGE_MASK ^ (align - 1llu));
-  uintptr haddr_diff = UNLIKELY( actual_tag != expected_tag ) ?
+  u64 haddr_diff = UNLIKELY( actual_tag != expected_tag ) ?
     _vm_cache_miss(cache, pagedir, vaddr, op) :
     cache->entries[index].haddr_diff;
   return (uintptr)(haddr_diff + vaddr);

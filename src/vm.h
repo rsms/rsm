@@ -46,7 +46,7 @@ RSM_ASSUME_NONNULL_BEGIN
 // "tag" value of a vm cache entry to both verify that the entry's address
 // is correct and also check the address alignment.
 //
-// This is possible because we creat a mask with bits set for the page address,
+// This is possible because we create a mask with bits set for the page address,
 // and also set bits for the alignment order.
 // When the tag is XORed in vm_translate's check, we get a non-zero value if
 // the address has the wrong alignment.
@@ -55,23 +55,23 @@ RSM_ASSUME_NONNULL_BEGIN
 //
 //   1. Load the cache table entry for the corresponding page address.
 //      This is a "lossy" process; the cache table only uses a few bits of the
-//      page address as an index.
-//   2. Check if the entry is indeed for this page address (cache miss if not)
-//   3. Check that the address is within valid range (VM_ADDR_BITS)
-//   3. Check the address's alignment (alignment violation if not)
-//   4. Load the host page address from the cache entry
-//   5. Calculate the canonical host address by adding the virtual address's
-//      offset (bottom PAGE_SIZE_BITS) to the host page address
-//   6. Perform the memory operation (e.g. load, store, etc) on the host address
+//      page address as an index; the entry might be for a different page.
+//   2. Check if the entry is indeed for this page address (cache miss if not.)
+//   3. Check that the address is within valid range (VM_ADDR_BITS.)
+//   4. Check the address's alignment (alignment violation if not.)
+//   5. Load the host page address from the cache entry.
+//   6. Calculate the canonical host address by adding the virtual address's
+//      offset (bottom PAGE_SIZE_BITS) to the host page address.
+//   7. Perform the memory operation (e.g. load, store etc) on the host address.
 //
 // Let's have a look at some examples.
-// This is how we construct the TAG_MASK:
+// This is how we construct the mask for checking tags:
 //
-//                             alignment bits
-//                                  ┌┴┐
-//   …111111111111111111111000000000111
-//                         └─────┬────┘
-//                        PAGE_SIZE_BITS
+//          page address          alignment bits
+//   ┌─~~~────────┴──────────┐         ┌┴┐
+//   11 … 11111111111111111111000000000111
+//                            └─────┬────┘
+//                             page offset
 //
 // For example, with PAGE_SIZE_BITS=12:
 //   …TAG_MASK(1)  = 1111111111111111111111111111111111111111111111111111000000000000
@@ -80,11 +80,18 @@ RSM_ASSUME_NONNULL_BEGIN
 //   …TAG_MASK(8)  = 1111111111111111111111111111111111111111111111111111000000000111
 //   …TAG_MASK(16) = 1111111111111111111111111111111111111111111111111111000000001111
 //   ... and so on.
-//   Max alignment value the cache can handle is (PAGE_SIZE >> 1).
+//   Max alignment value the cache can handle is PAGE_SIZE/2.
 //
 // Since we need to do all of this for _every single memory operation_ it needs
 // to be very efficient. We can't just sprinkle if...else checks around.
-// So what we do is this trick by comparing the tag of the cache entry.
+//
+// So what we do is this trick by comparing the tag of the cache entry;
+// we simply AND the virtual address with a cache entry's tag:
+// if the result is the page address--i.e. the address without page offset--we know
+// that it is both a valid cache entry for this page and that the address's alignment
+// is correct. Since we don't mask out the bottom (alignment-1) bits, if the address
+// has invalid alignment, the bottom bits will be set in the resulting tag and the
+// check will fail (and we take a slow path to figure out what's going on.)
 //
 // The first time we access an address we get a cache miss which leads us to
 // call _vm_cache_miss to perform full translation in the page directory,
@@ -94,8 +101,8 @@ RSM_ASSUME_NONNULL_BEGIN
 //
 //      │    vaddr = 0xD022
 //      │          = 0000000000000000000000000000000000000000000000001101000000100010
-//      │      tag = PAGE_ADDRESS(addr)
-//      │          = 000000000000000000000000000000001101000000000000 (0xD000)
+//      │      tag = PAGE_ADDRESS(addr) = 0xD000
+//      │          = 0000000000000000000000000000000000000000000000001101000000000000
 //      │    cache[VM_VFN(addr) & VM_CACHE_INDEX_VFN_MASK].tag = tag
 // We can then finish by performing the memory operation on the host address:
 //      │    haddr = hpaddr + VM_ADDR_OFFSET(vaddr)
@@ -135,7 +142,7 @@ RSM_ASSUME_NONNULL_BEGIN
 //      - update the cache entry (set haddr & tag as described earlier.)
 //
 // So, we can implement the cache lookup in only 10 x86_64 or arm64 instructions,
-// which includes a conditional branch to a call to _vm_cache_miss.
+// which includes a conditional branch and a call to _vm_cache_miss.
 //
 #define VM_CACHE_TAG_MASK(align)  ( VM_ADDR_PAGE_MASK ^ ((u64)(align) - 1llu) )
 

@@ -1,10 +1,13 @@
 // virtual memory (internal)
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
+#include "thread.h"
 RSM_ASSUME_NONNULL_BEGIN
 
 // VM_ZERO_PAGES: define to zero memory pages before use
-#define VM_ZERO_PAGES
+#if RSM_SAFE && !defined(VM_ZERO_PAGES)
+  #define VM_ZERO_PAGES
+#endif
 
 // virtual memory address space configuration
 // VM_ADDR_BITS: addressable space (effectively: (1<<VM_ADDR_BITS)-VM_ADDR_MIN)
@@ -200,6 +203,7 @@ typedef vm_pte_t* vm_ptab_t;
 // vm_pagedir_t is a page directory, managing mapping between virtual and host pages
 typedef struct {
   rmm_t*    mm;
+  RHMutex   lock;
   vm_ptab_t root; // L0
 } vm_pagedir_t;
 
@@ -244,12 +248,14 @@ enum vm_op {
 
 // vm_pagedir_init initializes a new vm_pagedir_t, sourcing backing memory from mm.
 // Returns false if allocating the root table in mm failed.
-bool vm_pagedir_init(vm_pagedir_t*, rmm_t* mm);
+rerr_t vm_pagedir_init(vm_pagedir_t*, rmm_t* mm);
 
 // vm_pagedir_dispose frees up resources of a page directory,
 // which becomes invalid after this call.
 void vm_pagedir_dispose(vm_pagedir_t*);
 
+// vm_pagedir_translate translates a virtual address to its corresponding host address
+uintptr vm_pagedir_translate(vm_pagedir_t*, u64 vaddr);
 
 // vm_cache_init initializes a vm_cache_t
 void vm_cache_init(vm_cache_t*);
@@ -291,6 +297,10 @@ u64 _vm_cache_miss(vm_cache_t*, vm_pagedir_t*, u64 vaddr, vm_op_t);
     (vm_cache), (pagedir), (vaddr), _Alignof(type), VM_OP_LOAD + _Alignof(type) \
   ) \
 )
+
+// VM_TRANSLATE translates a virtual address to a host address
+#define VM_TRANSLATE(align, vm_cache, pagedir, vaddr) \
+  vm_translate((vm_cache), (pagedir), (vaddr), (align), VM_OP_LOAD + (u32)(align))
 
 // vm_translate converts a virtual address to its corresponding host address
 ALWAYS_INLINE static uintptr vm_translate(

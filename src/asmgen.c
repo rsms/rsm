@@ -6,6 +6,7 @@
 #include "map.h"
 #include "abuf.h"
 #include "asm.h"
+#include "sched.h"
 
 #define DEBUG_LOG_DATA // define to log debug messages about data layout
 
@@ -336,9 +337,9 @@ static bool patch_imm(gstate* g, rnode_t* patcher, u32 inindex, u64 value) {
   rin_t* in = rarray_at(rin_t, &g->iv, inindex);
   u32 scratchreg = RSM_NREGS; // if >-1, names a reg largeval can safely use
 
-  #define SCRATCHREG_A_nil RSM_NREGS
-  #define SCRATCHREG_A_mem RSM_NREGS
-  #define SCRATCHREG_A_reg RSM_GET_A(*in)
+  #define SCRATCHREG_A_nil  (RSM_NREGS+1)
+  #define SCRATCHREG_A_mem  (RSM_NREGS+2)
+  #define SCRATCHREG_A_reg  RSM_GET_A(*in)
 
   #define U(OP, ENC, NARGS, SCRATCHREG) \
     case rop_##OP: \
@@ -387,9 +388,11 @@ largeval:
   // Does not fit in immediate value for the instruction.
   // Synthesize instructions to compute the value in a register.
 
-  if (scratchreg == RSM_NREGS) {
-    // no scratch register (instruction does not produce a register result)
-    errf(g->a, nposrange(patcher), "value too large for instruction immediate");
+  if (scratchreg >= RSM_NREGS) {
+    // >RSM_NREGS: no scratch register; instruction does not produce a register result.
+    // =RSM_NREGS: register interference
+    if (scratchreg == RSM_NREGS)
+      errf(g->a, nposrange(patcher), "TODO %s: scratch reg interference", __FUNCTION__);
     return false;
   }
 
@@ -1095,7 +1098,7 @@ static void layout_gdata(gstate* g) {
   // align is what we will use for the "align" field in the ROMs "data" table header
   // (note: largest alignment is g->data.v[0] after sorting)
   g->dataalign = (*rarray_at(gdata*, &g->dataorder, 0))->align;
-  u64 addr = 0;
+  u64 addr = EXE_BASE_ADDR;
   dlog_gdata(NULL); // header
 
   for (u32 i = 0; i < g->dataorder.len; i++) {

@@ -72,16 +72,18 @@ static void vm_ptab_free(rmm_t* mm, vm_ptab_t ptab) {
 }
 
 
-bool vm_pagedir_init(vm_pagedir_t* pagedir, rmm_t* mm) {
+rerr_t vm_pagedir_init(vm_pagedir_t* pagedir, rmm_t* mm) {
+  if (!RHMutexInit(&pagedir->lock))
+    return rerr_not_supported;
   vm_ptab_t ptab = vm_ptab_create(mm); // root page table
   if UNLIKELY(!ptab) {
     trace("failed to allocate root page table");
-    return false;
+    return rerr_nomem;
   }
   trace("allocated L%u page table %p +0x%lx", 1, ptab, VM_PTAB_SIZE);
   pagedir->root = ptab;
   pagedir->mm = mm;
-  return true;
+  return 0;
 }
 
 
@@ -95,12 +97,13 @@ static vm_pagedir_t* nullable vm_pagedir_create(rmm_t* mm) {
   // FIXME whole page allocated!
   static_assert(sizeof(vm_pagedir_t) < PAGE_SIZE, "");
   vm_pagedir_t* pagedir = rmm_allocpages(mm, 1);
-  if (pagedir) {
-    if (vm_pagedir_init(pagedir, mm))
-      return pagedir;
+  if (!pagedir)
+    return NULL;
+  if (vm_pagedir_init(pagedir, mm)) {
     rmm_freepages(mm, pagedir);
+    return NULL;
   }
-  return NULL;
+  return pagedir;
 }
 
 
@@ -109,7 +112,7 @@ static vm_pte_t vm_pagedir_alloc_backing_page(vm_pagedir_t* pagedir, vm_pte_t* p
   uintptr hpage_addr = haddr >> PAGE_SIZE_BITS;
   if UNLIKELY(hpage_addr == 0) {
     trace("FAILED to allocate backing page");
-    panic("TODO: purge a least recently-used page");
+    panic("TODO: purge a least-recently-used page");
   }
   trace("allocated backing page %p", (void*)haddr);
   *pte = vm_pte_make(hpage_addr);
@@ -120,16 +123,18 @@ static vm_pte_t vm_pagedir_alloc_backing_page(vm_pagedir_t* pagedir, vm_pte_t* p
 // vm_pagedir_lookup_hfn returns the Host Frame Number for a Virtual Frame Number
 static vm_pte_t vm_pagedir_lookup_pte(vm_pagedir_t* pagedir, u64 vfn) {
   assertf(vfn > 0, "invalid VFN 0x0 (vm address likely less than VM_ADDR_MIN)");
-  vfn--; // VM_ADDR_MIN
+  vfn--; // subtract one to make VM_ADDR_MIN VFN 0
   u32 bits = 0;
   u64 masked_vfn = vfn;
   vm_ptab_t ptab = pagedir->root;
   u8 level = 1;
-  // TODO: RW thread lock
+
+  vm_pte_t pte = {0};
+  RHMutexLock(&pagedir->lock);
 
   for (;;) {
     u64 index = getbits(masked_vfn, VFN_BITS - (1+bits), VM_PTAB_BITS);
-    vm_pte_t pte = ptab[index];
+    pte = ptab[index];
 
     trace(
       "lookup vfn 0x%llx L %u; index %llu = getbits(0x%llx, %u-(1+%u), %u)",
@@ -138,16 +143,16 @@ static vm_pte_t vm_pagedir_lookup_pte(vm_pagedir_t* pagedir, u64 vfn) {
     if (level == VM_PTAB_LEVELS) {
       if UNLIKELY(*(u64*)&pte == 0) {
         trace("first access to page vfn=0x%llx", vfn+1);
-        return vm_pagedir_alloc_backing_page(pagedir, &ptab[index]);
+        pte = vm_pagedir_alloc_backing_page(pagedir, &ptab[index]);
       }
-      return pte;
+      goto end;
     }
 
     bits += VM_PTAB_BITS;
     masked_vfn = getbits(masked_vfn, VFN_BITS - (1+bits), VFN_BITS - bits);
     level++;
 
-    if (*(u64*)&pte) {
+    if (pte.outaddr) {
       ptab = (vm_ptab_t)(uintptr)(pte.outaddr << PAGE_SIZE_BITS);
       continue;
     }
@@ -170,18 +175,22 @@ static vm_pte_t vm_pagedir_lookup_pte(vm_pagedir_t* pagedir, u64 vfn) {
     trace("allocated L%u page table %p +0x%lx at [%llu]",
       level, ptab, VM_PTAB_SIZE, index);
 
-    if UNLIKELY(!ptab)
-      return (vm_pte_t){0};
+    if UNLIKELY(!ptab) {
+      pte = (vm_pte_t){0};
+      goto end;
+    }
   }
+end:
+  RHMutexUnlock(&pagedir->lock);
+  return pte;
 }
 
-// // vm_pagedir_translate_vfn returns the host address for a virtual address
-// static uintptr vm_pagedir_translate_vfn(vm_pagedir_t* pagedir, u64 vaddr) {
-//   u64 vfn = vaddr_to_vfn(vaddr);
-//   vm_pte_t pte = vm_pagedir_lookup_pte(pagedir, vfn);
-//   uintptr host_page = (uintptr)(pte.outaddr << PAGE_SIZE_BITS);
-//   return host_page + (uintptr)vaddr_offs(vaddr);
-// }
+
+uintptr vm_pagedir_translate(vm_pagedir_t* pagedir, u64 vaddr) {
+  vm_pte_t pte = vm_pagedir_lookup_pte(pagedir, VM_VFN(vaddr));
+  uintptr host_page_addr = (uintptr)(pte.outaddr << PAGE_SIZE_BITS);
+  return host_page_addr + (uintptr)VM_ADDR_OFFSET(vaddr);
+}
 
 
 #ifdef VM_TRACE
@@ -260,6 +269,7 @@ u64 _vm_cache_miss(vm_cache_t* cache, vm_pagedir_t* pagedir, u64 vaddr, vm_op_t 
   trace("%s 0x%llx -> %p", __FUNCTION__, vaddr, (void*)hpaddr);
 
   // check if the lookup failed
+  // TODO: Or is result=0 how "out of memory" is signalled?
   if UNLIKELY(hpaddr == 0) {
     trace("invalid address 0x%llx (vm_pagedir_lookup_pte failed)", vaddr);
     return 0;

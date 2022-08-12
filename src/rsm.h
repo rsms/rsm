@@ -185,13 +185,13 @@ _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 #define RSM_OP_IS_BR(op)  (rop_IF <= (op) && (op) <= rop_IFZ)
 #define RSM_OP_ACCEPTS_PC_ARG(op)  (rop_IF <= (op) && (op) <= rop_JUMP)
 
-// size and position of instruction arguments
-#define RSM_SIZE_OP  8
-#define RSM_SIZE_i   1  /* immediate flag */
-#define RSM_SIZE_A   5
-#define RSM_SIZE_B   5
-#define RSM_SIZE_C   5
-#define RSM_SIZE_D   8
+// size and position of instruction arguments (in bits)
+#define RSM_SIZE_OP  8u
+#define RSM_SIZE_i   1u  /* immediate flag */
+#define RSM_SIZE_A   5u
+#define RSM_SIZE_B   5u
+#define RSM_SIZE_C   5u
+#define RSM_SIZE_D   8u
 #define RSM_SIZE_Di  RSM_SIZE_D
 #define RSM_SIZE_Ci  (RSM_SIZE_C + RSM_SIZE_D)
 #define RSM_SIZE_Bi  (RSM_SIZE_B + RSM_SIZE_C + RSM_SIZE_D)
@@ -203,18 +203,18 @@ _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 #define RSM_POS_C    (RSM_POS_B + RSM_SIZE_B)
 #define RSM_POS_D    (RSM_POS_C + RSM_SIZE_C)
 
-#define RSM_MAX_Au   ((1 << RSM_SIZE_Ai) - 1) /* (2^23 - 1) = 8,388,607  0x7fffff */
-#define RSM_MAX_Bu   ((1 << RSM_SIZE_Bi) - 1) /* (2^18 - 1) =   262,143   0x3ffff */
-#define RSM_MAX_Cu   ((1 << RSM_SIZE_Ci) - 1) /* (2^13 - 1) =     8,191    0x1fff */
-#define RSM_MAX_Du   ((1 << RSM_SIZE_Di) - 1) /* (2^8  - 1) =       255      0xff */
-#define RSM_MAX_As   (RSM_MAX_Au >> 1) /*                     4,194,303  0x3fffff */
-#define RSM_MAX_Bs   (RSM_MAX_Bu >> 1) /*                       131,071   0x1ffff */
-#define RSM_MAX_Cs   (RSM_MAX_Cu >> 1) /*                         4,095     0xfff */
-#define RSM_MAX_Ds   (RSM_MAX_Du >> 1) /*                           127      0x7f */
-#define RSM_MIN_As   (-RSM_MAX_As - 1) /*                    -4,194,304 -0x400000 */
-#define RSM_MIN_Bs   (-RSM_MAX_Bs - 1) /*                      -131,072  -0x20000 */
-#define RSM_MIN_Cs   (-RSM_MAX_Cs - 1) /*                        -4,096   -0x1000 */
-#define RSM_MIN_Ds   (-RSM_MAX_Ds - 1) /*                          -128     -0x80 */
+#define RSM_MAX_Au   ((1u << RSM_SIZE_Ai) - 1u) /* (2^23 - 1) = 8,388,607  0x7fffff */
+#define RSM_MAX_Bu   ((1u << RSM_SIZE_Bi) - 1u) /* (2^18 - 1) =   262,143   0x3ffff */
+#define RSM_MAX_Cu   ((1u << RSM_SIZE_Ci) - 1u) /* (2^13 - 1) =     8,191    0x1fff */
+#define RSM_MAX_Du   ((1u << RSM_SIZE_Di) - 1u) /* (2^8  - 1) =       255      0xff */
+#define RSM_MAX_As   ((i32)RSM_MAX_Au >> 1) /*                  4,194,303  0x3fffff */
+#define RSM_MAX_Bs   ((i32)RSM_MAX_Bu >> 1) /*                    131,071   0x1ffff */
+#define RSM_MAX_Cs   ((i32)RSM_MAX_Cu >> 1) /*                      4,095     0xfff */
+#define RSM_MAX_Ds   ((i32)RSM_MAX_Du >> 1) /*                        127      0x7f */
+#define RSM_MIN_As   (-(i32)RSM_MAX_As - 1) /*                 -4,194,304 -0x400000 */
+#define RSM_MIN_Bs   (-(i32)RSM_MAX_Bs - 1) /*                   -131,072  -0x20000 */
+#define RSM_MIN_Cs   (-(i32)RSM_MAX_Cs - 1) /*                     -4,096   -0x1000 */
+#define RSM_MIN_Ds   (-(i32)RSM_MAX_Ds - 1) /*                       -128     -0x80 */
 
 #define RSM_NREGS   32 /* total number of registers */
 #define RSM_MAX_REG (RSM_NREGS - 1) /* == SP */
@@ -333,6 +333,14 @@ enum rerr_ {
   rerr_mfault        = -13, // bad memory address
   rerr_overflow      = -14, // value too large
 };
+
+// rsm_init initializes global state; must be called before using the rest of the API.
+// Returns false if initialization failed.
+RSMAPI bool rsm_init();
+
+// enum related functions
+RSMAPI const char* rop_name(rop_t);  // name of an opcode
+RSMAPI const char* rerr_str(rerr_t); // short description of an error
 
 //———————————————————————————————————————————————————————————————————————————————————————
 // rmem_t: memory region
@@ -496,21 +504,29 @@ typedef struct {
 
   // fields populated on demand by rsm_loadrom
   const rin_t* code;      // vm instructions array (pointer into img)
-  usize         codelen;   // vm instructions array length
-  const void*   data;      // data segment initializer (pointer into img)
-  usize         datasize;  // data segment size
-  u32           dataalign; // data segment alignment (in bytes)
+  usize        codelen;   // vm instructions array length
+  const void*  data;      // data segment initializer (pointer into img)
+  usize        datasize;  // data segment size
+  u32          dataalign; // data segment alignment (in bytes)
 } rrom_t;
 
-// rvmstatus_t: VM status
-typedef u8 rvmstatus_t;
-enum rvmstatus {
-  RVM_INIT,
-  RVM_ERROR, // check rvm.error
-  RVM_END = 0xff,
-};
+// rsm_loadrom parses rom->img of rom->imgsize bytes,
+// populating the rest of the fields of the rrom_t struct.
+RSMAPI rerr_t rsm_loadrom(rrom_t* rom);
 
-// rvm_t: VM instance
+//———————————————————————————————————————————————————————————————————————————————————————
+// rmachine_t: virtual machine instance  (execution engine v2)
+typedef struct rmachine_ rmachine_t;
+
+rmachine_t* nullable rmachine_create(rmm_t*);
+void rmachine_dispose(rmachine_t*);
+
+// rmachine_execrom loads & runs a program from a ROM image
+rerr_t rmachine_execrom(rmachine_t*, rrom_t*);
+
+//———————————————————————————————————————————————————————————————————————————————————————
+// rvm_t: VM instance  (execution engine v1)
+typedef u8 rvmstatus_t;
 typedef struct {
   rvmstatus_t status;
   u64         iregs[RSM_NREGS];
@@ -519,28 +535,24 @@ typedef struct {
   usize       ramsize;
   void*       internal;
 } rvm_t;
+enum rvmstatus {
+  RVM_INIT,
+  RVM_ERROR, // check rvm.error
+  RVM_END = 0xff,
+};
 
-
-// rsm_init initializes global state; must be called before using the rest of the API.
-// Returns false if initialization failed.
-RSMAPI bool rsm_init();
-
-// rvm_create creates a new VM instance
-rvm_t* nullable rvm_create(rmemalloc_t*);
-
-// rvm_dispose frees a VM instance
-void rvm_dispose(rvm_t* vm);
-
-// rvm_main loads & runs a program in a ROM image
-rerr_t rvm_main(rvm_t* vm, rrom_t* rom);
 
 // rsm_vmexec executes a program, starting with instruction 0
 // Loads the ROM if needed.
 RSMAPI rerr_t rsm_vmexec(rvm_t* vm, rrom_t* rom);
 
-// rsm_loadrom parses rom->img of rom->imgsize bytes,
-// populating the rest of the fields of the rrom_t struct.
-RSMAPI rerr_t rsm_loadrom(rrom_t* rom);
+
+//———————————————————————————————————————————————————————————————————————————————————————
+// utilities
+
+// rsm_loadfile loads a file into memory
+rerr_t rsm_loadfile(const char* filename, rmem_t* data_out);
+void rsm_unloadfile(rmem_t); // unload file loaded with rsm_loadfile
 
 // rsm_fmtprog formats an array of instructions ip as "assembly" text to buf.
 // It writes at most bufcap-1 of the characters to the output buf (the bufcap'th
@@ -556,17 +568,9 @@ RSMAPI usize rsm_fmtprog(
 RSMAPI usize rsm_fmtinstr(
   char* buf, usize bufcap, rin_t, u32* nullable pcaddp, rfmtflag_t);
 
-// enum related functions
-RSMAPI const char* rop_name(rop_t);      // name of an opcode
-RSMAPI const char* rerr_str(rerr_t); // short description of an error
 
-// rsm_loadfile loads a file into memory
-rerr_t rsm_loadfile(const char* filename, rmem_t* data_out);
-void rsm_unloadfile(rmem_t); // unload file loaded with rsm_loadfile
-
-
-// --------------------------------------------------------------------------------------
-// assembler API (optional)
+//———————————————————————————————————————————————————————————————————————————————————————
+// assembler (optional)
 #ifndef RSM_NO_ASM
 
 // rtok_t: source token

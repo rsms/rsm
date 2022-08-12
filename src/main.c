@@ -299,13 +299,13 @@ int main(int argc, char*const* argv) {
   // —————————————— new execution engine ——————————————
   if (opt_newexec) {
 
-    rvm_t* vm2 = safechecknotnull( rvm_create(ma) );
-    rerr_t err2 = rvm_main(vm2, &rom);
-    rvm_dispose(vm2);
+    rmachine_t* machine = safechecknotnull( rmachine_create(mm) );
+    rerr_t err2 = rmachine_execrom(machine, &rom);
     if (err2) {
-      errmsg("rvm_main: %s", rerr_str(err2));
+      errmsg("rmachine_execrom: %s", rerr_str(err2));
       return 1;
     }
+    rmachine_dispose(machine);
 
   // —————————————— old execution engine ——————————————
   } else {

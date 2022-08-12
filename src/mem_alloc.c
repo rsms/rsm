@@ -406,8 +406,10 @@ static void* nullable heap_alloc(
   }
 
   // Give up if we didn't find a range of chunks large enough
-  if (chunk_len == 0)
+  if (chunk_len == 0) {
+    trace("heap exhausted");
     return NULL;
+  }
 
   // We found a range of free chunks!
   // Increment total number of chunks "in use" in the heap
@@ -886,7 +888,7 @@ rmem_t rmem_alloc_aligned(rmemalloc_t* a, usize size, usize alignment) {
 end:
   if (ptr) RMEM_PEDANTIC_SAFECHECK_ALLOCATED(a, ptr, size);
   RHMutexUnlock(&a->lock);
-  trace("allocated region " RMEM_FMT, RMEM_FMT_ARGS(RMEM(ptr, size)));
+  trace("rmem_alloc_aligned => " RMEM_FMT, RMEM_FMT_ARGS(RMEM(ptr, size)));
   return (rmem_t){ .p=ptr, .size=size };
 }
 
@@ -982,7 +984,8 @@ bool rmem_resize(rmemalloc_t* a, rmem_t* region, usize newsize) {
   trace("resizing %p  %zu -> %zu", region->p, oldsize, newsize);
 
   // FIXME replace this daft "allocate new, copy, free old" code
-  usize alignment = MIN(CEIL_POW2(newsize), (usize)CEIL_POW2((uintptr)region->p));
+  usize alignment =
+    MIN(CEIL_POW2(MIN(newsize, HEAP_ALIGN)), (usize)CEIL_POW2((uintptr)region->p));
   rmem_t new_region = rmem_alloc_aligned(a, newsize, alignment);
   if (!new_region.p)
     return false;

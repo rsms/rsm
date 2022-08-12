@@ -181,9 +181,11 @@ usize bitset_find_unset_range(
         usize start_aligned = ALIGN_CEIL(start, stride);
         nbits += start_aligned - start;
         *startp = start_aligned;
-        trace("    set start %zu", *startp);
+        trace("    set start %zu (nbits %zu)", *startp, nbits);
         assertf(*startp == ALIGN_CEIL(*startp, stride), "%zu != %zu",
           *startp, ALIGN_CEIL(*startp, stride));
+        if (nbits >= bucket_bits)
+          break;
       }
 
       if (bucket_val == 0) {
@@ -281,6 +283,7 @@ usize bitset_find_best_fit(bitset_t* bset, usize* startp, usize minlen, usize st
     // Is stride correctly calculated here? Do we need to include *startp?
     start += ALIGN_CEIL(rangelen, stride);
   }
+  //dlog(">> end: *startp = %zu; len = %zu", best_start & found, minlen & found);
   *startp = best_start & found;
   return minlen & found;
 }

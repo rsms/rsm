@@ -239,12 +239,12 @@ static void sname_or_kw(pstate* p) { // "foo"
 }
 
 static u32 sstring_multiline(pstate* p, const char* start, const char* end) {
-  if ((usize)(end - start) >= (usize)U32_MAX)
+  if ((usize)(uintptr)(end - start) >= (usize)U32_MAX)
     return U32_MAX;
 
   if UNLIKELY(*start != '\n') {
     serr(p, "multiline string must start with \"|\" on a new line");
-    return 0;
+    return U32_MAX;
   }
 
   u32 extralen = 0;
@@ -271,7 +271,7 @@ static u32 sstring_multiline(pstate* p, const char* start, const char* end) {
       if UNLIKELY(c != ' ' && c != '\t') {
         rposrange_t pr = {.focus={ lineno, col }};
         errf(p->a, pr, "missing \"|\" after linebreak in multiline string");
-        return 0;
+        return U32_MAX;
       }
     }
 
@@ -305,7 +305,7 @@ static void sstring_buffered(pstate* p, u32 extralen, bool ismultiline) {
     }
     // verify indentation and calculate nbytes used for indentation
     u32 indentextralen = sstring_multiline(p, src, src + len);
-    if UNLIKELY(indentextralen == 0) // an error occured
+    if UNLIKELY(indentextralen == U32_MAX) // an error occured
       return;
     if (check_add_overflow(extralen, indentextralen, &extralen))
       return serr(p, "string literal too large");

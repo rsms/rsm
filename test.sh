@@ -6,7 +6,12 @@ cd "$(dirname "$0")"
 
 for f in examples/*.rsm; do
   echo "——————————————————————————————————————————————————————————————————————————"
-  ROM=${f##*/} ; ROM=out/test_${ROM%*.rsm}.rom
+  FILENAME=${f##*/}
+  case "$FILENAME" in
+    fail-*) continue ;;  # skip files matching "fail-*.rsm"
+  esac
+
+  ROM=out/test_${FILENAME%*.rsm}.rom
 
   echo "rsm -o '$ROM' '$f'"
   out/rsm -o "$ROM" "$f"

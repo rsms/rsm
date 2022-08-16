@@ -134,9 +134,9 @@ contexts:
           | push
           | pop
 
-          | add
-          | sub
-          | mul
+          | adds?
+          | subs?
+          | muls?
           | div
           | mod
           | and

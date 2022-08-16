@@ -141,9 +141,12 @@ _( STORE1 , ABCs , mem , "store1"  /* mem[RB + Cs : 1] = RA -- wrap i64 to i8   
 _( PUSH   , Au   , mem , "push"    /* SP -= 8; mem[SP] = Au                           */)\
 _( POP    , A    , reg , "pop"     /* A = mem[SP]; SP += 8                            */)\
 \
-_( ADD   , ABCu , reg , "add"   /* RA = RB + Cu                                     */)\
-_( SUB   , ABCu , reg , "sub"   /* RA = RB - Cu                                     */)\
-_( MUL   , ABCu , reg , "mul"   /* RA = RB * Cu                                     */)\
+_( ADD   , ABCu , reg , "add"   /* RA = RB + Cu -- wrap on overflow                 */)\
+_( SUB   , ABCu , reg , "sub"   /* RA = RB - Cu -- wrap on overflow                 */)\
+_( MUL   , ABCu , reg , "mul"   /* RA = RB * Cu -- wrap on overflow                 */)\
+_( ADDS  , ABCs , reg , "adds"  /* RA = RB + Cs -- panic on overflow                */)\
+_( SUBS  , ABCs , reg , "subs"  /* RA = RB - Cs -- panic on overflow                */)\
+_( MULS  , ABCs , reg , "muls"  /* RA = RB * Cs -- panic on overflow                */)\
 _( DIV   , ABCu , reg , "div"   /* RA = RB / Cu                                     */)\
 _( MOD   , ABCu , reg , "mod"   /* RA = RB % Cu                                     */)\
 _( AND   , ABCu , reg , "and"   /* RA = RB & Cu                                     */)\

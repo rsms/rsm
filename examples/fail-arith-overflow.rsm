@@ -1,0 +1,22 @@
+// This demonstrates how integer overflow behaves.
+// add, sub and mul wraps the bits around, treating operands as unsigned.
+// adds, subs and muls panics on overflow.
+// Note: In the future, overflow will not panic RSM but do something more
+// useful that the program can handle. E.g. something akin to signals.
+
+const U64_MAX = 0xffffffffffffffff
+const I64_MAX = 0x7fffffffffffffff
+
+fun main() {
+  // overflow from non-"s" (sign agnostic) instructions wrap around
+  R1 = U64_MAX
+  R1 = add R1 1 // result is 0
+
+  R2 = I64_MAX
+  R2 = add R2 1 // result is I64_MIN
+
+  // overflow from "s" (signed) instructions panics
+  R3 = I64_MAX
+  R3 = adds R3 1
+  // we won't get here
+}

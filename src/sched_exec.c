@@ -173,6 +173,8 @@ enum execerr_t {
 #define RCrs ((i64)( RSM_GET_i(in) ? RSM_GET_Cs(in) : iregs[RSM_GET_Cu(in)] ))
 #define RDrs ((i64)( RSM_GET_i(in) ? RSM_GET_Ds(in) : iregs[RSM_GET_Du(in)] ))
 
+//———————————————————————————————————————————————————————————————————————————————————
+// memory operations
 
 // hostaddr translates a vm address to a host address
 inline static void* hostaddr(EXEC_PARAMS, u64 addr) {
@@ -281,6 +283,57 @@ static void push_PC(EXEC_PARAMS) {
   push(EXEC_ARGS, 8, (u64)pc);
 }
 
+// —————————— arithmetic
+
+static void on_overflow(T* t, usize pc, rop_t op, i64 x, i64 y, i64* dst) {
+  char opch;
+  const char* typename = "i64";
+
+  switch (op) {
+    case rop_ADDS: opch = '+';
+      // revert so we can print the initial values
+      if (x == *dst) {
+        __builtin_sub_overflow(x, y, &x);
+      } else if (y == *dst) {
+        __builtin_sub_overflow(x, y, &y);
+      }
+      break;
+    case rop_SUBS: opch = '-';
+      // revert so we can print the initial values
+      if (x == *dst) {
+        __builtin_add_overflow(x, y, &x);
+      } else if (y == *dst) {
+        __builtin_add_overflow(x, y, &y);
+      }
+      break;
+    case rop_MULS: opch = '*';
+      // can't revert multiplication overflow
+      if (x == *dst || y == *dst)
+        panic("signed integer overflow: multiplication overflows %s", typename);
+      break;
+  }
+
+  // TODO raise error in scheduler/current task
+  panic("signed integer overflow: %lld %c %lld overflows %s", x, opch, y, typename);
+}
+
+// void CHECK_OVERFLOW(name OP, name T, T x, T y, T* dstptr)
+//   OP: add, sub, mul
+//   T: i8, i16, i32, i64
+#if __has_builtin(__builtin_add_overflow)
+  #define CHECK_OVERFLOW(OP, T, x, y, dstptr) ( \
+    UNLIKELY(__builtin_##OP##_overflow((T)(x), (T)(y), (T*)(dstptr))) ? \
+      on_overflow(t, pc, RSM_GET_OP(in), (i64)(x), (i64)(y), (i64*)(dstptr)) : \
+      ((void)0) \
+  )
+#else
+  #define _CHECK_OVERFLOW_add(x, y, dstptr) (*(dstptr) = (x) + (y))
+  #define _CHECK_OVERFLOW_sub(x, y, dstptr) (*(dstptr) = (x) - (y))
+  #define _CHECK_OVERFLOW_mul(x, y, dstptr) (*(dstptr) = (x) * (y))
+  #define CHECK_OVERFLOW(OP, T, x, y, dstptr) \
+    _CHECK_OVERFLOW_##OP((T)(x), (T)(y), (T*)(dstptr))
+#endif
+
 // —————————— interpreter
 
 void rsched_exec(EXEC_PARAMS) {
@@ -383,6 +436,10 @@ void rsched_exec(EXEC_PARAMS) {
     #define do_ADD(C)  RA = RB + C
     #define do_SUB(C)  RA = RB - C
     #define do_MUL(C)  RA = RB * C
+    #define do_ADDS(C) CHECK_OVERFLOW(add, i64, RB, C, &RA);
+    #define do_SUBS(C) CHECK_OVERFLOW(sub, i64, RB, C, &RA);
+    #define do_MULS(C) CHECK_OVERFLOW(mul, i64, RB, C, &RA);
+    // TODO: if we keep ...S overflow-safe ops, expand to i32, i16 and i8 (e.g. do_ADDS4)
     #define do_DIV(C)  RA = RB / C
     #define do_MOD(C)  RA = RB % C
     #define do_AND(C)  RA = RB & C

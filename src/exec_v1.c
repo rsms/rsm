@@ -448,6 +448,9 @@ static void vmexec(VMPARAMS) {
     #define do_ADD(C)  RA = RB + C
     #define do_SUB(C)  RA = RB - C
     #define do_MUL(C)  RA = RB * C
+    #define do_ADDS(C) RA = RB + C
+    #define do_SUBS(C) RA = RB - C
+    #define do_MULS(C) RA = RB * C
     #define do_DIV(C)  RA = RB / C
     #define do_MOD(C)  RA = RB % C
     #define do_AND(C)  RA = RB & C

@@ -8,7 +8,7 @@
 #define VM_RUN_TEST_ON_INIT
 
 // VM_TRACE: define to enable logging a lot of info via dlog
-#define VM_TRACE
+//#define VM_TRACE
 
 // VFN_BITS: bits needed for VFN (VM_ADDR_BITS-PAGE_SIZE_BITS)
 #define VFN_BITS  (VM_ADDR_BITS - PAGE_SIZE_BITS)
@@ -379,6 +379,7 @@ static void test_vm() {
   // }
 
   rmm_dispose(mm);
+  dlog("—— end %s", __FUNCTION__);
 }
 #endif // VM_RUN_TEST_ON_INIT
 

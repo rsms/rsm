@@ -14,6 +14,14 @@ enum rrom_skind {
 
 #define CODE_ALIGNMENT sizeof(rin_t) // alignment of CODE section body
 
+UNUSED static const char* rrom_skind_name(rrom_skind kind) {
+  switch ((enum rrom_skind)kind) {
+    case RSM_ROM_DATA: return "DATA";
+    case RSM_ROM_CODE: return "CODE";
+  }
+  return "?";
+}
+
 // --------------------------------------------------------------------------------------
 // ROM loader
 
@@ -251,7 +259,8 @@ rerr_t rom_build(rrombuild_t* rb, rmemalloc_t* ma, rrom_t* rom) {
     usize headsize = sechsize[kind];
 
     // write section header
-    dlog("section 0x%02x at %08lx: %zu B head", kind, (uintptr)((void*)p-base), headsize);
+    dlog("%s section at %08lx: %zu B head",
+      rrom_skind_name(kind), (uintptr)((void*)p-base), headsize);
     #if DEBUG
     void* secstart = p; // used for assertion
     #endif

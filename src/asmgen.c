@@ -8,7 +8,11 @@
 #include "asm.h"
 #include "sched.h"
 
-#define DEBUG_LOG_DATA // define to log debug messages about data layout
+// DEBUG_LOG_DATALAYOUT: define to log debug messages about data layout
+#define DEBUG_LOG_DATALAYOUT
+
+// ASMGEN_TRACE: define to enable logging a lot of info via dlog
+//#define ASMGEN_TRACE
 
 // codegen
 typedef struct gstate gstate;
@@ -124,6 +128,24 @@ enum grefflag {
 } RSM_END_ENUM(grefflag)
 
 
+#if defined(DEBUG_LOG_DATALAYOUT) && defined(DEBUG)
+  #define dlog_datalayout(fmt, args...) dlog(fmt, ##args)
+#else
+  #undef DEBUG_LOG_DATALAYOUT
+  #define dlog_datalayout(...) ((void)0)
+#endif
+
+
+#if defined(ASMGEN_TRACE) && defined(DEBUG)
+  #define trace(fmt, args...) dlog("[asmgen] %s: " fmt, __FUNCTION__, ##args)
+#else
+  #ifdef ASMGEN_TRACE
+    #warning ASMGEN_TRACE has no effect unless DEBUG is enabled
+    #undef ASMGEN_TRACE
+  #endif
+  #define trace(...) ((void)0)
+#endif
+
 
 #define ERRN(n, fmt, args...) errf(g->a, nposrange(n), fmt, ##args)
 
@@ -195,8 +217,10 @@ static bool check_named_ref(
       // using function instruction index means we can address
       // 2^23 = 8,388,608 instructions (2^23*4 = 33,554,432 bytes) with Au imm
       // and much more by putting a larger instruction index in R(A).
-      if (((gfun*)target)->i > RSM_MAX_Au)
-        panic("pc distance too large"); // TODO generate R(A)=dist instrs using COPY/COPYV
+      if (((gfun*)target)->i > RSM_MAX_Au) {
+        // TODO generate R(A)=dist instrs using COPY/COPYV
+        panic("pc distance too large");
+      }
       return true;
 
     case rop_JUMP:
@@ -215,14 +239,6 @@ static bool check_named_ref(
     target->namelen >= 0xbb ? 0 : (int)target->namelen, target->name,
     scrubcheck);
   return false;
-}
-
-static i32 ref_pcval(u32 referreri, gbhead* b, grefflag flags) {
-  b->nrefs++;
-  if (flags&REF_ABS)
-    return (i32)b->i;
-  referreri++;
-  return referreri > b->i ? -(i32)(referreri - b->i) : (i32)(b->i - referreri);
 }
 
 typedef u8 ropenc;
@@ -249,7 +265,7 @@ static const i64 ropenc_limittab[][2] = { // ropenc limits {min,max}
   /* Au */     {0,          RSM_MAX_Au},
   /* As */     {RSM_MIN_As, RSM_MAX_As},
   /* AB */     {0,          RSM_MAX_REG},
-  /* ABv */    {I64_MIN,    I64_MAX},
+  /* ABv */    {I64_MIN,    I64_MAX}, // TODO: shouldn't max be U64_MAX?
   /* ABu */    {0,          RSM_MAX_Bu},
   /* ABs */    {RSM_MIN_Bs, RSM_MAX_Bs},
   /* ABC */    {0,          RSM_MAX_REG},
@@ -330,9 +346,10 @@ inline static u32 select_scratchreg(rin_t in, u32 dstreg, u32 nregargs) {
   return dstreg;
 }
 
-// set immediate value of instruction g->iv[inindex]
+// patch_imm sets last argument of the rin_t at g->iv[inindex] to value.
+// Resulting value (last argument of the rin_t) is assigned to *argp.
 // returns true if result/patched arg is an immediate value rather than a register.
-static bool patch_imm(gstate* g, rnode_t* patcher, u32 inindex, u64 value) {
+static bool patch_imm(gstate* g, rnode_t* patcher, u32 inindex, u64 value, i32* argp) {
   assert(inindex < g->iv.len);
   rin_t* in = rarray_at(rin_t, &g->iv, inindex);
   u32 scratchreg = RSM_NREGS; // if >-1, names a reg largeval can safely use
@@ -347,7 +364,8 @@ static bool patch_imm(gstate* g, rnode_t* patcher, u32 inindex, u64 value) {
         scratchreg = select_scratchreg(*in, SCRATCHREG, NARGS); \
         goto largeval; \
       } \
-      *in = RSM_SET_##ENC(*in, (u32)value); return true;
+      *in = RSM_SET_##ENC(*in, (u32)value); \
+      break;
 
   #define S(OP, ENC, NARGS, SCRATCHREG) \
     case rop_##OP: \
@@ -355,7 +373,8 @@ static bool patch_imm(gstate* g, rnode_t* patcher, u32 inindex, u64 value) {
         scratchreg = select_scratchreg(*in, SCRATCHREG, NARGS); \
         goto largeval; \
       } \
-      *in = RSM_SET_##ENC(*in, (u32)value); return true;
+      *in = RSM_SET_##ENC(*in, (i32)value); \
+      break;
 
   #define p__(OP, RES)
   #define p_A(OP, RES)
@@ -382,11 +401,18 @@ static bool patch_imm(gstate* g, rnode_t* patcher, u32 inindex, u64 value) {
       return false;
   }
 
+  // if we get here, value was small enough to fit as an immediate
+  *argp = (i32)value;
+  trace("op %s; small value %d -> imm", rop_name(RSM_GET_OP(*in)), *argp);
+  return true;
+
   #undef U
   #undef S
+
 largeval:
   // Does not fit in immediate value for the instruction.
   // Synthesize instructions to compute the value in a register.
+  trace("op %s; large value 0x%llx", rop_name(RSM_GET_OP(*in)), value);
 
   if (scratchreg >= RSM_NREGS) {
     // >RSM_NREGS: no scratch register; instruction does not produce a register result.
@@ -396,6 +422,9 @@ largeval:
     return false;
   }
 
+  // result in register scratchreg
+  *argp = (i32)scratchreg;
+
   // table of rop => ropenc which we use to look up the encoding for COPY
   const ropenc openctab[RSM_OP_COUNT] = {
     #define _(OP, ENC, ...) ropenc_##ENC,
@@ -403,45 +432,56 @@ largeval:
     #undef _
   };
 
-  // can we fit it into a COPY imm?
-  assertf(ropenc_limittab[openctab[rop_COPY]][0]==0, "COPY imm is assumed to be unsigned");
-  u64 copymax = (u64)ropenc_limittab[openctab[rop_COPY]][1];
+  // allocate instruction
   u32 subinindex = g->iv.len;
   rin_t* inp = GARRAY_PUSH_OR_RET(rin_t, &g->iv, false);
+
+  // copymax is the max immediate value for COPY.
+  assertf(ropenc_limittab[openctab[rop_COPY]][0] == 0,
+    "COPY imm is assumed to be unsigned");
+  u64 copymax = (u64)ropenc_limittab[openctab[rop_COPY]][1];
+
+  // can we fit it into a COPY immediate?
   if (value <= copymax) {
     // yes we can -- single copy instruction
+    trace("make COPY");
     *inp = RSM_MAKE_ABu(rop_COPY, scratchreg, (u32)value);
   } else {
-    // no, we need to use a variable-length copyv instruction
-    make_bigv(g, rop_COPYV, inp, scratchreg, value); // don't care about return value
+    // No, we need to use a variable-length copyv instruction.
+    // Here, make_bigv creates a copyv at *inp, appending a second instruction if
+    // the value is larger than U32_MAX. This means that
+    // Note that we don't care about return value from make_bigv; in case it fails to
+    // allocate memory it reports an error with errf and returns false.
+    trace("make COPYV");
+    make_bigv(g, rop_COPYV, inp, scratchreg, value);
   }
 
-  bool isimm;
-
-  // if patchee is an op with
-  // - no other arguments than the address, and
-  // - result register in scratchreg (guaranteed w/ our current logic), and
-  // - op has COPY semantics,
-  // then replace that instruction instead of patching it.
-  if (RSM_GET_OP(g->iv.v[inindex]) == rop_COPY) {
-    // replace
-    rarray_remove(rin_t, &g->iv, inindex, 1);
-    subinindex--; // fixup the "source" index of our synthesized instruction(s)
-    isimm = true;
-  } else {
-    // patch
-    patch_lastregarg(g, patcher, in, scratchreg);
-    isimm = false; // result is register, not imm
-  }
+  // set last arg of instruction "in" to register number scratchreg
+  // TODO: Can we remove this? genop() sets it regardless using RSM_MAKE_##ENC(...)
+  patch_lastregarg(g, patcher, in, scratchreg);
 
   // move inp...immN above patchee
   rarray_move(rin_t, &g->iv, inindex, subinindex, g->iv.len);
 
-  return isimm;
+  return false;
+}
+
+static i32 ref_pcval(u32 referreri, gbhead* b, grefflag flags) {
+  b->nrefs++; // increment refcount
+  if (flags & REF_ABS)
+    return (i32)b->i;
+  referreri++;
+  return referreri > b->i ? -(i32)(referreri - b->i) : (i32)(b->i - referreri);
 }
 
 // resolves pending PC arguments (jumps, calls and branch targets) pointing to b
 static void gpostresolve_pc(gstate* g, rarray* refs, gbhead* b) {
+
+  trace("%u refs to %s \"%.*s\"",
+    refs->len,
+    gnamedtype_name(((gnamed*)b)->namedtype),
+    (int)(((gnamed*)b)->namelen), ((gnamed*)b)->name);
+
   for (u32 i = refs->len; i-- ; ) {
     gref* ref = rarray_at(gref, refs, i);
     assert(assertnotnull(ref->n)->t == RT_NAME);
@@ -449,9 +489,16 @@ static void gpostresolve_pc(gstate* g, rarray* refs, gbhead* b) {
       continue;
 
     if LIKELY(check_named_ref(g, ref->n, ref->i, ref->flags, (gnamed*)b)) {
-      b->nrefs++; // increment refcount
-      i32 val = ref_pcval(ref->i, b, ref->flags);
-      patch_imm(g, ref->n, ref->i, (u64)val);
+
+      #ifdef ASMGEN_TRACE
+        char tmp[128];
+        rin_t* ref_in = rarray_at(rin_t, &g->iv, ref->i);
+        rsm_fmtinstr(tmp, sizeof(tmp), *ref_in, NULL, 0);
+        trace("  referrer: %4x %s (gref.flags 0x%x)", ref->i, tmp, ref->flags);
+      #endif
+
+      i32 ignore, val = ref_pcval(ref->i, b, ref->flags);
+      patch_imm(g, ref->n, ref->i, (u64)val, &ignore);
 
       // also remove from udnames
       if (refs != &g->udnames) for (u32 i = g->udnames.len; i-- ; ) {
@@ -469,6 +516,7 @@ static void gpostresolve_pc(gstate* g, rarray* refs, gbhead* b) {
 
 // called after entire AST has been processed; resolve data references
 static void resolve_undefined_names(gstate* g) {
+  trace("udnames.len %u", g->udnames.len);
   for (u32 i = 0; i < g->udnames.len; i++ ) {
     gref* ref = rarray_at(gref, &g->udnames, i);
 
@@ -500,20 +548,31 @@ static void resolve_undefined_names(gstate* g) {
     gdata* d = (gdata*)target;
     d->nrefs++;
 
-    #ifdef DEBUG_LOG_DATA
-    dlog("patching data reference %.*s (gdata %p, addr 0x%llx)",
+    dlog_datalayout("patching data reference %.*s (gdata %p, addr 0x%llx)",
       (int)namelen, name, d, d->addr);
-    #endif
 
-    patch_imm(g, ref->n, ref->i, d->addr);
+    i32 ignore;
+    patch_imm(g, ref->n, ref->i, d->addr, &ignore);
   }
   g->udnames.len = 0;
 }
 
 
-// returns true if result arg is an immediate value rather than a register.
-static bool refnamed(gstate* g, rnode_t* refn, u32 refi, rop_t op, u32 argc, i32* argp) {
+// refnamed sets *argp by looking up named thing at refn.
+// returns true if resulting *argp is an immediate value (rather than a register.)
+static bool refnamed(gstate* g, rnode_t* refn, u32 refi, u32 argc, i32* argp) {
+  rop_t op = RSM_GET_OP(*rarray_at(rin_t, &g->iv, refi));
+
   grefflag flags = 0;
+  if (op == rop_JUMP || op == rop_CALL)
+    flags |= REF_ABS;
+
+  #ifdef ASMGEN_TRACE
+    char tmp[128];
+    rin_t* ref_in = rarray_at(rin_t, &g->iv, refi);
+    rsm_fmtinstr(tmp, sizeof(tmp), *ref_in, NULL, 0);
+    trace("%4x %s (argc %u, flags %u)", refi, tmp, argc, flags);
+  #endif
 
   #define ADDGREF(refs) ({                             \
     gref* ref__ = GARRAY_PUSH_OR_RET(gref, (refs), 0); \
@@ -525,7 +584,7 @@ static bool refnamed(gstate* g, rnode_t* refn, u32 refi, rop_t op, u32 argc, i32
   })
 
   assert(refn->sval.len > 0);
-  *argp = 0; // in case of error
+  *argp = 0; // make sure *argp is set, even in case of error
 
   // look for local label
   gblock* b = find_target_gblock(g->fn, refn);
@@ -536,13 +595,12 @@ static bool refnamed(gstate* g, rnode_t* refn, u32 refi, rop_t op, u32 argc, i32
     return true;
   }
 
-  if (op == rop_JUMP || op == rop_CALL)
-    flags |= REF_ABS;
-
   // look for global function, data or constant
   gnamed* target = NAME_LOOKUP(g, refn->sval.p, refn->sval.len);
   if (!target) {
-    if (RSM_OP_ACCEPTS_PC_ARG(op)) { // also register as possible label/fun ref
+    // not found; register in "undefined names" and return
+    if (RSM_OP_ACCEPTS_PC_ARG(op)) {
+      // also register as possible label/fun ref
       flags |= REF_ANY;
       ADDGREF(&assertnotnull(g->fn)->ulv);
     }
@@ -550,6 +608,8 @@ static bool refnamed(gstate* g, rnode_t* refn, u32 refi, rop_t op, u32 argc, i32
     return true;
   }
 
+  // Found something!
+  // Check to make sure the target is valid (e.g. check jump pc distance bounds.)
   if UNLIKELY(!check_named_ref(g, refn, refi, flags, target))
     return false;
 
@@ -561,17 +621,13 @@ static bool refnamed(gstate* g, rnode_t* refn, u32 refi, rop_t op, u32 argc, i32
 
     case GNAMED_T_CONST: {
       target->nrefs++;
-      const void* initp = assertnotnull(((gdata*)target)->initp);
-      bool isimm = patch_imm(g, refn, refi, *(const u64*)initp);
-      // load argument since the caller will overwrite it
-      rin_t in = *rarray_at(rin_t, &g->iv, refi);
-      switch (argc) {
-        case 1: *argp = isimm ? RSM_GET_Au(in) : RSM_GET_A(in); return isimm;
-        case 2: *argp = isimm ? RSM_GET_Bu(in) : RSM_GET_B(in); return isimm;
-        case 3: *argp = isimm ? RSM_GET_Cu(in) : RSM_GET_C(in); return isimm;
-        case 4: *argp = isimm ? RSM_GET_Du(in) : RSM_GET_D(in); return isimm;
-        default: assert(0); return false;
-      }
+
+      // get the constant's value (e.g. 0xBEEF for "const x = 0xBEEF").
+      u64 value = *(const u64*)assertnotnull( ((gdata*)target)->initp );
+      trace("constant value: 0x%llx", value);
+
+      // patch_imm sets last argument of the rin_t at g->iv[refi] to value
+      return patch_imm(g, refn, refi, value, argp);
     }
 
     case GNAMED_T_DATA:
@@ -620,6 +676,9 @@ static bool getiargs(
   u32 argc = 0;
   rop_t op = (rop_t)n->ival;
 
+  trace("[%s] wantargc %u, minval %lld, maxval 0x%llx",
+    rop_name(op), wantargc, minval, maxval);
+
   // first argc-1 args are registers
   rnode_t* arg = n->children.head;
   for (; argc < wantargc-1 && arg; argc++, arg = arg->next)
@@ -642,9 +701,23 @@ static bool getiargs(
     return false;
 
   case RT_NAME: {
-    bool isimm = refnamed(g, arg, g->iv.len - 1, op, argc+1, &argv[argc]);
+    // set register values of instruction for refnamed & co to use.
+    rin_t* in = *inp;
+    assert(argc < 5);
+    switch (argc) {
+      case 0: break;
+      case 1: *in = RSM_MAKE_A(op, argv[0]); break;
+      case 2: *in = RSM_MAKE_AB(op, argv[0], argv[1]); break;
+      case 3: *in = RSM_MAKE_ABC(op, argv[0], argv[1], argv[2]); break;
+      case 4: *in = RSM_MAKE_ABCD(op, argv[0], argv[1], argv[2], argv[3]); break;
+    }
+
+    // set last arg argv[argc] by dereferencing name arg
+    bool isimm = refnamed(g, arg, g->iv.len-1, argc+1, &argv[argc]);
+
     // update instruction in case a patch caused instructions to be generated
     *inp = rarray_at(rin_t, &g->iv, g->iv.len - 1);
+
     return isimm;
   }
 
@@ -694,6 +767,8 @@ static void genop_call(gstate* g, rnode_t* n) {
     return;
   }
 
+  trace("");
+
   // desugar call operands, converting e.g.
   //   call foo R5 3
   // to
@@ -732,6 +807,7 @@ gen_call:
 
   // generate CALL instruction
   rin_t* in = GARRAY_PUSH_OR_RET(rin_t, &g->iv);
+  *in = RSM_MAKE__(rop_CALL); // needed for refnamed to set flags correctly
   i32 genarg;
   if (getiargs(g, n, &genarg, 1, 0, RSM_MAX_Au, &in)) {
     *in = RSM_MAKE_Au(rop_CALL, genarg);
@@ -749,12 +825,20 @@ static void genop(gstate* g, rnode_t* n) {
   assert(n->ival < RSM_OP_COUNT);
 
   rop_t op = (rop_t)n->ival;
+
+  trace("[%s]", rop_name(op));
+
   if (op == rop_CALL)
     return genop_call(g, n);
 
+  // add placeholder instruction
   rin_t* in = GARRAY_PUSH_OR_RET(rin_t, &g->iv);
-  *in = RSM_MAKE__(op);
-  i32 arg[4]; // ABCD args to RSM_MAKE_* macros
+  *in = RSM_MAKE__(op); // all args are zeroed; ie R0 for register values
+
+  // storage for ABCD args to RSM_MAKE_* macros
+  i32 arg[4] = {0};
+
+  //dlog_asm(g->a->memalloc, (const void*)g->iv.v, g->iv.len);
 
   // route opcode to instruction encoder
   switch (op) {
@@ -764,20 +848,32 @@ static void genop(gstate* g, rnode_t* n) {
   }
 
   // instruction encoders
-  #define NOIMM(argc, ENC, args...)                                 \
-    if (getiargs(g, n, arg, argc, 0, RSM_MAX_REG, &in)) goto noimm; \
-    *in = RSM_MAKE_##ENC(op, args); return;
-
-  #define RoIMM(argc, ENC, ENCi, minval, maxval, args...) \
-    if (getiargs(g, n, arg, argc, minval, maxval, &in)) { \
-      *in = RSM_MAKE_##ENCi(op, args);                    \
-    } else {                                              \
-      *in = RSM_MAKE_##ENC(op, args);                     \
-    }                                                     \
+  #define NOIMM(argc, ENC, args...)                     \
+    if (getiargs(g, n, arg, argc, 0, RSM_MAX_REG, &in)) \
+      goto noimm;                                       \
+    *in = RSM_MAKE_##ENC(op, args);                     \
     return;
 
+  #define RoIMM(argc, ENC, ENCi, minval, maxval, args...) \
+    trace("[%s] call getiargs", rop_name(op)); \
+    if (getiargs(g, n, arg, argc, minval, maxval, &in)) { \
+      /* last arg is immediate value */ \
+      trace("[%s] g.iv[%lu] = RSM_MAKE_" #ENCi "(%d, %d, %d, %d)", \
+        rop_name(op), ((uintptr)in - (uintptr)g->iv.v)/sizeof(rin_t), \
+        arg[0], arg[1], arg[2], arg[3]); \
+      *in = RSM_MAKE_##ENCi(op, args);                    \
+      return; \
+    } \
+    /* last arg is a register number */ \
+    trace("[%s] g.iv[%lu] = RSM_MAKE_" #ENC "(%d, %d, %d, %d)", \
+      rop_name(op), ((uintptr)in - (uintptr)g->iv.v)/sizeof(rin_t), \
+      arg[0], arg[1], arg[2], arg[3]); \
+    *in = RSM_MAKE_##ENC(op, args);                     \
+    goto finalize_reg_op; \
+
   #define RvIMM(argc, ENCv, minval, maxval, args...) {                \
-    if (!getiargs(g, n, arg, argc, minval, maxval, &in)) goto no_r;   \
+    if (!getiargs(g, n, arg, argc, minval, maxval, &in))              \
+      goto no_r;                                                      \
     u64 value = assertnotnull(nlastchild(n))->ival;                   \
     assert(argc == 2); /* fix if we add V ops with different arity */ \
     make_bigv(g, op, in, arg[0], value);                              \
@@ -806,6 +902,15 @@ static void genop(gstate* g, rnode_t* n) {
   DIAGNOSTIC_IGNORE_POP()
   #undef RoIMM
   #undef NOIMM
+
+finalize_reg_op:
+  // eliminate instructions that have no effect, e.g. "COPY R1 R1"
+  if (op == rop_COPY && RSM_GET_A(*in) == RSM_GET_B(*in)) {
+    u32 inindex = (u32)( ((uintptr)in - (uintptr)g->iv.v) / sizeof(rin_t) );
+    trace("rarray_remove g.iv[%u]", inindex);
+    rarray_remove(rin_t, &g->iv, inindex, 1);
+  }
+  return;
 
 noimm: // the operation does not accept an immediate-value as the last argument
   ERRN(n, "last argument to %s must be a register", rop_name(op));
@@ -1027,9 +1132,9 @@ static void genfun(gstate* g, rnode_t* fun) {
 }
 
 static void dlog_gdata(gdata* nullable d) {
-  #if defined(DEBUG) && defined(DEBUG_LOG_DATA)
+  #ifdef DEBUG_LOG_DATALAYOUT
   if (!d) {
-    dlog("data:\nADDRESS            NAME             SIZE  ALIGN  DATA");
+    dlog("ROM data layout:\nADDRESS            NAME             SIZE  ALIGN  DATA");
     return;
   }
   char buf[1024];
@@ -1109,7 +1214,7 @@ static void layout_gdata(gstate* g) {
     addr += d->size;
     dlog_gdata(d);
   }
-  g->datasize = addr;
+  g->datasize = addr - EXE_BASE_ADDR;
 }
 
 static rerr_t rom_on_filldata(void* base, void* gp) {

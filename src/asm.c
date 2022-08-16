@@ -256,6 +256,22 @@ void rsm_unloadfile(rmem_t m) {
   unmapfile(m);
 }
 
+
+#if DEBUG
+  UNUSED void _dlog_asm(rmemalloc_t* ma, const rin_t* iv, usize icount) {
+    rmem_t m = rmem_must_alloc(ma, 4096);
+    rfmtflag_t fl = isatty(1) ? RSM_FMT_COLOR : 0;
+    usize n = rsm_fmtprog(m.p, m.size, iv, icount, fl);
+    if (n >= m.size) {
+      rmem_must_resize(ma, &m, n + 1);
+      rsm_fmtprog(m.p, m.size, iv, icount, fl);
+    }
+    fwrite(m.p, n, 1, stdout); putc('\n', stdout);
+    rmem_free(ma, m);
+  }
+#endif
+
+
 // ————————————————————————————————————————
 // bufslab
 

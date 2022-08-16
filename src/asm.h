@@ -61,6 +61,17 @@ typedef struct rrombuild {
 
 rerr_t rom_build(rrombuild_t* rb, rmemalloc_t* ma, rrom_t* rom);
 
+static void dlog_asm(rmemalloc_t* ma, const rin_t* iv, usize icount);
+#if DEBUG
+  void _dlog_asm(rmemalloc_t* ma, const rin_t* iv, usize icount);
+  inline static void dlog_asm(rmemalloc_t* ma, const rin_t* iv, usize icount) {
+    _dlog_asm(ma, iv, icount);
+  }
+#else
+  inline static void dlog_asm(rmemalloc_t* ma, const rin_t* iv, usize icount) {
+  }
+#endif
+
 // ————————————————
 // bufslab
 

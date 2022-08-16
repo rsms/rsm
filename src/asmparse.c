@@ -86,6 +86,8 @@ static ropres rop_result(rop_t op) {
 }
 
 static rnode_t* appendchild(rnode_t* parent, rnode_t* child) {
+  // if you get a crash here, trying to access address 0xbbbbbbbb... then
+  // enable RMEM_PEDANTIC_CHECKS in mem_alloc.c to debug potential allocator bug.
   if (parent->children.tail) {
     parent->children.tail->next = child;
   } else {
@@ -230,12 +232,15 @@ static void sname_or_kw(pstate* p) { // "foo"
     p->ival = RSM_MAX_REG;
     return;
   }
+
   uintptr* vp = smap_lookup(&kwmap, p->tokstart, toklen(p)); // look up keyword
   if (!vp)
     return;
-  p->tok = *vp & 0xff;
-  if (*vp > 0xff)
-    p->ival = (u64)(*vp >> sizeof(rtok_t)*8);
+
+  //dlog("smap_lookup(&kwmap, \"%.*s\") => 0x%lx", (int)toklen(p), p->tokstart, *vp);
+  p->tok = *vp & 0xff; // bottom 8 bits is the token
+  // upper bits is a rop_t
+  p->ival = (u64)(*vp >> sizeof(rtok_t)*8) - 1;
 }
 
 static u32 sstring_multiline(pstate* p, const char* start, const char* end) {
@@ -512,18 +517,6 @@ static void sadvance(pstate* p) { // scan the next token
   assert(p->tokstart >= p->linestart);
   p->startpos.line = p->lineno;
   p->startpos.col = (u32)(uintptr)(p->tokstart - p->linestart) + 1;
-
-
-  // _( EQ    , ABCu , reg , "eq"    RA = RB == Cu )
-  // _( NEQ   , ABCu , reg , "neq"   RA = RB != Cu )
-  // _( LTU   , ABCu , reg , "ltu"   RA = RB <  Cu )
-  // _( LTS   , ABCs , reg , "lts"   RA = RB <  Cs )
-  // _( LTEU  , ABCu , reg , "lteu"  RA = RB <= Cu )
-  // _( LTES  , ABCs , reg , "ltes"  RA = RB <= Cs )
-  // _( GTU   , ABCu , reg , "gtu"   RA = RB >  Cu )
-  // _( GTS   , ABCs , reg , "gts"   RA = RB >  Cs )
-  // _( GTEU  , ABCu , reg , "gteu"  RA = RB >= Cu )
-  // _( GTES  , ABCs , reg , "gtes"  RA = RB >= Cs )
 
   switch (c) {
     case '(': p->tok = RT_LPAREN; return;
@@ -971,8 +964,6 @@ static rnode_t* poperands(PPARAMS, rnode_t* n) {
 // operation = op operand*
 static rnode_t* prefix_op(PPARAMS) {
   rnode_t* n = prefix_int(PARGS);
-  // if (n->ival == rop_CALL)
-  //   return pcall(PARGS, n);
   return poperands(PARGS, n);
 }
 
@@ -1469,7 +1460,7 @@ rerr_t init_asmparse() {
 
   #define _(op, enc, res, kw, ...) \
     vp = assertnotnull(smap_assign(m, kw, strlen(kw))); \
-    *vp = (RT_OP | ((uintptr)rop_##op << (sizeof(rtok_t)*8)));
+    *vp = (RT_OP | (((uintptr)rop_##op + 1) << (sizeof(rtok_t)*8)));
   RSM_FOREACH_OP(_)
   #undef _
 
@@ -1486,6 +1477,28 @@ rerr_t init_asmparse() {
     "not enough memory %zu; need %zu", sizeof(memory), ideal_size);
   if (ideal_size < sizeof(memory))
     dlog("kwmap uses only %zu B memory -- trim 'memory'", ideal_size);
+
+  // Make sure the smap isn't broken
+  // TODO: remove when it seems to be working
+  #if DEBUG
+  {
+    uintptr* vp;
+    uintptr expect = 0;
+    #define _(op, enc, res, kw, ...) \
+      vp = smap_lookup(&kwmap, kw, strlen(kw)); \
+      expect = (RT_OP | (((uintptr)rop_##op + 1) << (sizeof(rtok_t)*8))); \
+      assertf(*vp == expect, "\"%s\" (op): expect 0x%lx, got 0x%lx", kw, expect, *vp);
+    RSM_FOREACH_OP(_)
+    #undef _
+    #define _(token, kw) \
+      vp = smap_lookup(&kwmap, kw, strlen(kw)); \
+      expect = token; \
+      assertf(*vp == expect, "\"%s\" (token): expect 0x%lx, got 0x%lx", kw, expect, *vp);
+    RSM_FOREACH_KEYWORD_TOKEN(_)
+    #undef _
+  }
+  #endif
+
 
   // // smap_cfmt prints C code for a constant static representation of m
   // rmem_t buf = rmem_alloc(ma, rmem_avail(ma));

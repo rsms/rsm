@@ -611,7 +611,7 @@ static void sadvance(pstate* p) { // scan the next token
     const char* tname = tokname(t);
     const char* tvalp = p->tokstart;
     int tvalc = (int)toklen(p);
-    char buf[1024];
+    char buf[256];
     switch (t) {
       case RT_INTLIT2:
       case RT_INTLIT:
@@ -630,8 +630,9 @@ static void sadvance(pstate* p) { // scan the next token
       case RT_STRLIT: {
         abuf_t s = abuf_make(buf, sizeof(buf));
         abuf_repr(&s, p->sval.p, p->sval.len);
-        abuf_terminate(&s);
-        return log("%3u:%-3u %-12s \"%s\"", line, col, tname, buf);
+        if (abuf_terminate(&s) >= sizeof(buf))
+          memcpy(buf+sizeof(buf)-5, " \xE2\x80\xA6", 4); // U+2026 (" …\0")
+        return log("%3u:%-3u %-12s \"%s\" (%u)", line, col, tname, buf, p->sval.len);
       }
 
       default:

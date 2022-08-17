@@ -1137,19 +1137,22 @@ static void dlog_gdata(gdata* nullable d) {
     dlog("ROM data layout:\nADDRESS            NAME             SIZE  ALIGN  DATA");
     return;
   }
-  char buf[1024];
-  abuf_t s = abuf_make(buf, sizeof(buf));
+  char reprbuf[128];
+  char zerobuf[32];
+  abuf_t s = abuf_make(reprbuf, sizeof(reprbuf));
   if (d->initp) {
     abuf_reprhex(&s, d->initp, (usize)d->size);
     if (d->size < (u64)d->align) {
       // pad
       abuf_c(&s, ' ');
-      memset(buf + sizeof(buf)/2, 0, sizeof(buf) - sizeof(buf)/2);
-      abuf_reprhex(&s, buf + sizeof(buf)/2, (usize)d->align - (usize)d->size);
+      usize nbyte = MIN(sizeof(zerobuf), (usize)d->align - (usize)d->size);
+      memset(zerobuf, 0, nbyte);
+      abuf_reprhex(&s, zerobuf, nbyte);
     }
   } else {
-    memset(buf + sizeof(buf)/2, 0, sizeof(buf) - sizeof(buf)/2);
-    abuf_reprhex(&s, buf + sizeof(buf)/2, (usize)d->size);
+    usize nbyte = MIN(sizeof(zerobuf), (usize)d->size);
+    memset(zerobuf, 0, nbyte);
+    abuf_reprhex(&s, zerobuf, nbyte);
   }
   int namemax = 10, datamax = 30;
   int namelen = d->namelen, datalen = (int)s.len;
@@ -1160,7 +1163,7 @@ static void dlog_gdata(gdata* nullable d) {
     d->addr,
     namemax, namelen, d->name, nametail,
     d->size, d->align,
-    datalen, buf, datatail);
+    datalen, reprbuf, datatail);
   #endif
 }
 

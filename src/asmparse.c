@@ -7,7 +7,7 @@
 #include "abuf.h"
 
 //#define LOG_TOKENS // define to log() token scanning
-#define LOG_AST    // define to log() parsed top-level ast nodes
+//#define LOG_AST    // define to log() parsed top-level ast nodes
 //#define LOG_PRATT(fmt, args...) dlog("[pratt] " fmt, ##args) // log pratt dispatch
 //#define PRODUCE_COMMENT_NODES // define to include comments in the AST
 //#define PANIC_ON_SYNTAX_ERROR // call panic() on syntax error in DEBUG builds

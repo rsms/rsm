@@ -861,7 +861,7 @@ rmem_t rmem_alloc_aligned(rmemalloc_t* a, usize size, usize alignment) {
   // This succeeds for the common case of a small allocation size.
   #ifdef RMEM_SLABHEAP_ENABLE
     // overflow of slab_index is ok
-    const usize slabsize = CEIL_POW2(ALIGN2(size, SLABHEAP_MIN_SIZE));
+    const usize slabsize = CEIL_POW2(ALIGN2(MAX(size, alignment), SLABHEAP_MIN_SIZE));
     usize slab_index = ILOG2(slabsize) - ILOG2(SLABHEAP_MIN_SIZE);
     //dlog("** %zu => slabsize %zu, slab_index %zu", size, slabsize, slab_index);
     if (slab_index < SLABHEAP_COUNT) {

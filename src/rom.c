@@ -5,19 +5,19 @@
 
 typedef u8 rrom_skind; // section kind
 enum rrom_skind {
-  RSM_ROM_DATA = 0x03,
-  RSM_ROM_CODE = 0x04,
+  RSM_ROM_CODE = 0x01,
+  RSM_ROM_DATA = 0x02,
 
-  rrom_skind_MIN = RSM_ROM_DATA,
-  rrom_skind_MAX = RSM_ROM_CODE,
+  rrom_skind_MIN = RSM_ROM_CODE,
+  rrom_skind_MAX = RSM_ROM_DATA,
 } RSM_END_ENUM(rrom_skind)
 
 #define CODE_ALIGNMENT sizeof(rin_t) // alignment of CODE section body
 
 UNUSED static const char* rrom_skind_name(rrom_skind kind) {
   switch ((enum rrom_skind)kind) {
-    case RSM_ROM_DATA: return "DATA";
     case RSM_ROM_CODE: return "CODE";
+    case RSM_ROM_DATA: return "DATA";
   }
   return "?";
 }
@@ -81,12 +81,11 @@ static rerr_t load_section_DATA(LPARAMS) {
 }
 
 static rerr_t load_section_CODE(LPARAMS) {
-  const void* code = (const void*)ALIGN2((uintptr)p, CODE_ALIGNMENT);
-  usize codesize = size - (usize)(code - (const void*)p);
-  if UNLIKELY(!IS_ALIGN2(codesize, CODE_ALIGNMENT))
-    return perr("CODE section size %lu not aligned at %zu", codesize, CODE_ALIGNMENT);
-  rom->code = code;
-  rom->codelen = codesize / CODE_ALIGNMENT; // compiler replaces w/ shr; ie codesize>>2
+  p = (const void*)ALIGN2((uintptr)p, CODE_ALIGNMENT);
+  if UNLIKELY(!IS_ALIGN2(size, CODE_ALIGNMENT))
+    return perr("CODE section size %llu not aligned to %zu", size, CODE_ALIGNMENT);
+  rom->code = (const void*)p;
+  rom->codelen = (usize)( size / CODE_ALIGNMENT ); // #bytes -> #instructions
   p += size;
   MUSTTAIL return load_next_section(LARGS);
 }
@@ -114,7 +113,7 @@ rerr_t rsm_loadrom(rrom_t* rom) {
   rom->datasize  = 0;
   rom->dataalign = 1;
 
-  if UNLIKELY(rom->imgsize < 6 || *(u32*)rom->img->magic != RSM_ROM_MAGIC) {
+  if UNLIKELY(rom->imgsize < 6 || memcmp(&rom->img->magic, RSM_ROM_MAGIC, 4)) {
     const void* p = rom->img; // for perr
     return perr("invalid ROM image");
   }
@@ -136,6 +135,11 @@ rerr_t rsm_loadrom(rrom_t* rom) {
 // --------------------------------------------------------------------------------------
 // ROM builder
 #ifndef RSM_NO_ASM
+
+typedef struct {
+  usize size;  // size of section body
+  usize align; // alignment of section body
+} secsize_t;
 
 #define LEB_NBYTE_64 10  // number of bytes needed to represent all 64-bit integer values
 #define LEB_NBYTE_32 5   // number of bytes needed to represent all 32-bit integer values
@@ -171,14 +175,25 @@ _LEB_DEF_WRITE(leb_u64_write, u64, LEB_NBYTE_64, _LEB_MORE_U)
 // static usize leb_i32_write(u8 out[LEB_NBYTE_32], i32 val);
 // _LEB_DEF_WRITE(leb_i32_write, i32, LEB_NBYTE_32, _LEB_MORE_S)
 
+static usize leb_size(u64 val) {
+  for (usize len = 0; ;len++) {
+    val >>= 7;
+    if (val == 0)
+      return len;
+  }
+}
+
 
 static void calc_DATA(rrombuild_t* rb, usize* bsize, usize* align) {
-  if (rb->datasize)
-    *bsize = 1 + rb->datasize; // 1+ for "align u8"
+  if (rb->datasize == 0)
+    return;
+  // We add one byte for storage of data alignment value
+  *bsize = rb->datasize + 1;
+  *align = 1; // alignment in ROM image, not at runtime
 }
 static u8* build_DATA(rrombuild_t* rb, rrom_t* rom, u8* p, rerr_t* errp) {
   assert(rb->dataalign != 0);
-  assert(CEIL_POW2(rb->dataalign) == rb->dataalign);
+  assert(IS_POW2(rb->dataalign));
   *p++ = rb->dataalign == 1 ? 1 : ILOG2(rb->dataalign);
   rom->data = p;
   rom->datasize = rb->datasize;
@@ -203,98 +218,145 @@ static u8* build_CODE(rrombuild_t* rb, rrom_t* rom, u8* p, rerr_t* errp) {
 }
 
 
-rerr_t rom_build(rrombuild_t* rb, rmemalloc_t* ma, rrom_t* rom) {
-  memset(rom, 0, sizeof(rrom_t)); // in case of error
-  rom->dataalign = 1;
-
-  // Calculate image size
-  // Important: CALC_SECTION_SIZE order must match START_SECTION order
-  usize imgz = sizeof(rromimg_t);
-  usize sechsize[rrom_skind_MAX+1] = {0}; // header size with padding
-  usize secbsize[rrom_skind_MAX+1] = {0}; // body size with padding (duplicate)
-  usize secalign[rrom_skind_MAX+1] = {0};
+static usize calc_rom_size(
+  rrombuild_t* rb, rrom_t* rom, secsize_t* secsizev, usize* maxalignp)
+{
+  usize addr = sizeof(rromimg_t); // logical address; also effectively total size
 
   for (rrom_skind kind = rrom_skind_MIN; kind <= rrom_skind_MAX; kind++) {
-    usize bsize = 0;
-    usize align = 1;
+    usize bodysize = 0;
+    usize bodyalign = 1; // section body alignment in the ROM data
     switch ((enum rrom_skind)kind) {
-      case RSM_ROM_DATA: calc_DATA(rb, &bsize, &align); break;
-      case RSM_ROM_CODE: calc_CODE(rb, &bsize, &align); break;
+      case RSM_ROM_CODE: calc_CODE(rb, &bodysize, &bodyalign); break;
+      case RSM_ROM_DATA: calc_DATA(rb, &bodysize, &bodyalign); break;
     }
-    if (bsize == 0)
+    if (bodysize == 0)
       continue;
-    assert(align != 0);
-    assert(CEIL_POW2(align) == align);
-    u8 tmp[LEB_NBYTE_64];
-    usize n = leb_u64_write(tmp, (u64)bsize + (u64)align-1);
-    usize headerz = 1 + n; // kind u8 + size varint
-    usize totalz = ALIGN2(imgz + headerz + bsize, align) - imgz;
-    imgz += totalz;
-    sechsize[kind] = totalz - bsize;
-    secbsize[kind] = totalz - headerz;
-    secalign[kind] = (usize)align;
-    // usize padding = totalz - bsize - headerz;
-    // dlog("[calc] section 0x%02x size: %zu (%zu + %zu + %zu) @%zu",
-    //   kind, totalz, headerz, padding, bsize, align);
+
+    // #if DEBUG
+    // usize startaddr = addr;
+    // #endif
+
+    // headsize = u8(kind) + len(LEB(bodysize))
+    usize headsize = 1 + leb_size((u64)bodysize);
+    addr += headsize;
+
+    // align start of body
+    assert(bodyalign > 0 && IS_POW2(bodyalign));
+    addr = ALIGN2(addr, bodyalign);
+    *maxalignp = MAX(*maxalignp, bodyalign);
+
+    // bodysize
+    secsizev[kind].size = bodysize;
+    secsizev[kind].align = bodyalign;
+    addr += bodysize;
+
+    // dlog("[%s] %s section: %zu B = head(%zu) + padding(%zu) + body(%zu@%zu)",
+    //   __FUNCTION__, rrom_skind_name(kind), addr - startaddr,
+    //   headsize, ((addr - startaddr) - (headsize + bodysize)), bodysize, bodyalign);
   }
 
-  // allocate memory
-  rmem_t imgmem = rmem_alloc_aligned(ma, imgz, sizeof(void*)); // TODO: alignment
-  rromimg_t* img = imgmem.p;
-  if UNLIKELY(img == NULL)
-    return rerr_nomem;
+  return addr;
+}
 
-  // set header
-  *(u32*)img->magic = RSM_ROM_MAGIC; // "RSM\0"
+
+#if DEBUG
+  static void dlog_section_layout(
+    rromimg_t* img, secsize_t* secsizev, rrom_skind kind, uintptr secaddr, const u8* p)
+  {
+    uintptr headaddr = secaddr - (uintptr)img;
+    uintptr bodyaddr = (uintptr)p - (uintptr)img;
+    uintptr pad = ALIGN2((uintptr)p, secsizev[kind].align) - (uintptr)p;
+    usize secsize = (usize)( ((uintptr)p + pad + secsizev[kind].size) - secaddr );
+    const int kMaxSecNameLen = 4;
+    dlog("  %*s section %08lx … %08lx (%zu B)", kMaxSecNameLen, rrom_skind_name(kind),
+      secaddr - (uintptr)img, (secaddr - (uintptr)img) + secsize, secsize);
+    dlog("  %*s  header %08lx (%zu B)", kMaxSecNameLen, "",
+      headaddr, (uintptr)p - secaddr);
+    if (pad) {
+      dlog("  %*s padding %08lx (%zu B)", kMaxSecNameLen, "", bodyaddr, pad);
+    }
+    dlog("  %*s    body %08lx (%zu B, align %zu B)", kMaxSecNameLen, "",
+      bodyaddr + pad, secsizev[kind].size, secsizev[kind].align);
+  }
+#endif
+
+
+static rerr_t write_rom(
+  rrombuild_t* rb, rrom_t* rom, secsize_t* secsizev, rromimg_t* img, usize* imgsizep)
+{
+  // ROM header
+  memcpy(&img->magic, RSM_ROM_MAGIC, 4);
   img->version = 0;
 
   // p points to current "fill location" of the image
-  void* base = img;
-  u8* p = base + sizeof(rromimg_t);
+  u8* p = (u8*)img + sizeof(rromimg_t);
+
+  #if DEBUG
+  dlog("ROM image %08lx … %08lx (%zu B)", 0lu, (uintptr)*imgsizep, *imgsizep);
+  #endif
 
   for (rrom_skind kind = rrom_skind_MIN; kind <= rrom_skind_MAX; kind++) {
-    usize bodysize = secbsize[kind];
-    if (bodysize == 0)
+    if (secsizev[kind].size == 0)
       continue;
-    usize headsize = sechsize[kind];
 
-    // write section header
-    dlog("%s section at %08lx: %zu B head",
-      rrom_skind_name(kind), (uintptr)((void*)p-base), headsize);
     #if DEBUG
-    void* secstart = p; // used for assertion
+    uintptr secaddr = (uintptr)p; // used for assertion
     #endif
-    *p++ = kind; headsize--;
-    usize n = leb_u64_write(p, (u64)bodysize);
-    p += n; headsize -= n;
-    if (headsize) { // padding
-      memset(p, 0, headsize);
-      p += headsize;
-      bodysize -= headsize; // remove padding (only for log message)
-    }
 
-    // write section body
-    dlog("        body at %08lx: %zu B", (uintptr)((void*)p-base), bodysize);
-    assertf(IS_ALIGN2((uintptr)((void*)p-base), secalign[kind]), "misaligned");
+    // write header
+    *p++ = kind;
+    p += leb_u64_write(p, (u64)secsizev[kind].size);
+
+    #if DEBUG
+    dlog_section_layout(img, secsizev, kind, secaddr, p);
+    #endif
+
+    // align start of body
+    p = (u8*)ALIGN2((uintptr)p, secsizev[kind].align);
+
+    // write body
     rerr_t err = 0;
     switch ((enum rrom_skind)kind) {
       case RSM_ROM_DATA: p = build_DATA(rb, rom, p, &err); break;
       case RSM_ROM_CODE: p = build_CODE(rb, rom, p, &err); break;
     }
     if UNLIKELY(err) {
-      rmem_free(ma, imgmem);
+      *imgsizep = 0;
       return err;
     }
+  }
 
-    // check that the actual size is what we expect (note that headsize == padding)
-    assert((usize)((void*)p-secstart) == sechsize[kind]+secbsize[kind]-headsize);
+  *imgsizep = (usize)( (uintptr)p - (uintptr)img );
+  return 0;
+}
+
+
+rerr_t rom_build(rrombuild_t* rb, rmemalloc_t* ma, rrom_t* rom) {
+  memset(rom, 0, sizeof(rrom_t)); // in case of error
+  rom->dataalign = 1; // Note: this is set to rb->dataalign by build_DATA
+
+  // calculate image size
+  secsize_t secsizev[rrom_skind_MAX+1] = {0}; // size of each section
+  usize maxalign = 1;
+  rom->imgsize = calc_rom_size(rb, rom, secsizev, &maxalign);
+
+  // allocate memory
+  rmem_t imgmem = rmem_alloc_aligned(ma, rom->imgsize, maxalign);
+  rromimg_t* img = imgmem.p;
+  if UNLIKELY(img == NULL)
+    return rerr_nomem;
+
+  // write ROM image
+  rerr_t err = write_rom(rb, rom, secsizev, img, &rom->imgsize);
+  if UNLIKELY(err) {
+    rmem_free(ma, imgmem);
+    return err;
   }
 
   // finalize rrom fields
   rom->img = img;
-  rom->imgsize = (usize)((void*)p - base);
   rom->imgmem = imgmem;
-  dlog("final ROM image size: %zu B", rom->imgsize);
   return 0;
 }
 

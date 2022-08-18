@@ -284,9 +284,10 @@ int main(int argc, char*const* argv) {
 
   // input: load ROM or compile source
   rrom_t rom = {0};
-  if (indata.size > 4 && *(u32*)indata.p == RSM_ROM_MAGIC) {
+  if (indata.size > 4 && memcmp(indata.p, RSM_ROM_MAGIC, 4) == 0) {
     rom.img = indata.p;
     rom.imgsize = indata.size;
+    assert(IS_ALIGN2((uintptr)indata.p, sizeof(rin_t)));
   } else if (!compile(ma, infile, indata, &rom)) {
     return 1;
   }

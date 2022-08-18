@@ -296,11 +296,8 @@ _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 #define RSM_MAKE_ABCs(op,a,b,c)    RSM_MAKE_ABCu(op,a,b,((rin_t)(c))    + (RSM_MAX_Cu / 2))
 #define RSM_MAKE_ABCDs(op,a,b,c,d) RSM_MAKE_ABCDu(op,a,b,c,((rin_t)(d)) + (RSM_MAX_Du / 2))
 
-#if RSM_LITTLE_ENDIAN
-  #define RSM_ROM_MAGIC 0x52534d00 // "RSM\0"
-#else
-  #define RSM_ROM_MAGIC 0x004d5352 // "RSM\0"
-#endif
+// RSM_ROM_MAGIC is the ROM image file header "magic bytes"
+#define RSM_ROM_MAGIC "RSM\0"
 
 // RSM_PAGE_SIZE is the size in bytes of one RSM virtual memory page
 #define RSM_PAGE_SIZE 4096u
@@ -493,7 +490,7 @@ usize rmem_cap(rmemalloc_t*);
 
 // rromimg_t: ROM image layout, a portable binary blob
 typedef struct {
-  u8 magic[4]; // RSM_ROM_MAGIC
+  u8 magic[4]; // "RSM\0"
   u8 version;
   u8 data[];
 } rromimg_t;

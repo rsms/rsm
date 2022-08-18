@@ -38,20 +38,20 @@ Example:
      … │                               01 03 01 03          type 1  (i32)->(i32)
      … │                                           01 03    type 2  (i32)->() …
   0010 │ 00                                                 …
-     … │    01 10                                           import section, 16 bytes
+     … │    03 10                                           import section, 16 bytes
      … │          01                                        1 import
      … │             07 63 6f 6e 73 6f 6c 65 01             "console", 1 function
      … │                                        05 70 75    5 "pu …
   0020 │ 74 63 02                                           … tc" (i32)->()
-     … │          02 11                                     export section, 17 bytes
+     … │          04 11                                     export section, 17 bytes
      … │                02                                  2 exports
      … │                   06 75 70 63 61 73 65 01 02       "upcase" (i32)->(i32) code[2]
      … │                                              04    4 …
   0030 │ 6d 61 69 6e 00 04                                  … "main" ()->() code[4]
-     … │                   03 05                            data section, 5 bytes
+     … │                   02 05                            data section, 5 bytes
      … │                         02                         4B alignment of data
      … │                            00 00 00 63             data i32 0x63
-     … │                                        04 22       code section, 34 bytes
+     … │                                        01 22       code section, 34 bytes
      … │                                              00    padding
   0040 │ ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff    vmcode …
   0050 │ ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff    … vmcode
@@ -80,7 +80,15 @@ section:
       ╒════════════════╤════╩═════════╤═════════════════╤═══════════════╕
       │ paramc varuint │ type[paramc] │ resultc varuint │ type[resultc] │
       └────────────────┴──────────────┴─────────────────┴───────────────┘
-  0x01 import section:
+  0x01 code section:
+    ┌─────────────────┐
+    │ instr u32[...]  │
+    └─────────────────┘
+  0x02 data section:
+    ┌──────────┬──────┐
+    │ align u8 │ data │
+    └──────────┴──────┘
+  0x03 import section:
     ┌────────────────┬─────────────────┐
     │ mcount varuint │ mimport[mcount] │
     └────────────────┴───────╥─────────┘
@@ -90,21 +98,13 @@ section:
           ╒═════════════════╤═════════════════════╤══════════════╩╕
           │ namelen varuint │ namestr u8[namelen] │ typei varuint │
           └─────────────────┴─────────────────────┴───────────────┘
-  0x02 export section:
+  0x04 export section:
     ┌───────────────┬───────────────┐
     │ count varuint │ export[count] │
     └───────────────┴───────╥───────┘
       ╒═════════════════╤═══╩═════════════════╤═══════════════╤═══════════════╕
       │ namelen varuint │ namestr u8[namelen] │ typei varuint │ codei varuint │
       └─────────────────┴─────────────────────┴───────────────┴───────────────┘
-  0x03 data section:
-    ┌──────────┬──────┐
-    │ align u8 │ data │
-    └──────────┴──────┘
-  0x04 code section:
-    ┌─────────────────┐
-    │ instr u32[...]  │
-    └─────────────────┘
   0x05 name section:
     ┌───────────────┬─────────────┐
     │ count varuint │ name[count] │
@@ -117,38 +117,5 @@ type:
   ┌────┐   0x00 i1   0x03 i32   0x08 f32
   │ u8 │   0x01 i8   0x04 i64   0x09 f64
   └────┘   0x02 i16
-
-
-Runtime memory layout
-
-  Linear model like WASM where vm code does not live in runtime memory.
-  Simple and easy to understand. Coroutines would have to allocate their
-  stacks on the heap since the stack area can't grow. However growing the
-  heap is trivial (just allow higher addresses.)
-
-   0x0         datasize      heapbase
-    ┌─────────────┼─────────────┼───────────···
-    │ data        │     ← stack │ heap →
-    └─────────────┴─────────────┴───────────···
-
-  If we want to use memory-mapped I/O for stuff like devices, those mapped
-  things would go first so that their addresses are nice and short.
-
-   0x0         0xffff        datasize      heapbase
-    ┌─────────────┼─────────────┼─────────────┼───────────···
-    │ I/O map     │ data        │     ← stack │ heap →
-    └─────────────┴─────────────┴─────────────┴───────────···
-
-  If we have virtual memory, a page table, we could use a layout like this
-  where the stack and heap are allocated in far-distance pages. But this would
-  make porting RSM to other platforms harder since you'd need a page table.
-  Growing the stack is possible in this model either simply by convention,
-  or a mprotect'ed guard page separating the stack and heap, on systems that
-  support it.
-
-   0x0        heapbase                    0xFFFFFFFF
-    ┌─────────────┼────────── ··· ─────────────┤
-    │ data        │ heap →    ···    ← stack   │
-    └─────────────┴────────── ··· ─────────────┘
 
 

@@ -1,0 +1,34 @@
+> This is a legacy document, for execution engine v1
+
+Runtime memory layout
+
+  Linear model like WASM where vm code does not live in runtime memory.
+  Simple and easy to understand. Coroutines would have to allocate their
+  stacks on the heap since the stack area can't grow. However growing the
+  heap is trivial (just allow higher addresses.)
+
+   0x0         datasize      heapbase
+    ┌─────────────┼─────────────┼───────────···
+    │ data        │     ← stack │ heap →
+    └─────────────┴─────────────┴───────────···
+
+  If we want to use memory-mapped I/O for stuff like devices, those mapped
+  things would go first so that their addresses are nice and short.
+
+   0x0         0xffff        datasize      heapbase
+    ┌─────────────┼─────────────┼─────────────┼───────────···
+    │ I/O map     │ data        │     ← stack │ heap →
+    └─────────────┴─────────────┴─────────────┴───────────···
+
+  If we have virtual memory, a page table, we could use a layout like this
+  where the stack and heap are allocated in far-distance pages. But this would
+  make porting RSM to other platforms harder since you'd need a page table.
+  Growing the stack is possible in this model either simply by convention,
+  or a mprotect'ed guard page separating the stack and heap, on systems that
+  support it.
+
+   0x0        heapbase                    0xFFFFFFFF
+    ┌─────────────┼────────── ··· ─────────────┤
+    │ data        │ heap →    ···    ← stack   │
+    └─────────────┴────────── ··· ─────────────┘
+

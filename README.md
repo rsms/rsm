@@ -155,7 +155,11 @@ Callee using these must save and later restore their values before returning.
 White-space is ignored
 
 ```abnf
-file       = fundef*
+file       = (fundef | constdef | datadef)*
+
+constdef   = "const" name type? "=" expr ";"
+datadef    = "data" name (type ("=" expr)? | "=" expr) ";"
+
 fundef     = "fun" name "(" params? ")" result? funbody?
 params     = param ("," param)*
 result     = param ("," param)*
@@ -163,25 +167,41 @@ param      = name type | type
 funbody    = "{" block0? block* "}"
 block0     = blockstmt*
 block      = name ":" blockstmt*
-blockstmt  = operation | assignment | binop
-operation  = op operand*
+blockstmt  = operation | assignment | binop | constdef | datadef
+
+type       = inttype | arraytype
+inttype    = "i1" | "i8" | "i16" | "i32" | "i64"
+arraytype  = type "[" intlit "]"
+
+operation  = opcode operand*
            ; brz R1 end
 binop      = operand ("-" | "+" | "*" | "/") operand
            ; x + 3
-assignment = assignreg | assigndata
-assignreg  = reg "=" (operation | operand) ";"
-assigndata = gname "=" type expr? ";"
-           ; R3 = add R1 R4
-           ; @x = i32 123
-operand    = reg | literal
+assignment = reg "=" (operation | operand) ";"
+operand    = reg | literal | name
+
 literal    = intlit
 intlit     = "-"? (binlit | declit | hexlit)
 binlit     = "0b" ("0" | "1")+
 declit     = (0-9)+
 hexlit     = "0x" (0-9A-Fa-f)+
-gname      = "@" name
+
 name       = ("_" | A-Za-z | uniprint) ("_" | A-Za-z | 0-9 | uniprint)
+
 uniprint   = <utf8 encoding of printable unicode codepoint>
+
+opcode     = copy | copyv
+           | load | load4u | load4s | load2u | load2s | load1u | load1s
+           | store | store4 | store2 | store1
+           | push | pop
+           | add | sub | mul | adds | subs | muls
+           | div | mod
+           | and | or | xor | shl | shrs | shru | binv
+           | not
+           | eq | neq | ltu | lts | lteu | ltes | gtu | gts | gteu | gtes
+           | if | ifz | call | jump | ret
+           | mcopy | mcmp
+           | write | read
 ```
 
 Comments are ignored and can appear wherever whitespace can appear

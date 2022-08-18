@@ -50,11 +50,12 @@ struct gnamed {
 
 struct gdata { // base: gnamed
   NAMED_HEAD
-  u32                  align; // byte alignment (1, 2, 4, 8, 16 ...)
-  u64                  size;  // length of data in bytes
-  const void* nullable initp; // pointer to initial value, if any
-  u64                  addr;  // address (valid only after layout)
-  gdata* nullable      next;  // for gstate.datalist
+  u16                  align;   // byte alignment (1 2 4 8 16 32 64 128 ...)
+  usize                size;    // length of data in bytes
+  usize                initlen; // bytes at initp (initlen<=size)
+  const void* nullable initp;   // pointer to initial value, if any
+  u64                  addr;    // address (valid only after layout)
+  gdata* nullable      next;    // for gstate.datalist
   rnode_t*             origin;
 };
 
@@ -961,7 +962,7 @@ static void genassign(gstate* g, rnode_t* n) {
   return genop(g, n);
 }
 
-static bool gdata_typesize(gstate* g, rnode_t* type, u32* alignp, u64* sizep) {
+static bool gdata_typesize(gstate* g, rnode_t* type, u16* alignp, usize* sizep) {
   switch (type->t) {
     case RT_I1:  *alignp = 1; *sizep = 1; return true;
     case RT_I8:  *alignp = 1; *sizep = 1; return true;
@@ -970,11 +971,11 @@ static bool gdata_typesize(gstate* g, rnode_t* type, u32* alignp, u64* sizep) {
     case RT_I64: *alignp = 8; *sizep = 8; return true;
     case RT_ARRAY: {
       rnode_t* elemtype = assertnotnull(type->children.head);
-      u64 elemsize;
+      usize elemsize;
       if UNLIKELY(!gdata_typesize(g, elemtype, alignp, &elemsize))
         return false;
-      if (check_mul_overflow(elemsize, type->ival, sizep)) {
-        ERRN(type, "array too large; %llu×%llu", elemsize, type->ival);
+      if (check_mul_overflow(elemsize, (usize)type->ival, sizep)) {
+        ERRN(type, "array too large; %zu×%zu", elemsize, (usize)type->ival);
         return false;
       }
       return true;
@@ -1000,21 +1001,26 @@ static void gendata(gstate* g, rnode_t* datn) {
   d->name = datn->sval.p;
   d->namelen = datn->sval.len;
   d->nrefs = 0;
+  d->align = 1;
+  d->size = 0;
   d->origin = datn;
+  d->initp = NULL;
+  d->initlen = 0;
 
   rnode_t* type = assertnotnull(datn->children.head);
   if UNLIKELY(!gdata_typesize(g, type, &d->align, &d->size))
     return;
 
   rnode_t* init = type->next;
-  d->initp = NULL;
   if (init) {
     if (tokisintlit(init->t)) {
       init->ival = htole64(init->ival); // make sure byte order is LE
       d->initp = &init->ival;
+      d->initlen = MIN(8lu, d->size);
     } else if (init->t == RT_STRLIT) {
       assert(type->t == RT_ARRAY);
       d->initp = init->sval.p;
+      d->initlen = (usize)init->sval.len;
     } else {
       ERRN(init, "invalid value %s for data", tokname(init->t));
     }
@@ -1022,6 +1028,10 @@ static void gendata(gstate* g, rnode_t* datn) {
     ERRN(datn, "missing initial value for constant %.*s", (int)d->namelen, d->name);
     return;
   }
+
+  assertf(IS_POW2(d->align), "align=%u", d->align);
+  assertf(IS_ALIGN2(d->size, d->align), "size=%zu, align=%u", d->size, d->align);
+  assertf((u64)d->initlen <= d->size, "initlen=%zu, size=%zu", d->initlen, d->size);
 
   // TODO: check that init value fits in type
 
@@ -1140,26 +1150,30 @@ static void dlog_gdata(gdata* nullable d) {
   char reprbuf[128];
   char zerobuf[32];
   abuf_t s = abuf_make(reprbuf, sizeof(reprbuf));
-  if (d->initp) {
-    abuf_reprhex(&s, d->initp, (usize)d->size);
-    if (d->size < (u64)d->align) {
-      // pad
+
+  if (d->initp && d->initlen > 0) {
+    assert((usize)d->initlen <= d->size);
+    abuf_reprhex(&s, d->initp, d->initlen);
+    // zero pad remaining bytes
+    usize nbyte_remaining = d->size - d->initlen;
+    if (nbyte_remaining > 0) {
       abuf_c(&s, ' ');
-      usize nbyte = MIN(sizeof(zerobuf), (usize)d->align - (usize)d->size);
-      memset(zerobuf, 0, nbyte);
-      abuf_reprhex(&s, zerobuf, nbyte);
+      usize z = MIN(sizeof(zerobuf), nbyte_remaining);
+      memset(zerobuf, 0, z);
+      abuf_reprhex(&s, zerobuf, z);
     }
   } else {
-    usize nbyte = MIN(sizeof(zerobuf), (usize)d->size);
+    usize nbyte = MIN(sizeof(zerobuf), d->size);
     memset(zerobuf, 0, nbyte);
     abuf_reprhex(&s, zerobuf, nbyte);
   }
+
   int namemax = 10, datamax = 30;
   int namelen = d->namelen, datalen = (int)s.len;
   const char* nametail = "", *datatail = "";
   if (namelen > namemax) { namemax--; namelen = namemax; nametail = "…"; }
   if (datalen > datamax) { datamax--; datalen = datamax; datatail = "…"; }
-  log("0x%016llx %-*.*s%s %10llu     %2u  %.*s%s",
+  log("0x%016llx %-*.*s%s %10zu     %2u  %.*s%s",
     d->addr,
     namemax, namelen, d->name, nametail,
     d->size, d->align,
@@ -1211,10 +1225,9 @@ static void layout_gdata(gstate* g) {
 
   for (u32 i = 0; i < g->dataorder.len; i++) {
     gdata* d = *rarray_at(gdata*, &g->dataorder, i);
-    assert(d->align != 0);
-    assert(d->align == 1 || CEIL_POW2(d->align) == d->align);
+    assertf(d->align > 0 && IS_POW2(d->align), "%u", d->align);
     d->addr = ALIGN2(addr, d->align);
-    addr += d->size;
+    addr += (u64)d->size;
     dlog_gdata(d);
   }
   g->datasize = addr - EXE_BASE_ADDR;
@@ -1225,15 +1238,18 @@ static rerr_t rom_on_filldata(void* base, void* gp) {
   for (u32 i = 0; i < g->dataorder.len; i++) {
     gdata* d = *rarray_at(gdata*, &g->dataorder, i);
     void* dst = base + d->addr;
+    usize nbyte = d->size;
+    assertf(d->align > 0 && IS_POW2(d->align), "%u", d->align);
     if (d->initp) {
       // copy initial value
-      memcpy(dst, d->initp, d->size);
+      assert(d->initlen <= d->size);
+      nbyte -= d->initlen;
+      memcpy(dst, d->initp, d->initlen);
       if (d->size < (usize)d->align) // zero pad
         memset(dst + d->size, 0, (usize)d->align - d->size);
-    } else {
-      // zero initial value
-      memset(dst, 0, MAX(d->align, d->size));
     }
+    // zero rest
+    memset(dst, 0, nbyte);
   }
   return 0;
 }

@@ -123,7 +123,7 @@ typedef u32 rin_t;
 //   reg   Result in register
 //   mem   Result in memory
 //   nil   No result, or implicit register result (i.e. calls)
-// Changing instruction encoding? Remember to also update vm.c, fmt.c and compile.c
+//
 #define RSM_FOREACH_OP(_) /* _(name, arguments, result, asmname, semantics) */ \
 _( COPY   , ABu  , reg , "copy"    /* RA = Bu -- aka "move" */)\
 _( COPYV  , ABv  , reg , "copyv"   /* RA = instr[...]; PC+=Bu */)\
@@ -579,8 +579,9 @@ typedef u8 rtok_t;
 _( RT_END ) \
 _( RT_COMMENT ) \
 /* simple tokens */ \
-_( RT_LPAREN ) _( RT_RPAREN ) \
-_( RT_LBRACE ) _( RT_RBRACE ) \
+_( RT_LPAREN ) _( RT_RPAREN ) /* () */ \
+_( RT_LBRACE ) _( RT_RBRACE ) /* {} */ \
+_( RT_LBRACK ) _( RT_RBRACK ) /* [] */ \
 _( RT_SEMI   ) /* ; */ \
 _( RT_COMMA  ) /* , */ \
 _( RT_ASSIGN ) /* = */ \
@@ -594,8 +595,10 @@ _( RT_OP     ) /* brz */ \
 _( RT_INTLIT2  ) _( RT_SINTLIT2  ) /* 0b1111011       */ \
 _( RT_INTLIT   ) _( RT_SINTLIT   ) /* 123, -123       */ \
 _( RT_INTLIT16 ) _( RT_SINTLIT16 ) /* 0x7b            */ \
+/* other literals */ \
 _( RT_STRLIT ) /* "foo" */ \
-_( RT_ARRAY  ) /* T[] */ \
+/* types */ \
+_( RT_ARRAY ) /* T[N] */ \
 // end RSM_FOREACH_TOKEN
 // RSM_FOREACH_BINOP_TOKEN maps an infix binary operation to opcodes,
 // allowing e.g. "x + y" as an alternative to "add x y"

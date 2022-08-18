@@ -7,10 +7,18 @@
 #include "abuf.h"
 
 //#define LOG_TOKENS // define to log() token scanning
-//#define LOG_AST    // define to log() parsed top-level ast nodes
-//#define LOG_PRATT(args...) dlog(args) // define to log pratt dispatch
+#define LOG_AST    // define to log() parsed top-level ast nodes
+//#define LOG_PRATT(fmt, args...) dlog("[pratt] " fmt, ##args) // log pratt dispatch
 //#define PRODUCE_COMMENT_NODES // define to include comments in the AST
+//#define PANIC_ON_SYNTAX_ERROR // call panic() on syntax error in DEBUG builds
 
+#ifndef DEBUG
+  #undef LOG_TOKENS
+  #undef LOG_AST
+  #undef LOG_PRATT
+  #undef PRODUCE_COMMENT_NODES
+  #undef PANIC_ON_SYNTAX_ERROR
+#endif
 #ifndef LOG_PRATT
   #define LOG_PRATT(args...) ((void)0)
 #endif
@@ -128,8 +136,19 @@ static rposrange_t sposrange(pstate* p) {
   return (rposrange_t){.focus=p->startpos};
 }
 
+
+#ifdef PANIC_ON_SYNTAX_ERROR
+static bool panic_diaghandler(const rdiag_t* d, void* userdata) {
+  panic("%s\n", d->msg);
+  return false;
+}
+#endif
+
 ATTR_FORMAT(printf, 2, 3)
 static void serr(pstate* p, const char* fmt, ...) {
+  #ifdef PANIC_ON_SYNTAX_ERROR
+    p->a->diaghandler = panic_diaghandler;
+  #endif
   va_list ap;
   va_start(ap, fmt);
   reportv(p->a, sposrange(p), 1, fmt, ap);
@@ -139,6 +158,9 @@ static void serr(pstate* p, const char* fmt, ...) {
 
 ATTR_FORMAT(printf, 3, 4)
 static void perr(pstate* p, rnode_t* nullable n, const char* fmt, ...) {
+  #ifdef PANIC_ON_SYNTAX_ERROR
+    p->a->diaghandler = panic_diaghandler;
+  #endif
   va_list ap;
   va_start(ap, fmt);
   if (n) {
@@ -523,6 +545,8 @@ static void sadvance(pstate* p) { // scan the next token
     case ')': p->insertsemi = true; p->tok = RT_RPAREN; return;
     case '{': p->tok = RT_LBRACE; return;
     case '}': p->insertsemi = true; p->tok = RT_RBRACE; return;
+    case '[': p->tok = RT_LBRACK; return;
+    case ']': p->insertsemi = true; p->tok = RT_RBRACK; return;
     case ';': p->tok = RT_SEMI; return;
     case ',': p->tok = RT_COMMA; return;
     case '+': p->tok = RT_PLUS; return;
@@ -756,7 +780,7 @@ static rnode_t* mknil(pstate* p)  { return mknodet(p, RT_END); }
 static rnode_t* mkarraytype(pstate* p, u64 size, rnode_t* elemtype) {
   rnode_t* n = mknodet(p, RT_ARRAY);
   n->ival = size;
-  appendchild(n, elemtype);
+  setchildren1(n, elemtype);
   return n;
 }
 
@@ -809,7 +833,7 @@ static rnode_t* ptype(PPARAMS) {
     perrunexpected(p, NULL, "type", tokname(p->tok));
     return mknil(p);
   }
-  prec = PREC_MEMBER;
+  prec = PREC_UNARY_POSTFIX;
   rnode_t* n = pstmt(PARGS);
   expecttype(p, n);
   return n;
@@ -916,6 +940,37 @@ static rnode_t* pname(PPARAMS) {
   return n;
 }
 
+// arraytype = type "[" sizeconst "]"
+// sizeconst = intlit  // must be a positive non-null value
+static rnode_t* parraytype(PPARAMS, rnode_t* elemtype) {
+  assert(tokistype(elemtype->t));
+  rnode_t* n = mkarraytype(p, 0, elemtype);
+  sadvance(p);
+
+  // size as intlit
+  if (!tokisintlit(p->tok)) {
+    perrunexpected(p, NULL, "size constant as integer literal", tokname(p->tok));
+  } else if (p->ival == 0 || (tokissint(p->tok) && (i64)p->ival < 0)) {
+    perr(p, NULL, "invalid array size %lld", (i64)p->ival);
+  }
+  n->ival = p->ival;
+  sadvance(p);
+
+  // terminating "]"
+  eat(p, RT_RBRACK);
+
+  return n;
+}
+
+// lhs "[" ...
+static rnode_t* infix_bracket(PPARAMS, rnode_t* lhs) {
+  if UNLIKELY(!tokistype(lhs->t)) {
+    perr(p, NULL, "unexpected [ after %s", tokname(lhs->t));
+    return lhs;
+  }
+  return parraytype(PARGS, lhs);
+}
+
 // assignment = assignreg | assigndata
 // assignreg  = reg "=" (operation | operand) ";"
 // assigndata = gname "=" type expr? ";"
@@ -927,7 +982,7 @@ static rnode_t* infix_eq(PPARAMS, rnode_t* lhs) {
     case RT_DATA: case RT_CONST: return passign_storage(PARGS, n);
     case RT_IREG: case RT_FREG:  return passign_reg(PARGS, n);
   }
-  perrunexpected(p, lhs, "constant, @name or register", nname(lhs));
+  perrunexpected(p, lhs, "register, literal or named constant", nname(lhs));
   if (p->tok != RT_SEMI) // attempt to recover and also improve error message
     appendchild(n, pexpr(PARGS));
   return n;
@@ -1128,19 +1183,20 @@ static rnode_t* prefix_fun(PPARAMS) {
 }
 
 static const parselet_t parsetab[rtok_COUNT] = {
-  [RT_IREG]  = {prefix_int, NULL, 0},
-  [RT_FREG]  = {prefix_int, NULL, 0},
-  [RT_OP]    = {prefix_op, NULL, 0},
-  [RT_LABEL] = {prefix_label, NULL, 0},
-  [RT_NAME]  = {prefix_name, NULL, 0},
-  [RT_CONST] = {prefix_storage, NULL, 0},
-  [RT_DATA]  = {prefix_storage, NULL, 0},
-  [RT_I1]    = {prefix_type, NULL, 0},
-  [RT_I8]    = {prefix_type, NULL, 0},
-  [RT_I16]   = {prefix_type, NULL, 0},
-  [RT_I32]   = {prefix_type, NULL, 0},
-  [RT_I64]   = {prefix_type, NULL, 0},
-  [RT_ASSIGN]    = {NULL, infix_eq, PREC_ASSIGN},
+  [RT_IREG]   = {prefix_int, NULL, 0},
+  [RT_FREG]   = {prefix_int, NULL, 0},
+  [RT_OP]     = {prefix_op, NULL, 0},
+  [RT_LABEL]  = {prefix_label, NULL, 0},
+  [RT_NAME]   = {prefix_name, NULL, 0},
+  [RT_CONST]  = {prefix_storage, NULL, 0},
+  [RT_DATA]   = {prefix_storage, NULL, 0},
+  [RT_I1]     = {prefix_type, NULL, 0},
+  [RT_I8]     = {prefix_type, NULL, 0},
+  [RT_I16]    = {prefix_type, NULL, 0},
+  [RT_I32]    = {prefix_type, NULL, 0},
+  [RT_I64]    = {prefix_type, NULL, 0},
+  [RT_ASSIGN] = {NULL, infix_eq, PREC_ASSIGN},
+  [RT_LBRACK] = {NULL, infix_bracket, PREC_UNARY_POSTFIX},
 
   #define _(tok, ...) [tok] = {NULL, infix_binop, PREC_BINOP},
   RSM_FOREACH_BINOP_TOKEN(_)
@@ -1175,7 +1231,7 @@ static rnode_t* pstmt(PPARAMS) {
     return n;
   }
 
-  LOG_PRATT("PREFIX %s call", tokname(p->tok));
+  LOG_PRATT("PREFIX %s", tokname(p->tok));
   UNUSED const void* p1 = p->inp;
   UNUSED bool insertsemi = p->insertsemi;
   rnode_t* n = ps->prefix(PARGS);
@@ -1187,13 +1243,14 @@ static rnode_t* pstmt(PPARAMS) {
     ps = &parsetab[p->tok];
     if (ps->infix == NULL || ps->prec < prec) {
       if (ps->infix) {
-        LOG_PRATT("INFIX %s skip (ps->prec %d < prec %d)", tokname(p->tok), ps->prec, prec);
+        LOG_PRATT("INFIX %s skip; parsetab[%u].prec < caller_prec (%d < %d)",
+          tokname(p->tok), p->tok, ps->prec, prec);
       } else if (p->tok != RT_SEMI) {
         LOG_PRATT("INFIX %s not found", tokname(p->tok));
       }
       return n;
     }
-    LOG_PRATT("INFIX %s call", tokname(p->tok));
+    LOG_PRATT("INFIX %s", tokname(p->tok));
     n = ps->infix(PARGS, n);
   }
   return n;
@@ -1352,6 +1409,7 @@ rnode_t* nullable rasm_parse(rasm_t* a) {
       case RT_END: case rtok_COUNT:
       case RT_LPAREN: case RT_RPAREN:
       case RT_LBRACE: case RT_RBRACE:
+      case RT_LBRACK: case RT_RBRACK:
       case RT_SEMI:
       case RT_COMMA:
       case RT_ASSIGN:

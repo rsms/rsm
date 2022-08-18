@@ -28,7 +28,7 @@ typedef struct rposrange {
 const char* tokname(rtok_t t);
 
 // tokis* returns true if t is classified as such in the language
-#define tokistype(t)    ( RT_I1 <= (t) && (t) <= RT_I64 )
+#define tokistype(t)    ( (RT_I1 <= (t) && (t) <= RT_I64) || ((t) == RT_ARRAY) )
 #define tokisintlit(t)  ( RT_INTLIT2 <= (t) && (t) <= RT_SINTLIT16 )
 #define tokislit(t)     tokisintlit(t)
 #define tokissint(t)    (((t) - RT_SINTLIT16) % 2 == 0) // assumption: tokisintlit(t)

@@ -176,8 +176,9 @@ _LEB_DEF_WRITE(leb_u64_write, u64, LEB_NBYTE_64, _LEB_MORE_U)
 // _LEB_DEF_WRITE(leb_i32_write, i32, LEB_NBYTE_32, _LEB_MORE_S)
 
 static usize leb_size(u64 val) {
-  for (usize len = 0; ;len++) {
+  for (usize len = 0;;) {
     val >>= 7;
+    len++;
     if (val == 0)
       return len;
   }

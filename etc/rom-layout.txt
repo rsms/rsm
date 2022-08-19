@@ -71,9 +71,9 @@ module:
   └────────────┴────────────┴──────────┴──────┘
 body:
   if LZ4 in flags then compressed body:
-    ┌──────────────┬──────────────────────────┐
-    │ size varuint │ compressed_data u8[size] │
-    └──────────────┴──────────────────────────┘
+    ┌───────────────────────────┬─────────────────────────┐
+    │ uncompressed_size varuint │ compressed_data u8[...] │
+    └───────────────────────────┴─────────────────────────┘
   else uncompressed body:
     ┌─────────┐
     │ section │*

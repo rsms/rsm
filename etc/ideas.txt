@@ -1,0 +1,7 @@
+Ideas
+
+Debug SP errors: on call, save SP and on ret, check if SP is properly restored.
+  Catch bugs like:
+    SP = sub SP 24
+    // ...
+    SP = add SP 16

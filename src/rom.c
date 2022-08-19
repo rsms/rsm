@@ -519,10 +519,8 @@ static rerr_t write_rom(
   u8* p = (u8*)img + sizeof(rromimg_t);
   uintptr align_offs = 0;
 
-  #if DEBUG
   dlog("ROM image %08lx … %08lx (%zu B)", 0lu, (uintptr)imgsize, imgsize);
   dlog("  header  %08lx … %08lx (%zu B)", 0lu, sizeof(rromimg_t), sizeof(rromimg_t));
-  #endif
 
   for (rrom_skind kind = rrom_skind_MIN; kind <= rrom_skind_MAX; kind++) {
     if (secsizev[kind].size == 0)

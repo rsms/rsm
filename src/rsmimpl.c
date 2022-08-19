@@ -599,14 +599,36 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #endif
 
 #if !HAS_LIBC_BUILTIN(__builtin_memmove)
-void* memmove(void* dest, const void* src, usize n) {
+#if __has_attribute(__may_alias__)
+typedef __attribute__((__may_alias__)) usize WT;
+#define WS (sizeof(WT))
+#endif
+void* memmove(void *dest, const void *src, usize n) {
   char *d = dest;
   const char *s = src;
   if (d==s) return d;
   if ((uintptr)s-(uintptr)d-n <= -2*n) return memcpy(d, s, n);
   if (d<s) {
+    #if __has_attribute(__may_alias__)
+      if ((uintptr)s % WS == (uintptr)d % WS) {
+        while ((uintptr)d % WS) {
+          if (!n--) return dest;
+          *d++ = *s++;
+        }
+        for (; n>=WS; n-=WS, d+=WS, s+=WS) *(WT*)d = *(WT*)s;
+      }
+    #endif
     for (; n; n--) *d++ = *s++;
   } else {
+    #if __has_attribute(__may_alias__)
+      if ((uintptr)s % WS == (uintptr)d % WS) {
+        while ((uintptr)(d+n) % WS) {
+          if (!n--) return dest;
+          d[n] = s[n];
+        }
+        while (n>=WS) n-=WS, *(WT*)(d+n) = *(WT*)(s+n);
+      }
+    #endif
     while (n) n--, d[n] = s[n];
   }
   return dest;

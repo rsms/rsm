@@ -284,9 +284,14 @@ typedef unsigned long       usize;
   ((x) / atmp__) * atmp__; \
 })
 
-// ANYINT COND_BYTE_MASK(ANYINT flags, int flag, bool on)
+// T COND_FLAG(T flags, T flag, bool on)
 // branchless ( on ? (flags | flag) : (flags & ~flag) )
-#define COND_BYTE_MASK(flags, flag, on) ((flags) ^= (-(!!(on)) ^ (flags)) & (flag))
+#define COND_FLAG(flags, flag, on) ({ \
+  __typeof__(flags) flags__ = (flags); \
+  (flags__ ^ ( (__typeof__(flags))-(!!(on)) ^ flags__ ) & (__typeof__(flags))(flag)); \
+})
+#define COND_FLAG_X(flags, flag, on) \
+  ((flags) ^ ( (__typeof__(flags))-(!!(on)) ^ (flags) ) & (__typeof__(flags))(flag))
 
 // POISON constants are non-NULL addresses which will result in page faults on access.
 // Values match those of Linux.

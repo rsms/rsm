@@ -59,14 +59,14 @@ void bits_set_range(u8* bits, usize start, usize len, bool on) {
   if (first == last) {
     mask &= kBitsetMaskLast[(start + len) % 8];
     // branchless (*first = on ? (*first | mask) : (*first & ~mask))
-    *first = COND_BYTE_MASK(*first, mask, on);
+    *first = COND_FLAG(*first, mask, on);
     return;
   }
 
-  *first = COND_BYTE_MASK(*first, mask, on);
+  *first = COND_FLAG(*first, mask, on);
 
   mask = kBitsetMaskLast[(start + len) % 8];
-  *last = COND_BYTE_MASK(*last, mask, on);
+  *last = COND_FLAG(*last, mask, on);
 
   first++;
 

@@ -14,6 +14,7 @@ static bool opt_run = false;
 static bool opt_print_asm = false;
 static bool opt_print_debug = false;
 static bool opt_newexec = false;
+static bool opt_nocompress = false;
 static usize vm_ramsize = 1024*1024;
 
 #define errmsg(fmt, args...) fprintf(stderr, "%s: " fmt "\n", prog, ##args)
@@ -86,6 +87,7 @@ static void usage() {
     "  -p           Print assembly on stdout\n"
     "  -d           Print timing and register state on stdout at end\n"
     "  -X           Run new experimental execution engine\n"
+    "  -Z           Disable ROM compression (only effective with -o)\n"
     "  -R<N>=<val>  Initialize register R<N> to <val> (e.g. -R0=4, -R3=0xff)\n"
     "  -m <nbytes>  Set VM memory to <nbytes> (default: %zu)\n"
     "  -o <file>    Write compiled ROM to <file>\n"
@@ -111,12 +113,13 @@ static int parse_cli_opts(int argc, char*const* argv, u64* iregs) {
   extern char* optarg; // global state in libc... coolcoolcool
   extern int optind, optopt;
   int nerrs = 0;
-  for (int c; (c = getopt(argc, argv, ":hrpdXR:o:m:")) != -1;) switch(c) {
+  for (int c; (c = getopt(argc, argv, ":hrpdXZR:o:m:")) != -1;) switch(c) {
     case 'h': usage(); exit(0);
     case 'r': opt_run = true; break;
     case 'p': opt_print_asm = true; break;
     case 'd': opt_print_debug = true; break;
     case 'X': opt_newexec = true; break;
+    case 'Z': opt_nocompress = true; break;
     case 'R': nerrs += setreg(iregs, optarg); break;
     case 'o': outfile = optarg; break;
     case 'm': nerrs += parse_bytesize_opt(optopt, optarg, &vm_ramsize); break;
@@ -150,6 +153,39 @@ static bool loadfile(
     errmsg("error reading stdin: %s", rerr_str(err));
   }
   return false;
+}
+
+static void loadrom(rrom_t* rom, rmemalloc_t* ma) {
+  #ifndef DEBUG
+  // If the ROM is already loaded, do nothing.
+  // Don't take this shortcut in debug builds to make sure we test the decoder often.
+  if (rom->code)
+    return;
+  #endif
+
+  // When a ROM is NOT compressed, we can access its data directly
+  // by passing a NULL rmem_t to rsm_loadrom.
+  rmem_t imgmem = {0};
+
+  if (rom->img->flags & RROM_LZ4) {
+    // must provide memory in which to load ROM when its compressed
+    usize dstsize = rromimg_loadsize(rom->img, rom->imgsize);
+    if (dstsize == USIZE_MAX) {
+      errmsg("invalid ROM");
+      exit(1);
+    }
+    imgmem = rmem_alloc_aligned(ma, dstsize, RSM_ROM_ALIGN);
+    if (imgmem.p == NULL) {
+      errmsg("failed to allocate memory");
+      exit(1);
+    }
+  }
+
+  rerr_t err = rsm_loadrom(rom, imgmem);
+  if (err) {
+    errmsg("failed to load ROM: %s", rerr_str(err));
+    exit(1);
+  }
 }
 
 static void print_asm(rmemalloc_t* ma, const rin_t* iv, usize icount) {
@@ -231,7 +267,10 @@ static bool compile(
   if (a.errcount) // note: errors have been reported by diaghandler
     return false;
 
-  rerr_t err = rasm_gen(&a, mod, ma, rom);
+  bool disable_rom_compression = opt_nocompress | (outfile == NULL);
+  a.flags = COND_FLAG(a.flags, RASM_NOCOMPRESS, disable_rom_compression);
+
+  rerr_t err = rasm_gen(&a, mod, rom);
   if (err) {
     errmsg("(rasm_gen) %s", rerr_str(err));
     return false;
@@ -246,8 +285,6 @@ static bool compile(
     }
   }
 
-  if (opt_print_asm)
-    print_asm(ma, rom->code, rom->codelen);
   return true;
 }
 
@@ -292,6 +329,11 @@ int main(int argc, char*const* argv) {
     return 1;
   }
 
+  if (opt_print_asm) {
+    loadrom(&rom, ma);
+    print_asm(ma, rom.code, rom.codelen);
+  }
+
   if (!opt_run)
     return 0;
 
@@ -310,6 +352,8 @@ int main(int argc, char*const* argv) {
 
   // —————————————— old execution engine ——————————————
   } else {
+    loadrom(&rom, ma);
+
     // allocate memory and execute program
     vm.ramsize = vm_ramsize;
     vm.rambase = osvmem_alloc(vm_ramsize);
@@ -317,7 +361,7 @@ int main(int argc, char*const* argv) {
       errmsg("failed to allocate %zu B of memory", vm_ramsize);
       return 1;
     }
-    rerr_t err = rsm_vmexec(&vm, &rom);
+    rerr_t err = rsm_vmexec(&vm, &rom, ma);
     if (err) {
       errmsg("vmexec: %s", err == rerr_nomem ? "not enough memory" : rerr_str(err));
       return 1;

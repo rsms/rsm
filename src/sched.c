@@ -643,14 +643,9 @@ static u64 rsched_vmlayout(rsched_t* s, rrom_t* rom) {
 
 
 rerr_t rsched_execrom(rsched_t* s, rrom_t* rom) {
-  // make sure ROM is loaded
-  if (!rom->code) {
-    rerr_t err = rsm_loadrom(rom);
-    if (err)
-      return err;
-  }
+  // user should have called rsm_loadrom
   if (rom->code == NULL || rom->codelen == 0)
-    return rerr_invalid; // ROM without (or with empty) code section
+    return rerr_invalid;
 
   // layout virtual memory
   u64 stack_vaddr = rsched_vmlayout(s, rom);

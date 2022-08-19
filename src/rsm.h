@@ -302,6 +302,9 @@ _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 // RSM_PAGE_SIZE is the size in bytes of one RSM virtual memory page
 #define RSM_PAGE_SIZE 4096u
 
+// RSM_ROM_ALIGN is the alignment of ROM images and also maximum alignment of data
+#define RSM_ROM_ALIGN 64u
+
 typedef u8 rop_t; // opcode
 enum rop {
   #define _(name, ...) rop_##name,
@@ -488,31 +491,51 @@ usize rmem_cap(rmemalloc_t*);
 
 //——————————————————————————————————————————————————————————————————————————————————————
 
+// rromflag_t: describes properties of a ROM image
+typedef u8 rromflag_t;
+enum rromflag {
+  RROM_LZ4 = 1 << 0, // data is compressed with LZ4
+};
+
 // rromimg_t: ROM image layout, a portable binary blob
 typedef struct {
-  u8 magic[4]; // "RSM\0"
-  u8 version;
-  u8 data[];
+  u8         magic[4]; // "RSM\0"
+  u8         version;
+  rromflag_t flags;
+  u8         data[];
 } rromimg_t;
 
 // rrom_t: ROM (read only media); the container for an RSM program
 typedef struct {
-  // ROM image
+  // read-only, potentially-compressed image
   rromimg_t* img;
   usize      imgsize; // size of img, in bytes
-  rmem_t     imgmem;  // img memory region (for use with rmem_free)
 
-  // fields populated on demand by rsm_loadrom
-  const rin_t* code;      // vm instructions array (pointer into img)
+  // fields populated by rasm_gen
+  usize imgmemsize; // size of memory allocation backing img
+
+  // fields populated by rsm_loadrom
+  rmem_t       datamem; // memory of loaded (uncompressed) data
+  const rin_t* code;      // vm instructions array (pointer into datamem)
   usize        codelen;   // vm instructions array length
-  const void*  data;      // data segment initializer (pointer into img)
+  const void*  data;      // data segment initializer (pointer into datamem)
   usize        datasize;  // data segment size
-  u32          dataalign; // data segment alignment (in bytes)
+  u32          dataalign; // data segment alignment
 } rrom_t;
+
+// rromimg_loadsize returns the number of bytes needed to load a ROM.
+// Returns USIZE_MAX if the image is invalid, 0 if empty.
+RSMAPI usize rromimg_loadsize(const rromimg_t* img, usize imgsize);
 
 // rsm_loadrom parses rom->img of rom->imgsize bytes,
 // populating the rest of the fields of the rrom_t struct.
-RSMAPI rerr_t rsm_loadrom(rrom_t* rom);
+// The rom sections are loaded into dst.p which must be RSM_ROM_ALIGN aligned.
+// dst.size must be at least rromimg_loadsize(rom->img, rom->imgsize).
+RSMAPI rerr_t rsm_loadrom(rrom_t* rom, rmem_t dst);
+
+// rsm_freerom frees rom->img memory back to allocator ma.
+// This function does nothing unless rom->imgmemsize > 0.
+RSMAPI void rsm_freerom(rrom_t* rom, rmemalloc_t* ma);
 
 //———————————————————————————————————————————————————————————————————————————————————————
 // rmachine_t: virtual machine instance  (execution engine v2)
@@ -544,7 +567,7 @@ enum rvmstatus {
 
 // rsm_vmexec executes a program, starting with instruction 0
 // Loads the ROM if needed.
-RSMAPI rerr_t rsm_vmexec(rvm_t* vm, rrom_t* rom);
+RSMAPI rerr_t rsm_vmexec(rvm_t* vm, rrom_t* rom, rmemalloc_t* ma);
 
 
 //———————————————————————————————————————————————————————————————————————————————————————
@@ -661,12 +684,19 @@ typedef struct rdiag {
 // Return false to stop the process (e.g. stop assembling.)
 typedef bool(*rdiaghandler_t)(const rdiag_t*, void* nullable userdata);
 
+// rasmflag_t are flags for rasm_t
+typedef u32 rasmflag_t;
+enum rasmflag {
+  RASM_NOCOMPRESS = 1 << 0, // disable ROM image compression
+};
+
 // rasm_t: assembly session (think of it as one source file)
-typedef struct rasm {
+typedef struct {
   rmemalloc_t*   memalloc;    // memory allocator
   const char*    srcdata;     // input source bytes
   usize          srclen;      // length of srcdata
   const char*    srcname;     // symbolic name of source (e.g. filename)
+  rasmflag_t     flags;       // control generation
   u32            errcount;    // number of errors reported
   rdiag_t        diag;        // last diagnostic report
   rdiaghandler_t diaghandler; // diagnostic report callback
@@ -702,10 +732,9 @@ struct rnode {
 // resulting rnode.
 RSMAPI rnode_t* nullable rasm_parse(rasm_t* a);
 
-// rasm_gen builds VM code from AST.
-// Uses a->mem for temporary storage, allocates data for rom with rommem.
-// a can be reused.
-RSMAPI rerr_t rasm_gen(rasm_t* a, rnode_t* module, rmemalloc_t* rommem, rrom_t* rom);
+// rasm_gen builds VM code from AST. a can be reused.
+// When you are done with the resulting rom, call rsm_freerom(rom, a->memalloc).
+RSMAPI rerr_t rasm_gen(rasm_t* a, rnode_t* module, rrom_t* rom);
 
 // rasm_dispose frees resources of a
 RSMAPI void rasm_dispose(rasm_t* a);

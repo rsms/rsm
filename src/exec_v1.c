@@ -550,20 +550,9 @@ static void log_memory(rrom_t* rom, vmstate* vs) {
 #endif // DEBUG
 
 
-static rerr_t vm_loadrom(rrom_t* rom) {
-  if (rom->code)
-    return 0; // already loaded
-  rerr_t err = rsm_loadrom(rom);
-  if (err == 0 && (rom->code == NULL || rom->codelen == 0))
-    err = rerr_invalid; // ROM without (or with empty) code section
-  return err;
-}
-
-
-rerr_t rsm_vmexec(rvm_t* vm, rrom_t* rom) {
-  rerr_t err = vm_loadrom(rom);
-  if (err)
-    return err;
+rerr_t rsm_vmexec(rvm_t* vm, rrom_t* rom, rmemalloc_t* malloc) {
+  if (rom->code == NULL)
+    return rerr_invalid; // ROM not loaded
 
   // memory layout:
   //    ┌─────────────┬─────────────┬───────────···

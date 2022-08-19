@@ -1223,6 +1223,9 @@ static void layout_gdata(gstate* g) {
   u64 addr = EXE_BASE_ADDR;
   dlog_gdata(NULL); // header
 
+  if (g->dataalign > RSM_ROM_ALIGN)
+    return errf(g->a, (rposrange_t){0}, "data alignment %u too large", g->dataalign);
+
   for (u32 i = 0; i < g->dataorder.len; i++) {
     gdata* d = *rarray_at(gdata*, &g->dataorder, i);
     assertf(d->align > 0 && IS_POW2(d->align), "%u", d->align);
@@ -1237,16 +1240,17 @@ static rerr_t rom_on_filldata(void* base, void* gp) {
   gstate* g = gp;
   for (u32 i = 0; i < g->dataorder.len; i++) {
     gdata* d = *rarray_at(gdata*, &g->dataorder, i);
-    void* dst = base + d->addr;
+    void* dst = base + (usize)(d->addr - EXE_BASE_ADDR);
     usize nbyte = d->size;
     assertf(d->align > 0 && IS_POW2(d->align), "%u", d->align);
     if (d->initp) {
       // copy initial value
       assert(d->initlen <= d->size);
-      nbyte -= d->initlen;
       memcpy(dst, d->initp, d->initlen);
       if (d->size < (usize)d->align) // zero pad
         memset(dst + d->size, 0, (usize)d->align - d->size);
+      nbyte -= d->initlen;
+      dst += d->initlen;
     }
     // zero rest
     memset(dst, 0, nbyte);
@@ -1307,7 +1311,7 @@ static gstate* nullable init_gstate(rasm_t* a) {
   return g;
 }
 
-rerr_t rasm_gen(rasm_t* a, rnode_t* module, rmemalloc_t* rommem, rrom_t* rom) {
+rerr_t rasm_gen(rasm_t* a, rnode_t* module, rrom_t* rom) {
   dlog("assembling \"%s\"", a->srcname);
   assert(module->t == RT_LPAREN);
   gstate* g = init_gstate(a);
@@ -1343,10 +1347,11 @@ rerr_t rasm_gen(rasm_t* a, rnode_t* module, rmemalloc_t* rommem, rrom_t* rom) {
     .codelen = g->iv.len,
     .datasize = g->datasize,
     .dataalign = g->dataalign,
+    .flags = a->flags,
     .userdata = g,
     .filldata = &rom_on_filldata,
   };
-  return rom_build(&rb, rommem, rom);
+  return rom_build(&rb, a->memalloc, rom);
 }
 
 void gstate_dispose(gstate* g) {

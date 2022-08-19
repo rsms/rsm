@@ -55,6 +55,7 @@ typedef struct rrombuild {
   usize        codelen;   // vm instructions array length
   usize        datasize;  // data segment size
   u8           dataalign; // data segment alignment
+  rasmflag_t   flags;
   void*        userdata;
   rerr_t(*filldata)(void* dst, void* userdata);
 } rrombuild_t;

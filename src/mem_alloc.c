@@ -78,7 +78,7 @@ static_assert(SLABHEAP_COUNT > 0, "undef RMEM_SLABHEAP_ENABLE instead");
 #define HEAP_MIN_SIZE  (CHUNK_SIZE*2)
 #define HEAP_ALIGN     CHUNK_SIZE
 // HEAP_MAX_ALIGN: maximum alignment factor that heap_alloc can handle
-#define HEAP_MAX_ALIGN  XMAX(PAGE_SIZE, SLABHEAP_BLOCK_SIZE)
+#define HEAP_MAX_ALIGN  MAX_X(PAGE_SIZE, SLABHEAP_BLOCK_SIZE)
 static_assert(IS_POW2(HEAP_MAX_ALIGN), "");
 
 #ifdef RMEM_SLABHEAP_ENABLE

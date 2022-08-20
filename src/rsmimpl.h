@@ -240,8 +240,8 @@ typedef unsigned long       usize;
   // turns into CMP + CMOV{L,G} on x86_64
   // turns into CMP + CSEL on arm64
 
-#define XMAX(a,b) ((a) > (b) ? (a) : (b))
-#define XMIN(a,b) ((a) < (b) ? (a) : (b))
+#define MAX_X(a,b) ((a) > (b) ? (a) : (b))
+#define MIN_X(a,b) ((a) < (b) ? (a) : (b))
 
 // T IDIV_CEIL(T x, ANY divisor) divides x by divisor, rounding up.
 // If x is zero, returns max value of x (wraps.)

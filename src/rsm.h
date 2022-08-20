@@ -370,7 +370,8 @@ inline static void rmem_fill(rmem_t m, u8 byte) { __builtin_memset(m.p, byte, m.
 // rmem_zerofill fills memory with zeroes
 inline static void rmem_zerofill(rmem_t m) { __builtin_memset(m.p, 0, m.size); }
 
-// rmem_align adjusts a memory region to a given power-of-two alignment.
+// rmem_align adjusts a memory region to a given power-of-two alignment
+// by rounding the address region.p up and its region.size down.
 // If the region is too small to be aligned, false is returned
 // and region is left unchanged.
 bool rmem_align(rmem_t* region, usize alignment);
@@ -515,7 +516,7 @@ typedef struct {
   usize imgmemsize; // size of memory allocation backing img
 
   // fields populated by rsm_loadrom
-  rmem_t       datamem; // memory of loaded (uncompressed) data
+  rmem_t       datamem;   // memory of loaded (uncompressed) data
   const rin_t* code;      // vm instructions array (pointer into datamem)
   usize        codelen;   // vm instructions array length
   const void*  data;      // data segment initializer (pointer into datamem)

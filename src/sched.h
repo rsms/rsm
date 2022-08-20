@@ -4,12 +4,9 @@
 #include "vm.h"
 RSM_ASSUME_NONNULL_BEGIN
 
-// EXE_BASE_ADDR is the start virtual-memory address of executable data.
-// It's where ROM data + heap is placed.
-#define EXE_BASE_ADDR VM_ADDR_MIN
-
-// EXE_TOP_ADDR is the end of the executable virtual-memory address space.
-#define EXE_TOP_ADDR  VM_ADDR_MAX
+// EXE_TOP_ADDR is the end of the virtual memory-address space,
+// where exeinfo_t ends.
+#define EXE_TOP_ADDR  ALIGN2_FLOOR_X(VM_ADDR_MAX, 8)
 
 // S_MAXPROCS is the upper limit of concurrent P's; the effective CPU parallelism limit.
 // There are no fundamental restrictions on the value.
@@ -107,6 +104,8 @@ struct rsched_ {
   P*           allp[S_MAXPROCS]; // all live P's (managed by sched_procresize)
   _Atomic(u32) nprocs;           // max active Ps (also num valid P's in allp)
 
+  u64 heap_vaddr; // heap base (virtual address)
+
   // TODO: replace with virtual memory
   void* heapbase; // heap memory base address
   usize heapsize; // heap memory size
@@ -122,6 +121,14 @@ struct rsched_ {
   M m0; // main M (bound to the OS thread which rvm_main is called on)
   P p0; // first P
 };
+
+
+// exeinfo_t is mapped at the end of the virtual memory-address space,
+// at the bottom of the stack. It describes the host system.
+// Thus, in a program's main function, exeinfo_t is at SP.
+typedef struct {
+  u64 heap_vaddr; // start of heap, end of data (SP+0)
+} exeinfo_t;
 
 
 rerr_t rsched_init(rsched_t* s, rmachine_t* machine);

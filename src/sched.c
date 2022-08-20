@@ -18,6 +18,17 @@ static_assert(STK_MIN % STK_ALIGN == 0, "STK_MIN not aligned to STK_ALIGN");
 // MAIN_RET_PC: special PC value representing the main return address
 #define MAIN_RET_PC  USIZE_MAX
 
+// EXEINFO_NPAGES pages used for exeinfo_t
+#define EXEINFO_NPAGES  ( (sizeof(exeinfo_t) + PAGE_SIZE-1) / PAGE_SIZE )
+
+// STACK_VADDR is the virtual address of the base of the main stack
+#define STACK_VADDR \
+  ALIGN2_FLOOR_X( \
+    EXE_TOP_ADDR - sizeof(exeinfo_t), MAX_X(_Alignof(exeinfo_t), STK_ALIGN) )
+
+// DATA_VADDR is the virtual address of the data section
+#define DATA_VADDR  VM_ADDR_MIN
+
 //———————————————————————————————————————————————————————————————————————————————————
 // vm v2
 //
@@ -592,15 +603,172 @@ void rsched_dispose(rsched_t* s) {
 }
 
 
+static void exeinfo_init(exeinfo_t* exeinfo, u64 heap_vaddr) {
+  assertf(IS_ALIGN2((uintptr)exeinfo, _Alignof(exeinfo_t)), "%p", exeinfo);
+  exeinfo->heap_vaddr = heap_vaddr;
+}
+
+
+// rsched_alloc_basemem allocates base memory; backing pages for rom code and data
+static rmem_t rsched_alloc_basemem(rsched_t* s, rrom_t* rom) {
+  // Minimum size needed for uncompressed ROM image.
+  // Plus one extra page for rom's code & data alignment.
+  usize minromsize = rromimg_loadsize(rom->img, rom->imgsize) + (PAGE_SIZE - 1);
+
+  // calculate how many pages we need (allocation must be pow2 order)
+  usize npages = CEIL_POW2(
+    ( (minromsize + PAGE_SIZE-1) / PAGE_SIZE ) + // code & data
+    ( (STK_MIN + PAGE_SIZE-1) / PAGE_SIZE ) + // minimum stack (fail early)
+    EXEINFO_NPAGES // exeinfo_t
+  );
+
+  // allocate pages
+  void* p = rmm_allocpages(s->machine->mm, npages);
+  rmem_t basemem = RMEM(p, npages*PAGE_SIZE);
+
+  dlog("basemem " RMEM_FMT " %zu pages", RMEM_FMT_ARGS(basemem), npages);
+  return basemem;
+}
+
+
+#if DEBUG
+static void dlog_memory_map(
+  const void* code, usize codesize,
+  const void* data, usize datasize,
+  const void* heap, usize heapsize,
+  const void* stack, usize stacksize)
+{
+  dlog("memory map:");
+  dlog("  %-7s %12s  %-12s              %6s","SEGMENT","HADDR","VADDR","SIZE");
+  #define SEG(name, haddr, vaddr, size) { \
+    uintptr haddr__ = (uintptr)(haddr); \
+    u64 vaddr__ = (u64)(vaddr), vaddr_end__; \
+    if ( check_add_overflow(vaddr__, (u64)(size), &vaddr_end__) || \
+         vaddr_end__ >= EXE_TOP_ADDR ) \
+    { \
+      vaddr_end__ = vaddr__; \
+      vaddr__ -= (u64)(size); \
+      haddr__ -= (uintptr)(size); \
+    } \
+    if (vaddr__ == 0) { \
+      dlog("  %-7s %12lx  (not mapped)              %6zu", \
+      (name), haddr__, (size)); \
+    } else { \
+      dlog("  %-7s %12lx  %012llx-%012llx %6zu", \
+        (name), haddr__, vaddr__, vaddr_end__, (size)); \
+    } \
+  }
+
+  u64 heap_vaddr = VM_ADDR_MIN + (u64)(uintptr)(heap - data);
+
+  SEG("code",    code,  0,           codesize);
+  SEG("data",    data,  DATA_VADDR,  datasize);
+  SEG("heap",    heap,  heap_vaddr,  heapsize);
+  SEG("stack",   stack, STACK_VADDR, stacksize);
+  SEG("exeinfo", stack, STACK_VADDR, sizeof(exeinfo_t));
+  #undef SEG
+}
+#else
+  #define dlog_memory_map(...) ((void)0)
+#endif
+
+
+// rsched_loadrom loads a rom image into backing memory pages at basemem
+static rerr_t rsched_loadrom(rsched_t* s, rrom_t* rom, rmem_t basemem) {
+  // 1. load rom image into base memory:
+  //   basemem
+  //   ├────────┬──────────┬──────────────────────┬─────────────────────┐
+  //   │ header │ code     │ data                 │ ignored_section ... │
+  //   ├────────┴──────────┴──────────────────────┴─────────────────────┘
+  //   page 1
+  //
+  // 2. move code and data sections to page boundaries,
+  //    overwriting header and other ROM sections:
+  //   ┌────────────────┬─────────────────────────────────┐
+  //   │ code           │ data                            │
+  //   ├────────────────┼────────────────┬────────────────┘
+  //   page 1           page 2           page 3
+  //                    vm start
+  //
+  rerr_t err = rsm_loadrom(rom, basemem);
+  if (err)
+    return err;
+
+  // this implementation currently requires the CODE section
+  // to appear before the DATA section
+  if UNLIKELY((const void*)rom->code > rom->data) {
+    // TODO: support rom with DATA section before CODE section
+    dlog("unsupported ROM layout: DATA section before CODE section");
+    return rerr_not_supported;
+  }
+
+  // move code section to front
+  usize codesize = rom->codelen * sizeof(rin_t);
+  memmove(basemem.p, rom->code, codesize);
+  // TODO: map code pages in directory and set its permission to "read + execute"
+
+  // rsm_loadrom verifies that rom->dataalign<=RSM_ROM_ALIGN and we're
+  // making the assumption here that PAGE_SIZE as least as large,
+  // since we're aligning data to page boundary.
+  static_assert(RSM_ROM_ALIGN <= PAGE_SIZE, "");
+
+  // move data section to after code, aligned to page boundary
+  void* data = basemem.p + ALIGN2(codesize, PAGE_SIZE);
+  memmove(data, rom->data, rom->datasize);
+  // TODO: map data pages in directory and set its permission to "read + write"
+
+  // stacksize (size of stack; space for exeinfo later subtracted)
+  usize stacksize = EXEINFO_NPAGES * PAGE_SIZE;
+
+  // remaining data space is used for backing memory of the initial heap
+  void* heap = (void*)ALIGN2((uintptr)data + rom->datasize, HEAP_ALIGN);
+  usize heapsize;
+  void* heapend = basemem.p + (basemem.size - stacksize);
+  if (heap >= heapend) {
+    heap = heapend;
+    heapsize = 0;
+  } else {
+    heapsize = (usize)(uintptr)(heapend - heap);
+    if (heapsize > PAGE_SIZE) {
+      // when we have extra backing pages, map them to initial stack instead of heap
+      usize diff = ALIGN2_FLOOR(heapsize, PAGE_SIZE);
+      stacksize += diff;
+      heapsize -= diff;
+    }
+  }
+
+  // stack starts at the highest virtual address and is mapped to the last
+  // stacksize/PAGE_SIZE host backing pages.
+  void* stack = basemem.p + basemem.size;
+
+  // reserve space on stack for exeinfo_t & initialize it
+  usize exeinfo_size = ALIGN2(sizeof(exeinfo_t), MAX(_Alignof(exeinfo_t), STK_ALIGN));
+  stack -= exeinfo_size;
+  stacksize -= exeinfo_size;
+  u64 heap_vaddr = VM_ADDR_MIN + (u64)(uintptr)(heap - data);
+  exeinfo_init(stack, heap_vaddr);
+  assertf(IS_ALIGN2((uintptr)stack, STK_ALIGN), "%p", stack);
+
+  dlog_memory_map(
+    basemem.p, codesize,
+    data, rom->datasize,
+    heap, heapsize,
+    stack, stacksize);
+
+  return 0;
+}
+
+
 static u64 rsched_vmlayout(rsched_t* s, rrom_t* rom) {
   // virtual memory layout
-  //    ┌─────────┬──────── ··· ─────────┬───────────┐
-  //    │ data    │ heap →       ← stack │ heap_addr │
-  //    ├─────────┴──────── ··· ─────────┴───────────┤
-  //  0x1000                                  0xffffffffffff
+  //   ┌──────┬─────────── ··· ────────────┬───────────┐
+  //   │ data │ heap →             ← stack │ exeinfo_t │
+  //   ├──────┴─────────── ··· ────────────┴───────────┤
+  //   0x1000                                          0xffffffffffff
+  //   VM_ADDR_MIN                                     VM_ADDR_MAX
   //
-  static_assert(IS_ALIGN2(EXE_BASE_ADDR, PAGE_SIZE), "");
-  u64 data_vaddr = EXE_BASE_ADDR;
+  static_assert(IS_ALIGN2(VM_ADDR_MIN, PAGE_SIZE), "");
+  u64 data_vaddr = VM_ADDR_MIN;
 
   // copy data to base address
   u64 offs = 0;
@@ -621,11 +789,12 @@ static u64 rsched_vmlayout(rsched_t* s, rrom_t* rom) {
 
   // top part of address space
   // TODO: env, argv etc
-  u64 top_addr = ALIGN2_FLOOR(EXE_TOP_ADDR, 8);
+  static_assert(IS_ALIGN2(EXE_TOP_ADDR, _Alignof(exeinfo_t)), "");
+  u64 top_addr = EXE_TOP_ADDR;
 
   // store heap_addr
   u64 heap_vaddr = ALIGN2(data_vaddr + rom->datasize, HEAP_ALIGN);
-  top_addr -= 8;
+  top_addr -= sizeof(exeinfo_t);
   uintptr haddr = vm_pagedir_translate(&s->vm_pagedir, top_addr);
   if (haddr == 0)
     return 0;
@@ -643,24 +812,38 @@ static u64 rsched_vmlayout(rsched_t* s, rrom_t* rom) {
 
 
 rerr_t rsched_execrom(rsched_t* s, rrom_t* rom) {
-  // user should have called rsm_loadrom
-  if (rom->code == NULL || rom->codelen == 0)
-    return rerr_invalid;
+  // allocate base memory; pages for rom code and data.
+  // We will load the rom image into this space and move code & data to page boundaries.
+  rmem_t basemem = rsched_alloc_basemem(s, rom);
+  if (basemem.p == NULL)
+    return rerr_nomem;
+
+  // load rom into initial backing pages
+  rerr_t err = rsched_loadrom(s, rom, basemem);
+  if (err)
+    goto error;
 
   // layout virtual memory
   u64 stack_vaddr = rsched_vmlayout(s, rom);
-  if (stack_vaddr == 0)
-    return rerr_nomem;
+  if (stack_vaddr == 0) {
+    err = rerr_nomem;
+    goto error;
+  }
 
   // create main task
-  rerr_t err = sched_spawn(s, rom->code, rom->codelen, stack_vaddr, /*pc=*/0);
+  void* code = basemem.p;
+  err = sched_spawn(s, code, rom->codelen, stack_vaddr, /*pc=*/0);
   if (err)
-    return err;
+    goto error;
 
   // save pointer to main task
   s->t0 = s->m0.p->runnext;
 
   // enter scheduler loop in M0
   return m_start(&s->m0);
+
+error:
+  rmm_freepages(s->machine->mm, basemem.p);
+  return err;
 }
 

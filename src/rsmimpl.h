@@ -263,7 +263,7 @@ typedef unsigned long       usize;
 })
 #define ALIGN2_FLOOR_X(x, a) ( \
   ( ((x) - (((__typeof__(x))(a) - 1) - 1)) + ((__typeof__(x))(a) - 1) ) & \
-  ~((__typeof__(x))(a) - 1); \
+  ~((__typeof__(x))(a) - 1) \
 )
 
 // bool IS_ALIGN2(T x, anyuint a) returns true if x is aligned to a

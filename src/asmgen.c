@@ -1185,7 +1185,7 @@ static int gdata_sort(const gdata** x, const gdata** y, void* ctx) {
   return (int)(*y)->align - (int)(*x)->align;
 }
 
-static void layout_gdata(gstate* g) {
+static void layout_data(gstate* g) {
   if (g->datavcurr->len == 0) {
     g->datasize = 0;
     return;
@@ -1220,7 +1220,7 @@ static void layout_gdata(gstate* g) {
   // align is what we will use for the "align" field in the ROMs "data" table header
   // (note: largest alignment is g->data.v[0] after sorting)
   g->dataalign = (*rarray_at(gdata*, &g->dataorder, 0))->align;
-  u64 addr = EXE_BASE_ADDR;
+  u64 addr = VM_ADDR_MIN;
   dlog_gdata(NULL); // header
 
   if (g->dataalign > RSM_ROM_ALIGN)
@@ -1233,14 +1233,14 @@ static void layout_gdata(gstate* g) {
     addr += (u64)d->size;
     dlog_gdata(d);
   }
-  g->datasize = addr - EXE_BASE_ADDR;
+  g->datasize = addr - VM_ADDR_MIN;
 }
 
 static rerr_t rom_on_filldata(void* base, void* gp) {
   gstate* g = gp;
   for (u32 i = 0; i < g->dataorder.len; i++) {
     gdata* d = *rarray_at(gdata*, &g->dataorder, i);
-    void* dst = base + (usize)(d->addr - EXE_BASE_ADDR);
+    void* dst = base + (usize)(d->addr - VM_ADDR_MIN);
     usize nbyte = d->size;
     assertf(d->align > 0 && IS_POW2(d->align), "%u", d->align);
     if (d->initp) {
@@ -1331,7 +1331,7 @@ rerr_t rasm_gen(rasm_t* a, rnode_t* module, rrom_t* rom) {
     return rerr_invalid;
 
   // compute data layout and resolve data references
-  layout_gdata(g);
+  layout_data(g);
   resolve_undefined_names(g);
 
   // report unresolved references

@@ -9,33 +9,36 @@ rmachine_t* nullable rmachine_create(rmm_t* mm) {
   if (!malloc)
     return NULL;
 
-  rmachine_t* m;
+  // note that we must allocate pages in pow2 orders
+  usize npages = CEIL_POW2((sizeof(rmachine_t) + PAGE_SIZE-1) / PAGE_SIZE);
+  u16 tailmemcap = (u16)(npages * PAGE_SIZE) - sizeof(rmachine_t);
 
-  dlog("sizeof(rmachine_t) %zu", sizeof(rmachine_t));
-
-  // if (sizeof(rmachine_t) > PAGE_SIZE/2) {
-  //   usize npages = (sizeof(rmachine_t) + PAGE_SIZE-1) / PAGE_SIZE;
-  //   m = rmm_allocpages(mm, npages);
-  // } else {
-  m = rmem_alloct(malloc, rmachine_t);
-  // }
-
-  if (!m) {
-    rmem_allocator_free(malloc);
-    return NULL;
+  rmachine_t* m = rmm_allocpages(mm, npages);
+  if UNLIKELY(!m) {
+    log("rmm_allocpages(%zu) failed", npages);
+    goto error;
   }
+
+  dlog("%s allocating %zu pages " RMEM_FMT " rmachine_t=%zu",
+    __FUNCTION__, npages, RMEM_FMT_ARGS(RMEM(m, npages*PAGE_SIZE)), sizeof(rmachine_t));
 
   m->mm = mm;
   m->malloc = malloc;
+  m->tailmemcap = tailmemcap;
 
   rerr_t err = rsched_init(&m->sched, m);
-  if (err) {
+  if UNLIKELY(err) {
     log("rsched_init failed: %s", rerr_str(err));
-    rmem_allocator_free(malloc);
-    return NULL;
+    goto error;
   }
 
   return m;
+
+error:
+  rmem_allocator_free(malloc);
+  if (m)
+    rmm_freepages(mm, m);
+  return NULL;
 }
 
 

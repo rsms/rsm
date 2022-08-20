@@ -233,7 +233,7 @@ static rerr_t load_section(LPARAMS) {
 
 
 static rerr_t rsm_loadrom_direct(rrom_t* rom) {
-  dlog("%s", __FUNCTION__);
+  traceload("%s", __FUNCTION__);
 
   if (!IS_ALIGN2((uintptr)rom->img, RSM_ROM_ALIGN)) {
     log("%simage address %p not aligned to %u boundary",
@@ -253,7 +253,7 @@ static rerr_t rsm_loadrom_direct(rrom_t* rom) {
 
 static rerr_t rsm_loadrom_compressed(rrom_t* rom, rmem_t dst) {
 #ifdef RSM_WITH_LZ4
-  dlog("%s", __FUNCTION__);
+  traceload("%s", __FUNCTION__);
 
   // copy body by decompressing it into dst.p.
   // Note: rom_decompress checks that dst is large enough for datasize.
@@ -277,7 +277,7 @@ static rerr_t rsm_loadrom_compressed(rrom_t* rom, rmem_t dst) {
 
 
 static rerr_t rsm_loadrom_uncompressed(rrom_t* rom, rmem_t dst) {
-  dlog("%s", __FUNCTION__);
+  traceload("%s", __FUNCTION__);
 
   usize datasize = rom->imgsize - sizeof(rromimg_t);
   if ((u64)dst.size < datasize) {

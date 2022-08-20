@@ -8,7 +8,12 @@
 #define ROM_VERSION_MIN 0
 #define ROM_VERSION_MAX 0
 
+// RSM_WITH_LZ4: define to enable creation of LZ4 compressed ROMs
 #define RSM_WITH_LZ4
+
+// ROM_LOAD_TRACE: define to enable dlog of the loading process (in DEBUG mode only)
+//#define ROM_LOAD_TRACE
+
 #ifdef RSM_WITH_LZ4
   #include "lz4.h"
 #endif
@@ -23,6 +28,12 @@ enum rrom_skind {
 } RSM_END_ENUM(rrom_skind)
 
 #define CODE_ALIGNMENT sizeof(rin_t) // alignment of CODE section body
+
+#ifdef ROM_LOAD_TRACE
+  #define traceload(args...) dlog(args)
+#else
+  #define traceload(args...) ((void)0)
+#endif
 
 UNUSED static const char* rrom_skind_name(rrom_skind kind) {
   switch ((enum rrom_skind)kind) {
@@ -69,8 +80,8 @@ static rerr_t leb_u64_read(u64* resultp, u32 nbit, const u8** input, const void*
   return err;
 }
 
-
-static void clear_computed_rom_fields(rrom_t* rom) {
+// rrom_clear_pointers clears computed pointers into a ROMs data
+static void rrom_clear_pointers(rrom_t* rom) {
   memset(&rom->datamem, 0, sizeof(rrom_t) - offsetof(rrom_t, datamem));
   rom->dataalign = 1;
 }
@@ -195,9 +206,10 @@ static rerr_t load_section_CODE(LPARAMS) {
 
 static rerr_t load_section(LPARAMS) {
   assert(p < end);
-  // #if DEBUG
-  // uintptr secoffs = (uintptr)(p - start);
-  // #endif
+
+  #ifdef ROM_LOAD_TRACE
+  uintptr secoffs = (uintptr)(p - start);
+  #endif
 
   u8 kind = *p++;
   rerr_t err = leb_u64_read(&size, 64, &p, end);
@@ -207,8 +219,8 @@ static rerr_t load_section(LPARAMS) {
   if UNLIKELY(size > (usize)(end - p))
     return perr("corrupt section 0x%02x", kind);
 
-  // dlog("%s %s (0x%02x) at offset 0x%08lx (body: 0x%08lx %llu B)",
-  //   __FUNCTION__, rrom_skind_name(kind), kind, secoffs, (uintptr)(p - start), size);
+  traceload("%s %s (0x%02x) at offset 0x%08lx (body: 0x%08lx %llu B)",
+    __FUNCTION__, rrom_skind_name(kind), kind, secoffs, (uintptr)(p - start), size);
 
   switch (kind) {
     case RSM_ROM_DATA: MUSTTAIL return load_section_DATA(LARGS);
@@ -283,7 +295,7 @@ static rerr_t rsm_loadrom_uncompressed(rrom_t* rom, rmem_t dst) {
 
 
 rerr_t rsm_loadrom(rrom_t* rom, rmem_t dst) {
-  clear_computed_rom_fields(rom);
+  rrom_clear_pointers(rom);
 
   if UNLIKELY( rom->imgsize < sizeof(rromimg_t) ||
                memcmp(&rom->img->magic, RSM_ROM_MAGIC, 4) )

@@ -229,7 +229,7 @@ static vm_ptab_t nullable new_ptab(vm_pagedir_t* pagedir, vm_ptab_t parent, u64 
   u64 ptab_hfn = ((u64)(uintptr)ptab) >> PAGE_SIZE_BITS;
   parent[index] = (vm_pte_t){ .outaddr = ptab_hfn };
 
-  trace("map allocated page table %p (HFN 0x%llx) +0x%lx at parent[%llu]",
+  trace("allocated page table %p (HFN 0x%llx) +0x%lx at parent[%llu]",
     ptab, ptab_hfn, VM_PTAB_SIZE, index);
 
   assertf(IS_ALIGN2((u64)(uintptr)ptab, PAGE_SIZE),
@@ -287,8 +287,8 @@ rerr_t vm_map(
     // page table leaf entry
     assert(npages > 0);
     for (;;) {
-      trace("map ptab[%llu] = 0x%llx (vfn 0x%llx, haddr 0x%lx)",
-        index, VM_VFN_VADDR(vfn), vfn, haddr);
+      trace("map 0x%llx => 0x%lx %s (vfn 0x%llx, ptab[%llu])",
+        VM_VFN_VADDR(vfn), haddr, vm_perm_str(perm), vfn, index);
 
       if UNLIKELY(*(u64*)pte) {
         dlog("trying to map already-mapped page at vaddr 0x%llx", VM_VFN_VADDR(vfn));

@@ -150,11 +150,19 @@ RSM_ASSUME_NONNULL_BEGIN
 //
 #define VM_CACHE_TAG_MASK(align)  ( VM_ADDR_PAGE_MASK ^ ((u64)(align) - 1llu) )
 
-// VM_VFN(u64 vaddr) calculates the page frame number of a virtual address
-// aka Virtual Frame Number. It's the top (64-PAGE_SIZE_BITS) bits of the address.
+// u64 VM_VFN(u64 vaddr) calculates the page frame number of a virtual address,
+// aka Virtual Frame Number.
+// The VFN is the top (64-PAGE_SIZE_BITS) bits of the address minus VM_ADDR_MIN.
+// The result is undefined if vaddr < VM_ADDR_MIN.
 // e.g. 0xdeadbeef 11011110101011011011111011101111 / PAGE_SIZE(4096)
 //    = 0xdeadb    11011110101011011011
-#define VM_VFN(vaddr)  ( (u64)(vaddr) >> PAGE_SIZE_BITS )
+#define VM_VFN(vaddr)  ( ((u64)(vaddr) >> PAGE_SIZE_BITS) - (VM_ADDR_MIN/PAGE_SIZE) )
+
+// VM_VFN_MAX is the largest valid VFN
+#define VM_VFN_MAX  VM_VFN(VM_ADDR_MAX)
+
+// u64 VM_VFN_VADDR(u64 vfn) calculates the virtual page address for vfn
+#define VM_VFN_VADDR(vfn)  ( ((u64)(vfn) + (VM_ADDR_MIN/PAGE_SIZE)) << PAGE_SIZE_BITS )
 
 // u64 VM_PAGE_ADDR(u64 vaddr) calculates the page address of a virtual address
 // e.g. 0xdeadbeef 11011110101011011011111011101111 & (PAGE_SIZE(4096) - 1)
@@ -167,31 +175,64 @@ RSM_ASSUME_NONNULL_BEGIN
 //    = 0xeef                          111011101111
 #define VM_ADDR_OFFSET(vaddr)  ( (vaddr) & VM_ADDR_OFFS_MASK )
 
+// u64 VM_CACHE_INDEX(u64) returns the index in vm_cache_t.entries for vaddr.
+// vaddr must be >= VM_ADDR_MIN or the result is undefined.
+#define VM_CACHE_INDEX(vaddr)  ( VM_VFN(vaddr) & VM_CACHE_INDEX_VFN_MASK )
+
 // vm_cache_ent_t* VM_CACHE_ENTRY(vm_cache_t cache, u64 vaddr)
 // accesses the cache entry for a virtual address's page.
 // vaddr can be either a page address or a canonical address (offset is ignored.)
 // #define VM_CACHE_INDEX_MASK
-#define VM_CACHE_ENTRY(cache, vaddr) \
-  ( &(cache)->entries[VM_VFN(vaddr) & VM_CACHE_INDEX_VFN_MASK] )
+#define VM_CACHE_ENTRY(cache, vaddr)  ( &(cache)->entries[VM_CACHE_INDEX(vaddr)] )
 
+// vm_perm_t VM_PTE_PERM(vm_pte_t) returns vm_perm_t of a PTE
+#define VM_PTE_PERM(pte)  ( (*(vm_perm_t*)(pte)) & ((vm_perm_t)VM_PERM_ALL) )
+
+// bool VM_PERM_CHECK(vm_perm_t, vm_perm_t) returns true if hasperm contains all
+// permissions of wantperm.
+#define VM_PERM_CHECK(hasperm, wantperm) \
+  ( ( ((hasperm) & (wantperm)) ^ (wantperm) ) == 0 )
+
+
+// vm_perm_t: page permissions
+typedef u8 vm_perm_t;
+enum vm_perm {
+  // note: values should match permission bit positions of vm_pte_t
+  VM_PERM_NONE = 0,
+  VM_PERM_R    = 1 << 0, // can read from this page
+  VM_PERM_W    = 1 << 1, // can write to this page
+  VM_PERM_X    = 1 << 2, // can execute RSM code in this page
+
+  // convenience values
+  VM_PERM_RW  = VM_PERM_R | VM_PERM_W,
+  VM_PERM_RX  = VM_PERM_R | VM_PERM_X,
+  VM_PERM_RWX = VM_PERM_R | VM_PERM_W | VM_PERM_X,
+
+  VM_PERM_ALL = VM_PERM_RWX,
+};
 
 // vm_pte_t - page table entry
 typedef struct {
 #if RSM_LITTLE_ENDIAN
-  // bool  execute     : 1; // can execute code in this page
-  // bool  read        : 1; // can read from this page
-  // bool  write       : 1; // can write to this page
-  // bool  uncacheable : 1; // can not be cached in TLB
-  // bool  accessed    : 1; // has been accessed
-  // bool  dirty       : 1; // has been written to
-  // usize type        : 3; // type of page
-  // usize reserved    : 3;
+  // note: permission bit positions should match vm_perm_t
+  bool  read        : 1; // can read from this page
+  bool  write       : 1; // can write to this page
+  bool  execute     : 1; // can execute code in this page
+  bool  uncacheable : 1; // can not be cached
+  bool  accessed    : 1; // has been accessed
+  bool  written     : 1; // has been written to
+  u64   type        : 3; // type of page
+  u64   _reserved   : 3;
 
   // usize nuse      : VM_PTAB_BITS; // number of sub-entries in use
   // usize _reserved : 3;
 
-  usize _reserved : 12;
-  u64   outaddr   : 52;
+  // usize _reserved : 12;
+
+  // outaddr is the host frame number (hfn=haddr>>PAGE_SIZE_BITS).
+  // For branches (page tables) this is the address of the next table or PTE.
+  // For leafs (PTEs) this is the mapped host page address.
+  u64 outaddr : 52;
 #else
   #error TODO
 #endif
@@ -254,14 +295,23 @@ rerr_t vm_pagedir_init(vm_pagedir_t*, rmm_t* mm);
 // which becomes invalid after this call.
 void vm_pagedir_dispose(vm_pagedir_t*);
 
-// vm_pagedir_translate translates a virtual address to its corresponding host address
-uintptr vm_pagedir_translate(vm_pagedir_t*, u64 vaddr);
+// vm_map maps a range of host pages, starting at haddr, to a range of virtual pages.
+// If haddr is 0, backing pages are allocated as needed on first access.
+// haddr's address must be aligned to PAGE_SIZE.
+// vaddr does not need to be page aligned; its top PAGE_SIZE_BITS bits are ignored.
+rerr_t vm_map(vm_pagedir_t*, uintptr haddr, u64 vaddr, usize npages, vm_perm_t);
+
+// vm_unmap deallocates a range of virtual pages
+// Caller using a cache should call vm_cache_invalidate
+rerr_t vm_unmap(vm_pagedir_t*, u64 vaddr, usize npages);
+
 
 // vm_cache_init initializes a vm_cache_t
 void vm_cache_init(vm_cache_t*);
 
-// vm_cache_invalidate invalidates the entire cache
-void vm_cache_invalidate(vm_cache_t*);
+// vm_cache_invalidate invalidates npages starting at vaddr.
+// To invalidate the entire cache, pass vaddr=VM_ADDR_MIN, npages=VM_CACHE_LEN.
+void vm_cache_invalidate(vm_cache_t*, u64 vaddr, usize npages);
 
 // vm_cache_invalidate_one invalidates the entry for the provided address's page.
 // Note that this does not verify if the VM_CACHE_ENTRY is for the correct page.
@@ -306,7 +356,8 @@ u64 _vm_cache_miss(vm_cache_t*, vm_pagedir_t*, u64 vaddr, vm_op_t);
 ALWAYS_INLINE static uintptr vm_translate(
   vm_cache_t* cache, vm_pagedir_t* pagedir, u64 vaddr, u64 align, vm_op_t op)
 {
-  u64 index = VM_VFN(vaddr) & VM_CACHE_INDEX_VFN_MASK;
+  assert(vaddr >= VM_ADDR_MIN);
+  u64 index = VM_CACHE_INDEX(vaddr);
   u64 actual_tag = cache->entries[index].tag;
   u64 expected_tag = vaddr & (VM_ADDR_PAGE_MASK ^ (align - 1llu));
   u64 haddr_diff = UNLIKELY( actual_tag != expected_tag ) ?

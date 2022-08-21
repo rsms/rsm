@@ -245,7 +245,12 @@ typedef unsigned long       usize;
 
 // T IDIV_CEIL(T x, ANY divisor) divides x by divisor, rounding up.
 // If x is zero, returns max value of x (wraps.)
-#define IDIV_CEIL(x, divisor)  ( (__typeof__(x))1 + ( ((x) - 1) / (divisor) ) )
+#define IDIV_CEIL(x, divisor) ({ \
+  __typeof__(x) div__ = (__typeof__(x))(divisor); \
+  ( (x) + div__ - 1 ) / div__; \
+})
+#define IDIV_CEIL_X(x, divisor) \
+  ( ( (x) + (__typeof__(x))(divisor) - 1 ) / (__typeof__(x))(divisor) )
 
 // T ALIGN2<T>(T x, anyuint a) rounds up x to nearest a (a must be a power of two)
 #define ALIGN2(x,a) ({ \

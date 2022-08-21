@@ -104,8 +104,6 @@ struct rsched_ {
   P*           allp[S_MAXPROCS]; // all live P's (managed by sched_procresize)
   _Atomic(u32) nprocs;           // max active Ps (also num valid P's in allp)
 
-  u64 heap_vaddr; // heap base (virtual address)
-
   // TODO: replace with virtual memory
   void* heapbase; // heap memory base address
   usize heapsize; // heap memory size

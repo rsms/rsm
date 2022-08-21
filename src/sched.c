@@ -8,9 +8,9 @@
 
 
 // stack constants
-#define STK_ALIGN    8           // stack alignment (== sizeof(u64))
-#define STK_MIN      2048        // minium stack size (TODO: consider making part of ROM)
-#define STK_MAX      (1024*1024) // maximum stack size
+#define STK_ALIGN    8lu       // stack alignment (== sizeof(u64))
+#define STK_MIN      2048lu    // minium stack size (TODO: consider making part of ROM)
+#define STK_MAX      1lu * MiB // maximum stack size
 static_assert(STK_MIN % STK_ALIGN == 0, "STK_MIN not aligned to STK_ALIGN");
 
 #define HEAP_ALIGN   8  // alignment of heap memory address
@@ -19,7 +19,7 @@ static_assert(STK_MIN % STK_ALIGN == 0, "STK_MIN not aligned to STK_ALIGN");
 #define MAIN_RET_PC  USIZE_MAX
 
 // EXEINFO_NPAGES pages used for exeinfo_t
-#define EXEINFO_NPAGES  ( (sizeof(exeinfo_t) + PAGE_SIZE-1) / PAGE_SIZE )
+#define EXEINFO_NPAGES  IDIV_CEIL_X(sizeof(exeinfo_t), PAGE_SIZE)
 
 // STACK_VADDR is the virtual address of the base of the main stack
 #define STACK_VADDR \
@@ -705,7 +705,6 @@ static rerr_t rsched_loadrom(rsched_t* s, rrom_t* rom, rmem_t basemem) {
   // move code section to front
   usize codesize = rom->codelen * sizeof(rin_t);
   memmove(basemem.p, rom->code, codesize);
-  // TODO: map code pages in directory and set its permission to "read + execute"
 
   // rsm_loadrom verifies that rom->dataalign<=RSM_ROM_ALIGN and we're
   // making the assumption here that PAGE_SIZE as least as large,
@@ -715,7 +714,13 @@ static rerr_t rsched_loadrom(rsched_t* s, rrom_t* rom, rmem_t basemem) {
   // move data section to after code, aligned to page boundary
   void* data = basemem.p + ALIGN2(codesize, PAGE_SIZE);
   memmove(data, rom->data, rom->datasize);
-  // TODO: map data pages in directory and set its permission to "read + write"
+
+  // virtual memory layout
+  //   ┌──────┬─────────── ··· ────────────┬───────────┐
+  //   │ data │ heap →             ← stack │ exeinfo_t │
+  //   ├──────┴─────────── ··· ────────────┴───────────┤
+  //   0x1000                                          0xffffffffffff
+  //   VM_ADDR_MIN                                     VM_ADDR_MAX
 
   // stacksize (size of stack; space for exeinfo later subtracted)
   usize stacksize = EXEINFO_NPAGES * PAGE_SIZE;
@@ -748,6 +753,7 @@ static rerr_t rsched_loadrom(rsched_t* s, rrom_t* rom, rmem_t basemem) {
   u64 heap_vaddr = VM_ADDR_MIN + (u64)(uintptr)(heap - data);
   exeinfo_init(stack, heap_vaddr);
   assertf(IS_ALIGN2((uintptr)stack, STK_ALIGN), "%p", stack);
+  assertf(stacksize >= STK_MIN, "stacksize(%zu) < STK_MIN(%lu)", stacksize, STK_MIN);
 
   dlog_memory_map(
     basemem.p, codesize,
@@ -755,59 +761,34 @@ static rerr_t rsched_loadrom(rsched_t* s, rrom_t* rom, rmem_t basemem) {
     heap, heapsize,
     stack, stacksize);
 
+  // map bottom vm pages (data & heap) in vm page directory
+  uintptr haddr = (uintptr)data;
+  usize nbyte = ALIGN2(rom->datasize, HEAP_ALIGN) + heapsize;
+  usize bottom_npages = nbyte / PAGE_SIZE;
+  assertf(IS_ALIGN2(nbyte, PAGE_SIZE), "%zu", nbyte);
+  if (( err = vm_map(&s->vm_pagedir, haddr, DATA_VADDR, bottom_npages, VM_PERM_RW) )) {
+    dlog("vm_map failed: %s", rerr_str(err));
+    return rerr_mfault;
+  }
+
+  // map top vm pages (stack & exeinfo)
+  u64 vaddr = STACK_VADDR - stacksize;
+  haddr = (uintptr)stack - stacksize;
+  nbyte = (usize)(uintptr)(heapend - data);
+  assertf(IS_ALIGN2(nbyte, PAGE_SIZE), "%zu", nbyte);
+  if (( err = vm_map(&s->vm_pagedir, haddr, vaddr, nbyte/PAGE_SIZE, VM_PERM_RW) )) {
+    dlog("vm_map failed: %s", rerr_str(err));
+    vm_unmap(&s->vm_pagedir, DATA_VADDR, bottom_npages);
+    return rerr_mfault;
+  }
+
   return 0;
 }
 
 
-static u64 rsched_vmlayout(rsched_t* s, rrom_t* rom) {
-  // virtual memory layout
-  //   ┌──────┬─────────── ··· ────────────┬───────────┐
-  //   │ data │ heap →             ← stack │ exeinfo_t │
-  //   ├──────┴─────────── ··· ────────────┴───────────┤
-  //   0x1000                                          0xffffffffffff
-  //   VM_ADDR_MIN                                     VM_ADDR_MAX
-  //
-  static_assert(IS_ALIGN2(VM_ADDR_MIN, PAGE_SIZE), "");
-  u64 data_vaddr = VM_ADDR_MIN;
-
-  // copy data to base address
-  u64 offs = 0;
-  usize size = rom->datasize;
-  for (u64 npages = (rom->datasize + PAGE_SIZE - 1)/PAGE_SIZE; npages--;) {
-    uintptr haddr = vm_pagedir_translate(&s->vm_pagedir, data_vaddr + offs);
-    if (haddr == 0)
-      return 0;
-    assertf(IS_ALIGN2(haddr, PAGE_SIZE), "%p", (void*)haddr);
-    // TODO: set r & w flags for the vm page entry
-    usize copysize = size;
-    if (copysize > PAGE_SIZE)
-      copysize = PAGE_SIZE;
-    memcpy((void*)haddr, rom->data + offs, copysize);
-    size -= copysize;
-    offs += PAGE_SIZE;
-  }
-
-  // top part of address space
-  // TODO: env, argv etc
-  static_assert(IS_ALIGN2(EXE_TOP_ADDR, _Alignof(exeinfo_t)), "");
-  u64 top_addr = EXE_TOP_ADDR;
-
-  // store heap_addr
-  u64 heap_vaddr = ALIGN2(data_vaddr + rom->datasize, HEAP_ALIGN);
-  top_addr -= sizeof(exeinfo_t);
-  uintptr haddr = vm_pagedir_translate(&s->vm_pagedir, top_addr);
-  if (haddr == 0)
-    return 0;
-  *(u64*)haddr = heap_vaddr;
-
-  // stack starts where initial args end
-  u64 stack_vaddr = ALIGN2_FLOOR(top_addr, STK_ALIGN);
-
-  dlog("data_vaddr:  0x%llx", data_vaddr);
-  dlog("heap_vaddr:  0x%llx", heap_vaddr);
-  dlog("stack_vaddr: 0x%llx", stack_vaddr);
-
-  return stack_vaddr;
+static rerr_t rsched_unloadrom(rsched_t* s, rrom_t* rom) {
+  dlog("TODO %s: vm_unmap", __FUNCTION__);
+  return 0;
 }
 
 
@@ -821,28 +802,24 @@ rerr_t rsched_execrom(rsched_t* s, rrom_t* rom) {
   // load rom into initial backing pages
   rerr_t err = rsched_loadrom(s, rom, basemem);
   if (err)
-    goto error;
-
-  // layout virtual memory
-  u64 stack_vaddr = rsched_vmlayout(s, rom);
-  if (stack_vaddr == 0) {
-    err = rerr_nomem;
-    goto error;
-  }
+    goto end;
 
   // create main task
   void* code = basemem.p;
-  err = sched_spawn(s, code, rom->codelen, stack_vaddr, /*pc=*/0);
+  err = sched_spawn(s, code, rom->codelen, STACK_VADDR, /*pc=*/0);
   if (err)
-    goto error;
+    goto end;
 
   // save pointer to main task
   s->t0 = s->m0.p->runnext;
 
   // enter scheduler loop in M0
-  return m_start(&s->m0);
+  err = m_start(&s->m0);
 
-error:
+  // finish
+  rsched_unloadrom(s, rom);
+
+end:
   rmm_freepages(s->machine->mm, basemem.p);
   return err;
 }

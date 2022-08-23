@@ -101,7 +101,7 @@ typedef unsigned long       usize;
 #endif
 
 #if __has_attribute(aligned)
-  #define ATTR_ALIGNED(alignment) __attribute__((aligned(alignment)))
+  #define ATTR_ALIGNED(alignment) __attribute__((__aligned__(alignment)))
 #else
   #define ATTR_ALIGNED(alignment)
 #endif
@@ -342,56 +342,37 @@ typedef unsigned long       usize;
 // starting at the least significant bit position.
 // If x is 0, the result is undefined.
 #define rsm_ctz(x) _Generic((x), \
-  i8:    __builtin_ctz,   u8:    __builtin_ctz, \
-  i16:   __builtin_ctz,   u16:   __builtin_ctz, \
-  i32:   __builtin_ctz,   u32:   __builtin_ctz, \
-  isize: __builtin_ctzl,  usize: __builtin_ctzl, \
-  i64:   __builtin_ctzll, u64:   __builtin_ctzll)(x)
+  i8:   __builtin_ctz,   u8:    __builtin_ctz, \
+  i16:  __builtin_ctz,   u16:   __builtin_ctz, \
+  i32:  __builtin_ctz,   u32:   __builtin_ctz, \
+  long: __builtin_ctzl,  unsigned long: __builtin_ctzl, \
+  i64:  __builtin_ctzll, u64:   __builtin_ctzll)(x)
 
 // int rsm_clz(ANYUINT x) counts leading zeroes in x,
 // starting at the most significant bit position.
 // If x is 0, the result is undefined.
 #define rsm_clz(x) ( \
-  __builtin_constant_p(x) ? RSM_CLZ_X(x) : \
-  sizeof(x) == 1 ? __builtin_clz(x) - 24 : \
-  sizeof(x) == 2 ? __builtin_clz(x) - 16 : \
-  sizeof(x) == 4 ? __builtin_clz(x) : \
-                   __builtin_clzll(x) \
+  _Generic((x), \
+    i8:   __builtin_clz,   u8:    __builtin_clz, \
+    i16:  __builtin_clz,   u16:   __builtin_clz, \
+    i32:  __builtin_clz,   u32:   __builtin_clz, \
+    long: __builtin_clzl,  unsigned long: __builtin_clzl, \
+    i64:  __builtin_clzll, u64:   __builtin_clzll \
+  )(x) - ( 32 - MIN_X(4, (int)sizeof(__typeof__(x)))*8 ) \
 )
-
-// RSM_CLZ_X constant-expression count number of leading 0-bits
-// u32 RSM_CLZ_X(T x) {
-//   x |= (x >> 1);
-//   x |= (x >> 2);
-//   x |= (x >> 4);
-//   x |= (x >> 8);
-//   x |= (x >> 16);
-//   return (u32)x;
-// })
-#define RSM_CLZ_X(x) ( \
-  ((x) == 0) ? (u32)(sizeof(x) * 8) : \
-  sizeof(x) == 1 ? ( 8u  - RSM_POPCOUNT_X(_RSM_CLZ_4((u8)x)) ) : \
-  sizeof(x) == 2 ? ( 16u - RSM_POPCOUNT_X(_RSM_CLZ_8((u16)x)) ) : \
-  sizeof(x) <= 4 ? ( 32u - RSM_POPCOUNT_X(_RSM_CLZ_16((u32)x)) ) : \
-  sizeof(x) <= 8 ? ( 64u - RSM_POPCOUNT_X(_RSM_CLZ_32((u64)x)) ) : \
-  0u \
-)
-#define _RSM_CLZ_1(x)   ((x) | ((x) >> 1))
-#define _RSM_CLZ_2(x)   (_RSM_CLZ_1(x)  | (_RSM_CLZ_1(x) >> 2))
-#define _RSM_CLZ_4(x)   (_RSM_CLZ_2(x)  | (_RSM_CLZ_2(x) >> 4))
-#define _RSM_CLZ_8(x)   (_RSM_CLZ_4(x)  | (_RSM_CLZ_4(x) >> 8))
-#define _RSM_CLZ_16(x)  (_RSM_CLZ_8(x)  | (_RSM_CLZ_8(x) >> 16))
-#define _RSM_CLZ_32(x)  (_RSM_CLZ_16(x) | (_RSM_CLZ_16(x) >> 32))
+#define RSM_CLZ_X rsm_clz
 
 
 // int rsm_ffs(ANYINT x) returns one plus the index of the least significant 1-bit of x,
 // or if x is zero, returns zero.
 #define rsm_ffs(x) _Generic((x), \
-  i8:    __builtin_ffs,   u8:    __builtin_ffs, \
-  i16:   __builtin_ffs,   u16:   __builtin_ffs, \
-  i32:   __builtin_ffs,   u32:   __builtin_ffs, \
-  isize: __builtin_ffsl,  usize: __builtin_ffsl, \
-  i64:   __builtin_ffsll, u64:   __builtin_ffsll)(x)
+  i8:   __builtin_ffs,   u8:    __builtin_ffs, \
+  i16:  __builtin_ffs,   u16:   __builtin_ffs, \
+  i32:  __builtin_ffs,   u32:   __builtin_ffs, \
+  long: __builtin_ffsl,   unsigned long: __builtin_ffsl, \
+  i64:  __builtin_ffsll, u64:   __builtin_ffsll \
+)(x)
+#define RSM_FFS_X  rsm_ffs
 
 // int rsm_fls(ANYINT n) finds the Find Last Set bit (last = most-significant)
 // (Note that this is not the same as rsm_ffs(x)-1).
@@ -399,88 +380,48 @@ typedef unsigned long       usize;
 // e.g. rsm_fls(0b1000000000000000) = 15
 // e.g. rsm_fls(0b1000000000000000) = 15
 // e.g. rsm_fls(0b1000) = 3
-#define rsm_fls(x)   ( (x) ? (int)(sizeof(x) * 8) - rsm_clz(x) : 0 )
-#define RSM_FLS_X(x) ( (x) ? (int)(sizeof(x) * 8) - RSM_CLZ_X(x) : 0 )
+#define rsm_fls(x)  ( (x) ? (int)(sizeof(__typeof__(x)) * 8) - rsm_clz(x) : 0 )
+#define RSM_FLS_X   rsm_fls
 
 // int ILOG2(ANYINT n) calculates the log of base 2
 // Result is undefined if n is 0.
 #define ILOG2(n) (rsm_fls(n) - 1)
 
 // ANYINT FLOOR_POW2(ANYINT x) rounds down x to nearest power of two.
-// Returns 1 when x is 0.
-#define FLOOR_POW2(x) ( \
-  __builtin_constant_p(x) ? FLOOR_POW2_X(x) : \
-  ({ \
-    __typeof__(x) xtmp__ = (x); \
-    (__typeof__(x))_Generic((x), \
-      i8:    _rsm_floor_pow2_32,   u8:    _rsm_floor_pow2_32, \
-      i16:   _rsm_floor_pow2_32,   u16:   _rsm_floor_pow2_32, \
-      i32:   _rsm_floor_pow2_32,   u32:   _rsm_floor_pow2_32, \
-      isize: _rsm_floor_pow2_z,    usize: _rsm_floor_pow2_z, \
-      i64:   _rsm_floor_pow2_64,   u64:   _rsm_floor_pow2_64 \
-    )(xtmp__ + !xtmp__); \
-  }) \
-)
-u32 _rsm_floor_pow2_32(u32 x);
-u64 _rsm_floor_pow2_64(u64 x);
-#if USIZE_MAX < 0xffffffffffffffff
-  #define _rsm_floor_pow2_z _rsm_floor_pow2_32
-#else
-  #define _rsm_floor_pow2_z _rsm_floor_pow2_64
-#endif
-// FLOOR_POW2_X is a constant-expression implementation of FLOOR_POW2
+// Returns 1 if x is 0.
+#define FLOOR_POW2(x) ({ \
+  __typeof__(x) xtmp__ = (x); \
+  FLOOR_POW2_X(xtmp__); \
+})
+// FLOOR_POW2_X is a constant-expression implementation of FLOOR_POW2.
+// When used as a constant expression, compilation fails if x is 0.
 #define FLOOR_POW2_X(x) ( \
-  (((x) == 0) | ((x) == 1)) ? \
-    (__typeof__(x))1 : \
-    ( (x) == ~(__typeof__(x))0 ) ? \
-      ~(__typeof__(x))0 : \
-      (sizeof(x) <= 4) ? \
-        ((_FLOOR_POW2_32(x)>>1) + 1) : \
-        ((_FLOOR_POW2_64(x)>>1) + 1) \
+  ((x) <= 1) ? (__typeof__(x))1 : \
+  ((__typeof__(x))1 << ILOG2(x)) \
 )
-#define _FLOOR_POW2_2(x) ((x)|((x)>>1))
-#define _FLOOR_POW2_4(x) (_FLOOR_POW2_2(x)|_FLOOR_POW2_2((x)>>2))
-#define _FLOOR_POW2_8(x) (_FLOOR_POW2_4(x)|_FLOOR_POW2_4((x)>>4))
-#define _FLOOR_POW2_16(x) (_FLOOR_POW2_8(x)|_FLOOR_POW2_8((x)>>8))
-#define _FLOOR_POW2_32(x) (_FLOOR_POW2_16(x)|_FLOOR_POW2_16((x)>>16))
-#define _FLOOR_POW2_64(x) (_FLOOR_POW2_32(x)|_FLOOR_POW2_32((x)>>32))
-
 
 // ANYINT CEIL_POW2(ANYINT x) rounds up x to nearest power of two.
 // Returns 1 when x is 0.
-#define CEIL_POW2(x)  ( \
-  /*__builtin_constant_p(x) ? CEIL_POW2_X(x) : [disabled: clang-14 bug]*/ \
-  __builtin_constant_p(x) ? ({ \
-    __typeof__(x) xtmp__ = (x); \
-    ( xtmp__ <= 1 ) ? \
-      (__typeof__(x))1 : \
-      ( xtmp__ > (xtmp__ << 1) ) ? \
-        ~(__typeof__(x))0 : \
-        ( (__typeof__(x))1 << \
-          ((__typeof__(x))(sizeof(x)*8) - rsm_clz(--xtmp__)) \
-          /* --xtmp__ instead of xtmp__-1 to work around a bug in clang-14 */ \
-        ); \
-  }) : \
-  (__typeof__(x))( \
-    sizeof(x) <= 4 ? _rsm_ceil_pow2_32((u32)(x)) : \
-                     _rsm_ceil_pow2_64((u64)(x)) \
-  ) \
-)
-u32 _rsm_ceil_pow2_32(u32 x);
-u64 _rsm_ceil_pow2_64(u64 x);
+// Returns 0 when x is larger than the max pow2 for x's type (e.g. >0x80000000 for u32)
+#define CEIL_POW2(x) ({ \
+  __typeof__(x) xtmp__ = (x); \
+  CEIL_POW2_X(xtmp__); \
+})
 // CEIL_POW2_X is a constant-expression implementation of CEIL_POW2
 #define CEIL_POW2_X(x) ( \
-  ( ((x) <= 1) ) ? \
-    (__typeof__(x))1 : \
-    ( (x) > ((x) << 1) ) ? \
-      ~(__typeof__(x))0 : \
-      (__typeof__(x))1 << ( \
-        (__typeof__(x))(sizeof(x)*8) - RSM_CLZ_X((__typeof__(x))((x) - 1)) ) \
+  ((x) <= (__typeof__(x))1) ? (__typeof__(x))1 : \
+  ( ( ((__typeof__(x))1 << \
+          ILOG2( ((x) - ((x) == (__typeof__(x))1) ) - (__typeof__(x))1) \
+      ) - (__typeof__(x))1 ) << 1 ) \
+  + (__typeof__(x))2 \
 )
 
+// bool IS_POW2(T x) returns true if x is a power-of-two value
+#define IS_POW2(x)    ({ __typeof__(x) xtmp__ = (x); IS_POW2_X(xtmp__); })
+#define IS_POW2_X(x)  ( ((x) & ((x) - 1)) == 0 )
 
-#define IS_POW2(x)  ( ((x) & ((x) - 1)) == 0 )
-
+// T RSM_IPOW2(T x) returns the result of raising 2 to x (2^x).
+// E.g. RSM_IPOW2(4) = 16, RSM_IPOW2(5) = 32
 #define RSM_IPOW2(x) ((__typeof__(x))1 << (x))
 
 

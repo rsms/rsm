@@ -91,49 +91,53 @@ static_assert(RSM_POPCOUNT_X(0xFFFFFFFFFFFFllu + 32) == 6, "");
 static_assert(RSM_POPCOUNT_X(0xFFFFFFFFFFFFllu + 33) == 2, "");
 
 
-static_assert(RSM_CLZ_X(0u) == 32, "");
 static_assert(RSM_CLZ_X(1u) == 31, "");
 static_assert(RSM_CLZ_X(0xFFFFFFFFu) == 0, "");
 static_assert(RSM_CLZ_X(10u) == 28, "");
 static_assert(RSM_CLZ_X(31u) == 27, "");
 static_assert(RSM_CLZ_X(32u) == 26, "");
 static_assert(RSM_CLZ_X(33u) == 26, "");
+static_assert(RSM_CLZ_X((u8)0x80u) == 0, "");
+static_assert(RSM_CLZ_X((u16)0x8000u) == 0, "");
+static_assert(RSM_CLZ_X(0x80000000u) == 0, "");
 
-static_assert(RSM_CLZ_X(0llu) == 64, "");
 static_assert(RSM_CLZ_X(1llu) == 63, "");
-static_assert(RSM_CLZ_X(0xFFFFFFFFFFFFFFFFllu) == 0, "");
 static_assert(RSM_CLZ_X(10llu) == 60, "");
 static_assert(RSM_CLZ_X(31llu) == 59, "");
 static_assert(RSM_CLZ_X(32llu) == 58, "");
 static_assert(RSM_CLZ_X(33llu) == 58, "");
+static_assert(RSM_CLZ_X(0x8000000000000000llu) == 0, "");
+static_assert(RSM_CLZ_X(0xFFFFFFFFFFFFFFFFllu) == 0, "");
 
 
-static_assert(RSM_FLS_X(0) == 0, "0");
 static_assert(RSM_FLS_X(1) == 1, "1");
 static_assert(RSM_FLS_X(2) == 2, "10");
 static_assert(RSM_FLS_X(3) == 2, "11");
 static_assert(RSM_FLS_X(128) == 8, "10000000");
 
 
-static_assert(CEIL_POW2_X(0xFFFFFFFFu) == 0xFFFFFFFFu, "");
-static_assert(CEIL_POW2_X(1u) == 1, "");
-static_assert(CEIL_POW2_X(10u) == 16, "");
-static_assert(CEIL_POW2_X(31u) == 32, "");
-static_assert(CEIL_POW2_X(32u) == 32, "");
-static_assert(CEIL_POW2_X(33u) == 64, "");
-static_assert(CEIL_POW2_X(64u) == 64, "");
-static_assert(CEIL_POW2_X(100u) == 128, "");
-static_assert(CEIL_POW2_X(128u) == 128, "");
-static_assert(CEIL_POW2_X(200u) == 256, "");
-static_assert(CEIL_POW2_X(256u) == 256, "");
-static_assert(CEIL_POW2_X(300u) == 512, "");
-static_assert(CEIL_POW2_X(400u) == 512, "");
-static_assert(CEIL_POW2_X(500u) == 512, "");
-static_assert(CEIL_POW2_X(512u) == 512, "");
-static_assert(CEIL_POW2_X(600u) == 1024, "");
+static_assert(CEIL_POW2_X(0u) == 1u, "");
+static_assert(CEIL_POW2_X(1u) == 1u, "");
+static_assert(CEIL_POW2_X(10u) == 16u, "");
+static_assert(CEIL_POW2_X(31u) == 32u, "");
+static_assert(CEIL_POW2_X(32u) == 32u, "");
+static_assert(CEIL_POW2_X(33u) == 64u, "");
+static_assert(CEIL_POW2_X(64u) == 64u, "");
+static_assert(CEIL_POW2_X(100u) == 128u, "");
+static_assert(CEIL_POW2_X(128u) == 128u, "");
+static_assert(CEIL_POW2_X(200u) == 256u, "");
+static_assert(CEIL_POW2_X(256u) == 256u, "");
+static_assert(CEIL_POW2_X(300u) == 512u, "");
+static_assert(CEIL_POW2_X(400u) == 512u, "");
+static_assert(CEIL_POW2_X(500u) == 512u, "");
+static_assert(CEIL_POW2_X(512u) == 512u, "");
+static_assert(CEIL_POW2_X(600u) == 1024u, "");
+static_assert(CEIL_POW2_X(0x80000000u) == 0x80000000u, "");
+static_assert(CEIL_POW2_X(0x80000001u) == 0u, "");
+static_assert(CEIL_POW2_X(0xFFFFFFFFu) == 0u, "");
 
-static_assert(CEIL_POW2_X(0xFFFFFFFFFFFFFFFFllu) == 0xFFFFFFFFFFFFFFFFllu, "");
-static_assert(CEIL_POW2_X(1llu) == 1, "");
+static_assert(CEIL_POW2_X(0llu) == 1llu, "");
+static_assert(CEIL_POW2_X(1llu) == 1llu, "");
 static_assert(CEIL_POW2_X(10llu) == 16, "");
 static_assert(CEIL_POW2_X(31llu) == 32, "");
 static_assert(CEIL_POW2_X(32llu) == 32, "");
@@ -148,11 +152,13 @@ static_assert(CEIL_POW2_X(400llu) == 512, "");
 static_assert(CEIL_POW2_X(500llu) == 512, "");
 static_assert(CEIL_POW2_X(512llu) == 512, "");
 static_assert(CEIL_POW2_X(600llu) == 1024, "");
+static_assert(CEIL_POW2_X(0x8000000000000000llu) == 0x8000000000000000llu, "");
+static_assert(CEIL_POW2_X(0x8000000000000001llu) == 0llu, "");
+static_assert(CEIL_POW2_X(0xFFFFFFFFFFFFFFFFllu) == 0llu, "");
 
 
-static_assert(FLOOR_POW2_X(0xFFFFFFFFu) == 0xFFFFFFFF, "");
-static_assert(FLOOR_POW2_X(0xFFFFFFFFu-1) == 0x80000000, "");
-static_assert(FLOOR_POW2_X(0u) == 1, "");
+static_assert(FLOOR_POW2_X(0xFFFFFFFFu) == 0x80000000u, "");
+static_assert(FLOOR_POW2_X(0xFFFFFFFFu-1) == 0x80000000u, "");
 static_assert(FLOOR_POW2_X(1u) == 1, "");
 static_assert(FLOOR_POW2_X(10u) == 8, "");
 static_assert(FLOOR_POW2_X(31u) == 16, "");
@@ -169,9 +175,8 @@ static_assert(FLOOR_POW2_X(500u) == 256, "");
 static_assert(FLOOR_POW2_X(512u) == 512, "");
 static_assert(FLOOR_POW2_X(600u) == 512, "");
 
-static_assert(FLOOR_POW2_X(0xFFFFFFFFFFFFFFFFllu) == 0xFFFFFFFFFFFFFFFF, "");
-static_assert(FLOOR_POW2_X(0xFFFFFFFFFFFFFFFFllu-1) == 0x8000000000000000, "");
-static_assert(FLOOR_POW2_X(0llu) == 1, "");
+static_assert(FLOOR_POW2_X(0xFFFFFFFFFFFFFFFFllu) == 0x8000000000000000llu, "");
+static_assert(FLOOR_POW2_X(0xFFFFFFFFFFFFFFFFllu-1) == 0x8000000000000000llu, "");
 static_assert(FLOOR_POW2_X(1llu) == 1, "");
 static_assert(FLOOR_POW2_X(10llu) == 8, "");
 static_assert(FLOOR_POW2_X(31llu) == 16, "");
@@ -189,7 +194,7 @@ static_assert(FLOOR_POW2_X(512llu) == 512, "");
 static_assert(FLOOR_POW2_X(600llu) == 512, "");
 
 
-static_assert(IS_POW2(PAGE_SIZE),       "PAGE_SIZE is not a power-of-two");
+static_assert(IS_POW2_X(PAGE_SIZE),       "PAGE_SIZE is not a power-of-two");
 static_assert(PAGE_SIZE >= sizeof(u64), "PAGE_SIZE too small");
 static_assert(PAGE_SIZE <= 65536,       "PAGE_SIZE too large");
 
@@ -205,33 +210,6 @@ static_assert(ILOG2(PAGE_SIZE) == PAGE_SIZE_BITS, "update PAGE_SIZE_BITS");
 
 
 char abuf_zeroc = 0;
-
-
-u32 _rsm_floor_pow2_32(u32 x) {
-  x += !x;
-  if (x == ~0u) return ~0u;
-  if (x > (x << 1)) return (~0u >> 1) + 1;
-  return 1u << (rsm_fls(x) - 1);
-}
-
-u64 _rsm_floor_pow2_64(u64 x) {
-  x += !x;
-  if (x == ~0llu) return ~0llu;
-  if (x > (x << 1)) return (~0llu >> 1) + 1;
-  return 1llu << (rsm_fls(x) - 1);
-}
-
-u32 _rsm_ceil_pow2_32(u32 x) {
-  if (x <= 1u) return 1u;
-  if (x > (x << 1)) return ~(u32)0u;
-  return 1u << ( (int)(sizeof(x) * 8) - rsm_clz((u32)(x - 1u)) );
-}
-
-u64 _rsm_ceil_pow2_64(u64 x) {
-  if (x <= 1llu) return 1llu;
-  if (x > (x << 1)) return ~(u64)0llu;
-  return 1llu << ( (int)(sizeof(x) * 8) - rsm_clz((u64)(x - 1llu)) );
-}
 
 
 const char* rerr_str(rerr_t e) {

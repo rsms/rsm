@@ -327,13 +327,17 @@ ALWAYS_INLINE void vm_cache_invalidate_one(vm_cache_t* cache, u64 vaddr) {
 // Returns vm_cache_ent_t.haddr_diff
 u64 _vm_cache_miss(vm_cache_t*, vm_pagedir_t*, u64 vaddr, vm_op_t);
 
+// void vmtrace(const char* fmt, ...)
+#ifndef vmtrace
+  #define vmtrace(...) ((void)0)
+#endif
 
 // VM_STORE performs a store to host memory using a virtual address.
 // E.g. VM_STORE(u32, vm_cache, vm_pagedir, 0xdeadbee0, 1234)
 // This becomes 10 x86_64 instructions, or 10 arm64/armv8-1 instructions (clang-14 -O3).
 // See https://godbolt.org/z/esT98Y9Yd
 #define VM_STORE(type, vm_cache, pagedir, vaddr, value) { \
-  trace("VM_STORE %s (align %lu) 0x%llx", #type, _Alignof(type), vaddr); \
+  vmtrace("VM_STORE %s (align %lu) 0x%llx", #type, _Alignof(type), vaddr); \
   *(type*)vm_translate( \
     (vm_cache), (pagedir), (vaddr), _Alignof(type), VM_OP_STORE + _Alignof(type) \
   ) = (value); \
@@ -342,14 +346,14 @@ u64 _vm_cache_miss(vm_cache_t*, vm_pagedir_t*, u64 vaddr, vm_op_t);
 // VM_LOAD performs a load from host memory using a virtual address.
 // E.g. u32 value = VM_LOAD(u32, vm_cache, vm_pagedir, 0xdeadbee0);
 #define VM_LOAD(type, vm_cache, pagedir, vaddr) ( \
-  trace("VM_LOAD %s (align %lu) 0x%llx", #type, _Alignof(type), vaddr), \
+  vmtrace("VM_LOAD %s (align %lu) 0x%llx", #type, _Alignof(type), vaddr), \
   *(type*)vm_translate( \
     (vm_cache), (pagedir), (vaddr), _Alignof(type), VM_OP_LOAD + _Alignof(type) \
   ) \
 )
 
 // VM_TRANSLATE translates a virtual address to a host address
-#define VM_TRANSLATE(align, vm_cache, pagedir, vaddr) \
+#define VM_TRANSLATE(vm_cache, pagedir, vaddr, align) \
   vm_translate((vm_cache), (pagedir), (vaddr), (align), VM_OP_LOAD + (u32)(align))
 
 // vm_translate converts a virtual address to its corresponding host address

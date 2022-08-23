@@ -31,7 +31,6 @@ typedef u8 PStatus; // Processor status
 
 struct T {
   u64         id;
-  rsched_t*   s;         // parent scheduler
   M* nullable m;         // attached M
   T* nullable parent;    // task that spawned this task
   T* nullable schedlink; // next task to be scheduled
@@ -41,8 +40,8 @@ struct T {
   const rin_t* instrv; // instruction array
   const void*  rodata; // global read-only data (from ROM)
 
-  void*   sp;       // saved SP register value used by m_switchtask
-  uintptr stacktop; // end of stack (lowest valid stack address)
+  u64 sp;       // saved SP register value used by m_switchtask
+  u64 stacktop; // end of stack (lowest valid stack address)
 
   u64              waitsince; // approx time when the T became blocked
   _Atomic(TStatus) status;
@@ -63,8 +62,7 @@ struct M {
   double fregs[RSM_NREGS];
 
   // virtual memory cache for read-only and read-write pages
-  vm_cache_t vm_cache_r; //__attribute__((__aligned__(PAGE_SIZE)));
-  vm_cache_t vm_cache_rw;
+  vm_cache_t vm_cache[3]; // 0=r, 1=w, 2=wr
 };
 
 struct P {
@@ -96,8 +94,6 @@ struct rsched_ {
   T*           t0;        // main task on m0
   u32          maxmcount; // limit number of M's created (ie. OS thread limit)
 
-  vm_pagedir_t vm_pagedir; // virtual memory page directory
-
   _Atomic(u64) tidgen; // T.id generator
   _Atomic(u32) midgen; // M.id generator
 
@@ -116,6 +112,8 @@ struct rsched_ {
     u32          cap; // capacity of ptr array
   } allt;
 
+  vm_pagedir_t vm_pagedir; // virtual memory page directory
+
   M m0; // main M (bound to the OS thread which rvm_main is called on)
   P p0; // first P
 };
@@ -127,6 +125,13 @@ struct rsched_ {
 typedef struct {
   u64 heap_vaddr; // start of heap, end of data (SP+0)
 } exeinfo_t;
+
+
+// tctx_t: task execution context used for task switching, stored on stack
+typedef struct {
+  double fregs[RSM_NREGS - RSM_NTMPREGS];
+  u64    iregs[RSM_NREGS - RSM_NTMPREGS - 1]; // does not include SP
+} tctx_t;
 
 
 rerr_t rsched_init(rsched_t* s, rmachine_t* machine);

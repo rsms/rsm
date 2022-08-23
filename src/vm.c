@@ -2,6 +2,8 @@
 // See vmem.txt for in-depth documentation
 // SPDX-License-Identifier: Apache-2.0
 #include "rsmimpl.h"
+
+#define vmtrace trace
 #include "vm.h"
 
 // VM_RUN_TEST_ON_INIT: define to run tests during exe init in DEBUG builds

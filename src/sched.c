@@ -6,12 +6,21 @@
 #include "sched.h"
 #include "machine.h"
 
+// tctx
+// #define TCTX_ALIGN       PAGE_SIZE
+// #define TCTX_ALIGN       CEIL_POW2_X(sizeof(tctx_t))
+#define TCTX_ALIGN       _Alignof(tctx_t)
+#define TCTX_ALIGN_BITS  ILOG2(TCTX_ALIGN)
+
+// u64 TCTX_VADDR(u64 sp) calculates the address of tctx given a stack pointer
+#define TCTX_VADDR(sp)  ALIGN2_FLOOR((u64)(sp) - (u64)sizeof(tctx_t), TCTX_ALIGN)
 
 // stack constants
 #define STK_ALIGN    8lu       // stack alignment (== sizeof(u64))
-#define STK_MIN      2048lu    // minium stack size (TODO: consider making part of ROM)
+#define STK_MIN      2048lu    // minium stack size
 #define STK_MAX      1lu * MiB // maximum stack size
 static_assert(STK_MIN % STK_ALIGN == 0, "STK_MIN not aligned to STK_ALIGN");
+static_assert(STK_MIN >= ALIGN2_X(sizeof(tctx_t), TCTX_ALIGN), "STK_MIN too small");
 
 #define HEAP_ALIGN   8  // alignment of heap memory address
 
@@ -87,12 +96,6 @@ enum PStatus {
   P_SYSCALL,
   P_DEAD,
 };
-
-// tctx_t: task execution context used for task switching, stored on stack
-typedef struct {
-  double fregs[RSM_NREGS - RSM_NTMPREGS];
-  u64    iregs[RSM_NREGS - RSM_NTMPREGS - 1]; // does not include SP
-} __attribute__((__aligned__(STK_ALIGN))) tctx_t;
 
 
 // stackbase for a task
@@ -294,19 +297,19 @@ static T* p_runqget(P* p, bool* inheritTime) {
 
 
 static rerr_t sched_allt_add(rsched_t* s, T* t) {
-  assert(t->s == s);
   assert(t_readstatus(t) != T_IDLE);
 
   mtx_lock(&s->allt.lock);
 
   if (s->allt.len == s->allt.cap) {
-    rmem_t m = { s->allt.ptr, (usize)s->allt.cap * sizeof(void*) };
-    if UNLIKELY(!rmem_resize(s->machine->malloc, &m, (s->allt.cap + 64) * sizeof(void*))) {
+    rmem_t mem = { s->allt.ptr, (usize)s->allt.cap * sizeof(void*) };
+    bool ok = rmem_resize(s->machine->malloc, &mem, (s->allt.cap + 64) * sizeof(void*));
+    if UNLIKELY(!ok) {
       mtx_unlock(&s->allt.lock);
       return rerr_nomem;
     }
-    s->allt.cap = m.size / sizeof(void*);
-    AtomicStore(&s->allt.ptr, m.p, memory_order_release);
+    s->allt.cap = mem.size / sizeof(void*);
+    AtomicStore(&s->allt.ptr, mem.p, memory_order_release);
   }
 
   trace("set s.allt[%u] = T%llu", s->allt.len, t->id);
@@ -318,67 +321,105 @@ static rerr_t sched_allt_add(rsched_t* s, T* t) {
 }
 
 
-// TCTX_SIZE: bytes needed on stack to store a task's persistent register values
-#define TCTX_SIZE ( \
-  ((RSM_NREGS - RSM_NTMPREGS) * sizeof(u64)) + \
-  ((RSM_NREGS - RSM_NTMPREGS) * sizeof(double)) )
+// tctx_vaddr calculates the address of a tctx_t given a stack pointer
+static u64 tctx_vaddr(u64 sp) {
+  u64 vaddr = ALIGN2_FLOOR((u64)(sp) - (u64)sizeof(tctx_t), TCTX_ALIGN);
+
+  if LIKELY(VM_PAGE_ADDR(vaddr) == VM_PAGE_ADDR(vaddr + sizeof(tctx_t)))
+    return vaddr;
+
+  // the ctx address spans pages; store it at the end of the first page
+  return ALIGN2_FLOOR(vaddr + sizeof(tctx_t), PAGE_SIZE) - sizeof(tctx_t);
+}
 
 
-// tctx_t layout:
-//   [byte 0] F{RSM_NTMPREGS} F{RSM_NTMPREGS+1} F{...} F{RSM_NREGS-1} ...
-//        ... R{RSM_NTMPREGS} R{RSM_NTMPREGS+1} R{...} R{RSM_NREGS-2}
-
+// m_switchtask configures m to execute task t.
+// It first saves the current task's state, then restores the state of t.
 static void m_switchtask(M* m, T* nullable t) {
+  if (t) trace("-> T%llu", t->id);
+  else   trace("-> T-");
+
+  assert(t != m->currt);
+
   if (m->currt) {
     // save context
     panic("TODO: save context");
   }
+
   m->currt = t;
-  if (t) {
-    // restore context
-    // tctx is stored on the task stack at address SP-sizeof(tctx_t)
-    tctx_t* ctx = t->sp;
-    for (usize i = 0; i < countof(ctx->fregs); i++)
-      m->fregs[i + RSM_NTMPREGS] = ctx->fregs[i];
-    for (usize i = 0; i < countof(ctx->iregs); i++)
-      m->iregs[i + RSM_NTMPREGS] = ctx->iregs[i];
-    u64 sp = (u64)(uintptr)t->sp;
-    dlog("TODO: translate vm stack address to host address");
-    m->iregs[RSM_MAX_REG] = sp;
+  if (!t) {
+    dlog("TODO");
+    return;
   }
+
+  // restore context
+
+  // A suspended task's tctx is stored on the task's stack, just above SP
+  u64 ctx_vaddr = tctx_vaddr(t->sp);
+  assertf(ctx_vaddr >= t->stacktop, "%llx, %llx", ctx_vaddr, t->stacktop);
+
+  // get backing memory
+  vm_cache_t* vm_cache = &m->vm_cache[VM_PERM_RW];
+  tctx_t* ctx =
+    (tctx_t*)VM_TRANSLATE(vm_cache, &m->s->vm_pagedir, ctx_vaddr, TCTX_ALIGN);
+
+  dlog("load ctx from stack at vaddr 0x%llx", ctx_vaddr);
+
+
+  assertnotnull(ctx);
+
+
+  // tctx_t layout:
+  //   [byte 0] F{RSM_NTMPREGS} F{RSM_NTMPREGS+1} F{...} F{RSM_NREGS-1} ...
+  //        ... R{RSM_NTMPREGS} R{RSM_NTMPREGS+1} R{...} R{RSM_NREGS-2}
+
+  for (usize i = 0; i < countof(ctx->fregs); i++)
+    m->fregs[i + RSM_NTMPREGS] = ctx->fregs[i];
+
+  for (usize i = 0; i < countof(ctx->iregs); i++)
+    m->iregs[i + RSM_NTMPREGS] = ctx->iregs[i];
+
+  m->iregs[RSM_MAX_REG] = t->sp;
 }
 
 
-// stacksize is a requested minimum number of bytes to allocate for its stack
-static T* nullable sched_alloctask(rsched_t* s, usize stacksize) {
+static T* nullable task_create(M* m, u64 stack_vaddr, usize stacksize) {
   // task memory layout:
-  //    ┌───────────┬──────────┐
-  //    │   ← stack │ T struct │
-  //    ├───────────┼──────────┘
-  // stacktop   stackbase
-  //            initial SP
+  //
+  //               ┌─────────────┬─ stacktop
+  //               │             │
+  //               ~      ↑      ~
+  //               │    stack    │← tctx_t on top when task is idle
+  //               ├─────────────┼─ stackbase (CTX and initial SP)
+  //               │  T struct   │
+  //  stack_vaddr ─┴─────────────┘
+  //
+  assert(IS_ALIGN2(stack_vaddr, STK_ALIGN));
+  vm_cache_t* vm_cache = &m->vm_cache[VM_PERM_RW];
+  void* stackptr = (void*)VM_TRANSLATE(vm_cache, &m->s->vm_pagedir, stack_vaddr, STK_ALIGN);
+  assertf(stackptr != NULL, "stack memory not mapped for 0x%llx", stack_vaddr);
 
-  usize alignment = MAX(_Alignof(T), STK_ALIGN);
-  stacksize = ALIGN2(stacksize, alignment);
+  //dlog("stack 0x%llx => haddr %p ... %p", stack_vaddr, stackptr - stacksize, stackptr);
 
-  rmem_t stacktop =
-    rmem_alloc_aligned(s->machine->malloc, stacksize + sizeof(T), alignment);
-  if UNLIKELY(!stacktop.p)
-    return NULL;
-  memset(stacktop.p, 0, stacktop.size);
-  assertf(IS_ALIGN2((uintptr)stacktop.p, (uintptr)alignment), "bug in rmem_alloc");
+  // space for T, below stack, with strongest alignment
+  usize tsize = ALIGN2(sizeof(T), MAX(_Alignof(T), STK_ALIGN));
 
-  T* t = (T*)((uintptr)stacktop.p + stacktop.size - sizeof(T));
-  t->s = s;
-  t->stacktop = (uintptr)stacktop.p;
-  t->sp = TASK_STACKBASE(t);
+  T* t = stackptr - tsize;
+  t->stacktop = stack_vaddr - stacksize;
+  t->sp = stack_vaddr - (u64)tsize - sizeof(u64); // current stack pointer
+
+  // push final return value to stack
+  static_assert(_Alignof(T) <= STK_ALIGN, "assuming u64 alignment of stack");
+  u64* sp = (void*)t - sizeof(u64);
+  *sp = (u64)MAIN_RET_PC; // TODO: actual return address
 
   // initialize tctx
-  tctx_t* ctx = (tctx_t*)(t->sp - sizeof(tctx_t));
-  ctx->iregs[RSM_MAX_REG - RSM_NTMPREGS - 1] = (u64)(uintptr)t; // CTX
+  tctx_t* ctx = (tctx_t*)ALIGN2_FLOOR((uintptr)sp - sizeof(tctx_t), TCTX_ALIGN);
+  ctx->iregs[RSM_MAX_REG - RSM_NTMPREGS - 1] = (u64)(uintptr)t; // CTX reg
 
-  // dlog("s_alloctask stack %p … %p (%lu B)",
-  //   stacktop.p, t->sp, (usize)((uintptr)t->sp - (uintptr)stacktop.p));
+  dlog("store ctx to stack at vaddr 0x%llx (haddr %p)", tctx_vaddr(t->sp), ctx);
+
+  trace("T@%p+%zu stack 0x%llx-0x%llx", t, tsize, t->stacktop, stack_vaddr);
 
   return t;
 }
@@ -388,7 +429,7 @@ static T* nullable sched_alloctask(rsched_t* s, usize stacksize) {
 // Put it on the queue of T's waiting to run.
 // The compiler turns a go statement into a call to this.
 static rerr_t sched_spawn(
-  rsched_t* s, const rin_t* iv, usize ic, u64 stack_vaddr, usize pc)
+  rsched_t* s, const rin_t* iv, usize ic, u64 stack_vaddr, usize stacksize, usize pc)
 {
   T* t = t_get();
   M* m = t->m;
@@ -398,7 +439,7 @@ static rerr_t sched_spawn(
   m_acquire(m);
 
   // create main task
-  T* newtask = sched_alloctask(s, STK_MIN);
+  T* newtask = task_create(m, stack_vaddr, stacksize);
   if (!newtask) {
     err = rerr_nomem;
     goto onerr;
@@ -447,6 +488,10 @@ static rerr_t m_init(M* m, u64 id) {
   m->t0.m = m;
   m->t0.status = T_RUNNING;
   m->t0.id = AtomicAdd(&m->s->tidgen, 1, memory_order_acquire);
+
+  // virtual memory caches
+  for (usize i = 0; i < countof(m->vm_cache); i++)
+    vm_cache_init(&m->vm_cache[i]);
 
   return 0;
 }
@@ -674,7 +719,7 @@ static void dlog_memory_map(
 
 
 // rsched_loadrom loads a rom image into backing memory pages at basemem
-static rerr_t rsched_loadrom(rsched_t* s, rrom_t* rom, rmem_t basemem) {
+static rerr_t rsched_loadrom(rsched_t* s, rrom_t* rom, rmem_t basemem, usize* stacksizep) {
   // 1. load rom image into base memory:
   //   basemem
   //   ├────────┬──────────┬──────────────────────┬─────────────────────┐
@@ -782,6 +827,8 @@ static rerr_t rsched_loadrom(rsched_t* s, rrom_t* rom, rmem_t basemem) {
     return rerr_mfault;
   }
 
+  *stacksizep = stacksize;
+
   return 0;
 }
 
@@ -800,17 +847,18 @@ rerr_t rsched_execrom(rsched_t* s, rrom_t* rom) {
     return rerr_nomem;
 
   // load rom into initial backing pages
-  rerr_t err = rsched_loadrom(s, rom, basemem);
+  usize stacksize;
+  rerr_t err = rsched_loadrom(s, rom, basemem, &stacksize);
   if (err)
     goto end;
 
   // create main task
   void* code = basemem.p;
-  err = sched_spawn(s, code, rom->codelen, STACK_VADDR, /*pc=*/0);
+  err = sched_spawn(s, code, rom->codelen, STACK_VADDR, stacksize, /*pc=*/0);
   if (err)
     goto end;
 
-  // save pointer to main task
+  // set pointer to main task
   s->t0 = s->m0.p->runnext;
 
   // enter scheduler loop in M0

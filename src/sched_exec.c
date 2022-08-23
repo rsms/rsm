@@ -5,7 +5,7 @@
 #include "thread.h"
 #include "sched.h"
 
-//#define DEBUG_EXEC_LOG_LOADSTORE // define to dlog LOAD and STORE operations
+#define TRACE_MEMORY // define to dlog LOAD and STORE operations
 
 #define trace schedtrace
 
@@ -47,15 +47,19 @@ static_assert(STK_MIN % STK_ALIGN == 0, "STK_MIN not aligned to STK_ALIGN");
     fprintf(stderr, REG_FMTVAL_PAT("%6llx") "  │ %3ld  %s\n",
       REG_FMTVAL(RSM_MAX_REG, iregs[RSM_MAX_REG]), pc, buf);
   }
-  #ifdef DEBUG_EXEC_LOG_LOADSTORE
-    #define exec_logmemop dlog
+  #ifdef TRACE_MEMORY
+    #ifdef trace
+      #define tracemem trace
+    #else
+      #define tracemem dlog
+    #endif
   #else
-    #define exec_logmemop(...) ((void)0)
+    #define tracemem(...) ((void)0)
   #endif
 #else
   #define exec_logstate(...)        ((void)0)
   #define exec_logstate_header(...) ((void)0)
-  #define exec_logmemop(...)        ((void)0)
+  #define tracemem(...)        ((void)0)
 #endif
 
 
@@ -126,20 +130,8 @@ enum execerr_t {
   #define check(cond, ...) ((void)0)
 #endif // RSM_SAFE
 
-#define check_loadstore(addr, align, ealign, eoob) { \
-  check(IS_ALIGN2(addr, align), ealign, addr, align); \
-  check(addr <= endaddr(EXEC_ARGS, addr), eoob, addr, align); \
-}
-
 #define check_shift(exponent) check((exponent) < 64, EX_E_SHIFT_EXP, exponent)
 
-#if RSM_SAFE
-  // endaddr returns the fist invalid address for the segment addr is apart of.
-  // (In other words: it returns the last valid address + 1.)
-  inline static u64 endaddr(EXEC_PARAMS, u64 addr) {
-    return addr + t->s->heapsize;
-  }
-#endif
 
 // END runtime error checking & reporting
 //———————————————————————————————————————————————————————————————————————————————————
@@ -176,37 +168,32 @@ enum execerr_t {
 //———————————————————————————————————————————————————————————————————————————————————
 // memory operations
 
-// hostaddr translates a vm address to a host address
-inline static void* hostaddr(EXEC_PARAMS, u64 addr) {
-  // TODO FIXME virtual address table (or something more reliable)
-  // [TMP XXX] for now, assume lower addresses refer to global data
-  if (addr < 0xffff) {
-    //dlog("get host address of ROM global 0x%llu", addr);
-    return (void*)t->rodata + (uintptr)addr;
-  }
-  return (void*)(uintptr)addr;
-}
-
-inline static void* hostaddr_check_access(EXEC_PARAMS, u64 align, u64 addr) {
-  check_loadstore(addr, align, EX_E_UNALIGNED_ACCESS, EX_E_OOB_LOAD);
-  return hostaddr(EXEC_ARGS, addr);
-}
-
 // inline u64 MLOAD(TYPE, u64 addr)
-#define MLOAD(TYPE, addr) ({ \
-  u64 a__=(addr); \
-  u64 v__ = *(TYPE*)hostaddr_check_access(EXEC_ARGS, sizeof(TYPE), a__); \
-  exec_logmemop("LOAD  %s mem[0x%llx] => 0x%llx", #TYPE, a__, v__); \
-  v__; \
+#define MLOAD(TYPE, vaddr) ({ \
+  u64 vaddr__ = (vaddr); \
+  u64 value__ = VM_LOAD( \
+    TYPE, &(t)->m->vm_cache[VM_PERM_RW], &(t)->m->s->vm_pagedir, vaddr__); \
+  tracemem("LOAD %s 0x%llx (align %lu) => 0x%llx", \
+    #TYPE, vaddr__, _Alignof(TYPE), value__); \
+  value__; \
 })
 
 // inline void MSTORE(TYPE, u64 addr, u64 value)
-#define MSTORE(TYPE, addr, value) { \
-  u64 a__=(addr), v__=(value); \
-  exec_logmemop("STORE %s mem[0x%llx] <= 0x%llx", #TYPE, a__, v__); \
-  check_loadstore(a__, sizeof(TYPE), EX_E_UNALIGNED_STORE, EX_E_OOB_STORE); \
-  void* addr__ = hostaddr(EXEC_ARGS, a__); \
-  *(TYPE*)addr__ = v__; \
+#define MSTORE(TYPE, vaddr, value) { \
+  u64 vaddr__ = (vaddr); \
+  u64 value__ = (value); \
+  tracemem("STORE %s 0x%llx (align %lu) => 0x%llx", \
+    #TYPE, vaddr__, _Alignof(TYPE), value__); \
+  VM_STORE( \
+    TYPE, &(t)->m->vm_cache[VM_PERM_RW], &(t)->m->s->vm_pagedir, vaddr__, value__); \
+}
+
+static void mcopy(EXEC_PARAMS, u64 dstaddr, u64 srcaddr, u64 size) {
+  panic("%s NOT IMPLEMENTED", __FUNCTION__); // TODO virtual memory
+}
+
+static i64 mcmp(EXEC_PARAMS, u64 xaddr, u64 yaddr, u64 size) {
+  panic("%s NOT IMPLEMENTED", __FUNCTION__); // TODO virtual memory
 }
 
 static u64 copyv(EXEC_PARAMS, u64 n) {
@@ -217,18 +204,6 @@ static u64 copyv(EXEC_PARAMS, u64 n) {
   return (((u64)inv[pc]) << 32) | (u64)inv[pc+1];
 }
 
-static void mcopy(EXEC_PARAMS, u64 dstaddr, u64 srcaddr, u64 size) {
-  void* dst = hostaddr_check_access(EXEC_ARGS, 1, dstaddr);
-  void* src = hostaddr_check_access(EXEC_ARGS, 1, srcaddr);
-  memcpy(dst, src, (usize)size);
-}
-
-static i64 mcmp(EXEC_PARAMS, u64 xaddr, u64 yaddr, u64 size) {
-  void* x = hostaddr_check_access(EXEC_ARGS, 1, xaddr);
-  void* y = hostaddr_check_access(EXEC_ARGS, 1, yaddr);
-  return (i64)memcmp(x, y, (usize)size);
-}
-
 // —————————— I/O
 
 // libc prototypes
@@ -237,14 +212,14 @@ isize read(int fd, void* buf, usize nbyte);
 
 static u64 _write(EXEC_PARAMS, u64 fd, u64 addr, u64 size) {
   // RA = write srcaddr=RB size=R(C) fd=Du
-  void* src = hostaddr_check_access(EXEC_ARGS, 1, addr);
-  return (u64)write((int)fd, src, (usize)size);
+  panic("%s NOT IMPLEMENTED", __FUNCTION__); // TODO virtual memory
+  // return (u64)write((int)fd, src, (usize)size);
 }
 
 static u64 _read(EXEC_PARAMS, u64 fd, u64 addr, u64 size) {
   // RA = read dstaddr=RB size=R(C) fd=Du
-  void* dst = hostaddr_check_access(EXEC_ARGS, 1, addr);
-  return (u64)read((int)fd, dst, (usize)size);
+  panic("%s NOT IMPLEMENTED", __FUNCTION__); // TODO virtual memory
+  // return (u64)read((int)fd, dst, (usize)size);
 }
 
 // —————————— syscall
@@ -260,21 +235,19 @@ static u64 dev_open(EXEC_PARAMS, u64 devid) {
 
 // —————————— stack operations
 
-inline static void push(EXEC_PARAMS, u64 size, u64 val) {
-  u64 addr = SP;
-  check(addr >= size && addr - size >= t->stacktop, EX_E_STACK_OVERFLOW, addr);
-  addr -= size;
-  SP = addr;
-  MSTORE(u64, addr, val);
+inline static void push(EXEC_PARAMS, u64 size, u64 value) {
+  u64 vaddr = SP;
+  check(vaddr >= t->stacktop + size, EX_E_STACK_OVERFLOW, vaddr);
+  vaddr -= size;
+  SP = vaddr;
+  MSTORE(u64, vaddr, value);
 }
 
-inline static u64 pop(EXEC_PARAMS, usize size) {
-  usize addr = SP;
-  check(
-    USIZE_MAX-addr >= size && (uintptr)addr+size <= (uintptr)TASK_STACKBASE(t),
-    EX_E_STACK_OVERFLOW, addr);
-  SP = addr + size;
-  return MLOAD(u64, addr);
+inline static u64 pop(EXEC_PARAMS, u64 size) {
+  u64 vaddr = SP;
+  check(vaddr + size >= t->stacktop, EX_E_STACK_OVERFLOW, vaddr);
+  SP = vaddr + size;
+  return MLOAD(u64, vaddr);
 }
 
 static void push_PC(EXEC_PARAMS) {

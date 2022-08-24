@@ -175,10 +175,9 @@ _( CALL  , Au   , nil , "call"  /* R0...R7 = push(PC); PC=Au */)\
 _( JUMP  , Au   , nil , "jump"  /* PC = Au                   */)\
 _( RET   , _    , nil , "ret"   /* PC = pop()                */)\
 \
-_( SCALL , Au    , nil , "scall" /* R0...R7 = system_call(Au) */)\
+_( SCALL , Au    , nil , "scall" /* R0...R7 = syscall(Au) args in R0...R18 */)\
 _( WRITE , ABCDu , reg , "write" /* RA = write dstaddr=RB size=RC fd=Du */)\
 _( READ  , ABCDu , reg , "read"  /* RA = read  srcaddr=RB size=RC fd=Du */)\
-_( DEVOPEN , ABu , reg , "devopen" /* RA = devaddr = device(Bu) */)\
 _( MCOPY , ABCu  , mem , "mcopy" /* mem[RA:Cu] = mem[RB:Cu] */)\
 _( MCMP  , ABCDu , reg , "mcmp"  /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 \

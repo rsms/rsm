@@ -26,6 +26,11 @@ static_assert(STK_MIN % STK_ALIGN == 0, "STK_MIN not aligned to STK_ALIGN");
 #define EXEC_PARAMS T* t, u64* iregs, const rin_t* inv, usize pc
 #define EXEC_ARGS   t, iregs, inv, pc
 
+// syscall operations
+typedef u32 syscall_op_t;
+enum syscall_op {
+  SC_EXIT = 0, // status_code i32
+};
 
 //———————————————————————————————————————————————————————————————————————————————————
 // exec_logstate
@@ -189,11 +194,11 @@ enum execerr_t {
 }
 
 static void mcopy(EXEC_PARAMS, u64 dstaddr, u64 srcaddr, u64 size) {
-  panic("%s NOT IMPLEMENTED", __FUNCTION__); // TODO virtual memory
+  panic("NOT IMPLEMENTED"); // TODO virtual memory
 }
 
 static i64 mcmp(EXEC_PARAMS, u64 xaddr, u64 yaddr, u64 size) {
-  panic("%s NOT IMPLEMENTED", __FUNCTION__); // TODO virtual memory
+  panic("NOT IMPLEMENTED"); // TODO virtual memory
 }
 
 static u64 copyv(EXEC_PARAMS, u64 n) {
@@ -212,25 +217,24 @@ isize read(int fd, void* buf, usize nbyte);
 
 static u64 _write(EXEC_PARAMS, u64 fd, u64 addr, u64 size) {
   // RA = write srcaddr=RB size=R(C) fd=Du
-  panic("%s NOT IMPLEMENTED", __FUNCTION__); // TODO virtual memory
+  panic("NOT IMPLEMENTED"); // TODO virtual memory
   // return (u64)write((int)fd, src, (usize)size);
 }
 
 static u64 _read(EXEC_PARAMS, u64 fd, u64 addr, u64 size) {
   // RA = read dstaddr=RB size=R(C) fd=Du
-  panic("%s NOT IMPLEMENTED", __FUNCTION__); // TODO virtual memory
+  panic("NOT IMPLEMENTED"); // TODO virtual memory
   // return (u64)read((int)fd, dst, (usize)size);
 }
 
 // —————————— syscall
 
-static void scall(EXEC_PARAMS, u8 ar, rin_t in) {
-  dlog("scall not implemented");
-}
-
-static u64 dev_open(EXEC_PARAMS, u64 devid) {
-  // DEPRECATED (memory mapped devices via memory segmentation)
-  return 0;
+static int scall(EXEC_PARAMS, u32 syscall_op, rin_t in) {
+  switch ((enum syscall_op)syscall_op) {
+    case SC_EXIT: return 1; // suspend execution
+  }
+  panic("NOT IMPLEMENTED syscall %u", syscall_op);
+  return 0; // continue execution
 }
 
 // —————————— stack operations
@@ -327,8 +331,8 @@ void rsched_exec(EXEC_PARAMS) {
     //   [33]=&&_op_CAT_i    op with register or imm (imm handler)
     //   ...
     static const void* jumptab[(RSM_OP_COUNT << 1) | 1] = {
-      #define L_r(OP)      [(rop_##OP << 1)]=&&_op_##OP,
-      #define L_i(OP)      [(rop_##OP << 1)|1]=&&_op_##OP##_i,
+      #define L_r(OP)      [rop_##OP << 1]     = &&_op_##OP,
+      #define L_i(OP)      [(rop_##OP << 1)|1] = &&_op_##OP##_i,
       #define L__          L_r
       #define L_A          L_r
       #define L_AB         L_r
@@ -351,17 +355,18 @@ void rsched_exec(EXEC_PARAMS) {
       u32 ji = (RSM_GET_OP(in) << 1) | RSM_GET_i(in); \
       assertf(jumptab[ji], "\"%s\" i=%d", rop_name(RSM_GET_OP(in)), RSM_GET_i(in)); \
       goto *jumptab[ji];
-    #define NEXT     continue;
-    #define R(OP)    _op_##OP:
-    #define I(OP)    _op_##OP##_i:
+    #define NEXT         continue;
+    #define CASE_R(OP) _op_##OP:
+    #define CASE_I(OP) _op_##OP##_i:
     #define DEFAULT  /* check done in DISPATCH */
   #else // use switch
-    #define DISPATCH switch ((RSM_GET_OP(in) << 1) | RSM_GET_i(in))
-    #define NEXT     break;
-    #define R(OP)    case (rop_##OP << 1):
-    #define I(OP)    case (rop_##OP << 1)|1:
+    #define DISPATCH     switch ((RSM_GET_OP(in) << 1) | RSM_GET_i(in))
+    #define NEXT         break;
+    #define CASE_R(OP) case (rop_##OP << 1):
+    #define CASE_I(OP) case (rop_##OP << 1)|1:
     #ifdef DEBUG
-      #define DEFAULT default: panic("\"%s\" i=%d", rop_name(RSM_GET_OP(in)), RSM_GET_i(in));
+      #define DEFAULT \
+        default: panic("\"%s\" i=%d", rop_name(RSM_GET_OP(in)), RSM_GET_i(in));
     #else
       #define DEFAULT
     #endif
@@ -440,37 +445,31 @@ void rsched_exec(EXEC_PARAMS) {
 
     #define do_JUMP(A)  pc = (usize)A
     #define do_CALL(A)  push_PC(EXEC_ARGS); pc = (usize)A;
-    #define do_SCALL(A) scall(EXEC_ARGS, A, in)
+    #define do_SCALL(A) if (scall(EXEC_ARGS, A, in)) return;
 
     #define do_WRITE(D)   RA = _write(EXEC_ARGS, D, RB, RC) // addr=RB size=RC fd=D
     #define do_READ(D)    RA = _read(EXEC_ARGS, D, RB, RC) // addr=RB size=RC fd=D
-    #define do_DEVOPEN(B) RA = dev_open(EXEC_ARGS, B)
     #define do_MCOPY(C)   mcopy(EXEC_ARGS, RA, RB, C)
     #define do_MCMP(D)    RA = (u64)mcmp(EXEC_ARGS, RB, RC, D)
 
-    #define do_RET() { \
-      pc = (usize)pop(EXEC_ARGS, 8); /* load return address from stack */ \
-      /* TODO: instead of MAIN_RET_PC, append coro(end) or yield(end) or exit instr */ \
-      /* to end of inv and setup main return to that address. */ \
-      if (pc == MAIN_RET_PC) return; \
-    }
+    #define do_RET() pc = (usize)pop(EXEC_ARGS, 8) // load return address from stack
 
     //———————————————————————————————————————————————————————————————————————————————————
     // generators for handler labels (or case statements if a switch is used)
-    #define CASE__(OP)     R(OP) do_##OP(); NEXT
-    #define CASE_A(OP)     R(OP) do_##OP(RA); NEXT
-    #define CASE_AB(OP)    R(OP) do_##OP(RB); NEXT
-    #define CASE_ABC(OP)   R(OP) do_##OP(RC); NEXT
-    #define CASE_ABCD(OP)  R(OP) do_##OP(RD); NEXT
-    #define CASE_Au(OP)    R(OP) do_##OP(RA); NEXT   I(OP) do_##OP(RAu); NEXT
-    #define CASE_ABv(OP)   I(OP) do_##OP(RBu); NEXT
-    #define CASE_ABu(OP)   R(OP) do_##OP(RB); NEXT   I(OP) do_##OP(RBu); NEXT
-    #define CASE_ABCu(OP)  R(OP) do_##OP(RC); NEXT   I(OP) do_##OP(RCu); NEXT
-    #define CASE_ABCDu(OP) R(OP) do_##OP(RD); NEXT   I(OP) do_##OP(RDu); NEXT
-    #define CASE_As(OP)    R(OP) do_##OP(RA); NEXT   I(OP) do_##OP(RAs); NEXT
-    #define CASE_ABs(OP)   R(OP) do_##OP(RB); NEXT   I(OP) do_##OP(RBs); NEXT
-    #define CASE_ABCs(OP)  R(OP) do_##OP(RC); NEXT   I(OP) do_##OP(RCs); NEXT
-    #define CASE_ABCDs(OP) R(OP) do_##OP(RD); NEXT   I(OP) do_##OP(RDs); NEXT
+    #define CASE__(OP)     CASE_R(OP) do_##OP(); NEXT
+    #define CASE_A(OP)     CASE_R(OP) do_##OP(RA); NEXT
+    #define CASE_AB(OP)    CASE_R(OP) do_##OP(RB); NEXT
+    #define CASE_ABC(OP)   CASE_R(OP) do_##OP(RC); NEXT
+    #define CASE_ABCD(OP)  CASE_R(OP) do_##OP(RD); NEXT
+    #define CASE_Au(OP)    CASE_R(OP) do_##OP(RA); NEXT  CASE_I(OP) do_##OP(RAu); NEXT
+    #define CASE_ABv(OP)   CASE_I(OP) do_##OP(RBu); NEXT
+    #define CASE_ABu(OP)   CASE_R(OP) do_##OP(RB); NEXT  CASE_I(OP) do_##OP(RBu); NEXT
+    #define CASE_ABCu(OP)  CASE_R(OP) do_##OP(RC); NEXT  CASE_I(OP) do_##OP(RCu); NEXT
+    #define CASE_ABCDu(OP) CASE_R(OP) do_##OP(RD); NEXT  CASE_I(OP) do_##OP(RDu); NEXT
+    #define CASE_As(OP)    CASE_R(OP) do_##OP(RA); NEXT  CASE_I(OP) do_##OP(RAs); NEXT
+    #define CASE_ABs(OP)   CASE_R(OP) do_##OP(RB); NEXT  CASE_I(OP) do_##OP(RBs); NEXT
+    #define CASE_ABCs(OP)  CASE_R(OP) do_##OP(RC); NEXT  CASE_I(OP) do_##OP(RCs); NEXT
+    #define CASE_ABCDs(OP) CASE_R(OP) do_##OP(RD); NEXT  CASE_I(OP) do_##OP(RDs); NEXT
     #define _(OP, enc, ...) CASE_##enc(OP)
     RSM_FOREACH_OP(_)
     #undef _
@@ -478,5 +477,11 @@ void rsched_exec(EXEC_PARAMS) {
     DEFAULT
   } // DISPATCH
   } // loop
+
+  #undef DISPATCH
+  #undef NEXT
+  #undef CASE_R
+  #undef CASE_I
+  #undef DEFAULT
 }
 

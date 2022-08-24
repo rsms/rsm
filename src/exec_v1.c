@@ -254,57 +254,6 @@ static u64 _read(VMPARAMS, u64 fd, u64 addr, u64 size) {
   return (u64)read((int)fd, dst, (usize)size);
 }
 
-//————————————————————————————————————————————————————————————————————————————————————————
-// BEGIN memory-mapped devices experiment
-typedef struct rvm_dev_t rvm_dev_t;
-struct rvm_dev_t {
-  u32 id;
-  rerr_t(*open)(rvm_dev_t*, void** mp, usize* msizep, u32 flags);
-  rerr_t(*close)(rvm_dev_t*, void* m, usize msize);
-  rerr_t(*refresh)(rvm_dev_t*, void* m, usize msize, u32 flags);
-};
-
-static void* testdev_mem[32/sizeof(void*)];
-static rerr_t tesdev_open(rvm_dev_t* dev, void** mp, usize* msizep, u32 flags) {
-  *mp = testdev_mem;
-  *msizep = sizeof(testdev_mem);
-  return 0;
-}
-static rerr_t tesdev_close(rvm_dev_t* dev, void* m, usize msize) {
-  return 0;
-}
-static rerr_t testdev_refresh(rvm_dev_t* dev, void* m, usize msize, u32 flags) {
-  char buf[(sizeof(testdev_mem)*3) + 1];
-  abuf_t s = abuf_make(buf, sizeof(buf));
-  abuf_repr(&s, testdev_mem, sizeof(testdev_mem));
-  abuf_terminate(&s);
-  dlog("[testdev_refresh] device memory contents:\n\"%s\"", buf);
-  return 0;
-}
-static rvm_dev_t testdev = {
-  .id      = 1,
-  .open    = &tesdev_open,
-  .close   = &tesdev_close,
-  .refresh = &testdev_refresh,
-};
-
-static u64 dev_open(VMPARAMS, u64 devid) {
-  dlog("dev_open #%llu", devid);
-  if (devid < 1 || devid > M_SEG_COUNT-1)
-    return 0;
-  testdev.id = (u32)devid;
-  rerr_t err = testdev.open(&testdev, &vs->mbase[devid], &vs->msize[devid], 0);
-  if (err) {
-    log("devopen [%u] failed: %s", testdev.id, rerr_str(err));
-    return 0;
-  }
-  u64 addr = devid * M_SEG_SIZE;
-  dlog("[dev_open] addr 0x%llx, membase %p", addr, vs->mbase[devid]);
-  return addr;
-}
-// END memory-mapped devices experiment
-//————————————————————————————————————————————————————————————————————————————————————————
-
 static void scall(VMPARAMS, u8 ar, rin_t in) {
   dlog("scall not implemented");
 }
@@ -482,7 +431,6 @@ static void vmexec(VMPARAMS) {
 
     #define do_WRITE(D)   RA = _write(VMARGS, D, RB, RC) // addr=RB size=RC fd=D
     #define do_READ(D)    RA = _read(VMARGS, D, RB, RC) // addr=RB size=RC fd=D
-    #define do_DEVOPEN(B) RA = dev_open(VMARGS, B)
     #define do_MCOPY(C)   mcopy(VMARGS, RA, RB, C)
     #define do_MCMP(D)    RA = (u64)mcmp(VMARGS, RB, RC, D)
 
@@ -619,12 +567,6 @@ rerr_t rsm_vmexec(rvm_t* vm, rrom_t* rom, rmemalloc_t* malloc) {
   #endif
 
   vmexec(&vs, iregs, rom->code, 0);
-
-  if (vs.mbase[testdev.id]) {
-    rerr_t err = testdev.refresh(&testdev, vs.mbase[testdev.id], vs.msize[testdev.id], 0);
-    rerr_t err2 = testdev.close(&testdev, vs.mbase[testdev.id], vs.msize[testdev.id]);
-    return err ? err : err2;
-  }
 
   return 0;
 }

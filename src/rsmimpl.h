@@ -383,7 +383,8 @@ typedef unsigned long       usize;
 #define rsm_fls(x)  ( (x) ? (int)(sizeof(__typeof__(x)) * 8) - rsm_clz(x) : 0 )
 #define RSM_FLS_X   rsm_fls
 
-// int ILOG2(ANYINT n) calculates the log of base 2
+// int ILOG2(ANYINT n) calculates the log of base 2, rounding down.
+// e.g. ILOG2(15) = 3, ILOG2(16) = 4.
 // Result is undefined if n is 0.
 #define ILOG2(n) (rsm_fls(n) - 1)
 

@@ -38,6 +38,12 @@ static_assert(STK_MIN >= ALIGN2_X(sizeof(tctx_t), TCTX_ALIGN), "STK_MIN too smal
 // DATA_VADDR is the virtual address of the data section
 #define DATA_VADDR  VM_ADDR_MIN
 
+// PROLOGUE_LEN: number of instructions in the main prologue.
+#define PROLOGUE_LEN 1
+
+// PROLOGUE_PC is the instruction address of the prologue
+#define PROLOGUE_PC  0
+
 //———————————————————————————————————————————————————————————————————————————————————
 // vm v2
 //
@@ -411,7 +417,7 @@ static T* nullable task_create(M* m, u64 stack_vaddr, usize stacksize) {
   // push final return value to stack
   static_assert(_Alignof(T) <= STK_ALIGN, "assuming u64 alignment of stack");
   u64* sp = (void*)t - sizeof(u64);
-  *sp = (u64)MAIN_RET_PC; // TODO: actual return address
+  *sp = (u64)PROLOGUE_PC; // instruction offset of prologue
 
   // initialize tctx
   tctx_t* ctx = (tctx_t*)ALIGN2_FLOOR((uintptr)sp - sizeof(tctx_t), TCTX_ALIGN);
@@ -747,9 +753,21 @@ static rerr_t rsched_loadrom(rsched_t* s, rrom_t* rom, rmem_t basemem, usize* st
     return rerr_not_supported;
   }
 
+  // prologue
+  // It must fit in ROM header so that we can guarantee space in basemem
+  // and alignment of data. This constraint can be lifted by adding logic to
+  // rsched_alloc_basemem and add to codesize below as needed.
+  static_assert(PROLOGUE_LEN*sizeof(rin_t) <= sizeof(rromimg_t),
+    "prologue larger than rom header");
+  const rin_t prologue[PROLOGUE_LEN] = {
+    RSM_MAKE_Au(rop_SCALL, 0), // syscall(SC_EXIT)
+  };
+  static_assert(PROLOGUE_PC == 0, "");
+  memcpy(basemem.p, prologue, sizeof(prologue));
+
   // move code section to front
   usize codesize = rom->codelen * sizeof(rin_t);
-  memmove(basemem.p, rom->code, codesize);
+  memmove(basemem.p + sizeof(prologue), rom->code, codesize);
 
   // rsm_loadrom verifies that rom->dataalign<=RSM_ROM_ALIGN and we're
   // making the assumption here that PAGE_SIZE as least as large,
@@ -854,7 +872,8 @@ rerr_t rsched_execrom(rsched_t* s, rrom_t* rom) {
 
   // create main task
   void* code = basemem.p;
-  err = sched_spawn(s, code, rom->codelen, STACK_VADDR, stacksize, /*pc=*/0);
+  u64 pc = PROLOGUE_LEN; // TODO: use instruction address of "main" function
+  err = sched_spawn(s, code, rom->codelen + PROLOGUE_LEN, STACK_VADDR, stacksize, pc);
   if (err)
     goto end;
 

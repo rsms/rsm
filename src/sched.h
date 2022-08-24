@@ -26,7 +26,7 @@ typedef struct rsched_ rsched_t;
 typedef struct T T; // Task, a coroutine task
 typedef struct M M; // Machine, an OS thread (TODO: rename. C; CPU or Core)
 typedef struct P P; // Processor, an execution resource required to execute a T
-typedef u8 TStatus; // Task status
+typedef u8 tstatus_t; // Task status
 typedef u8 PStatus; // Processor status
 
 struct T {
@@ -43,8 +43,8 @@ struct T {
   u64 sp;       // saved SP register value used by m_switchtask
   u64 stacktop; // end of stack (lowest valid stack address)
 
-  u64              waitsince; // approx time when the T became blocked
-  _Atomic(TStatus) status;
+  u64                waitsince; // approx time when the T became blocked
+  _Atomic(tstatus_t) status;
 };
 
 struct M {
@@ -134,12 +134,56 @@ typedef struct {
 } tctx_t;
 
 
+enum tstatus {
+  // T_IDLE: task was just allocated and has not yet been initialized
+  T_IDLE = 0,
+
+  // T_RUNNABLE: task is on a run queue.
+  // It is not currently executing user code.
+  // The stack is not owned.
+  T_RUNNABLE, // 1
+
+  // T_RUNNING: task may execute user code.
+  // The stack is owned by this task.
+  // It is not on a run queue.
+  // It is assigned an M and a P (t.m and t.m.p are valid).
+  T_RUNNING, // 2
+
+  // T_SYSCALL: task is executing a system call.
+  // It is not executing user code.
+  // The stack is owned by this task.
+  // It is not on a run queue.
+  // It is assigned an M.
+  T_SYSCALL, // 3
+
+  // T_WAITING: task is blocked in the runtime.
+  // It is not executing user code.
+  // It is not on a run queue, but should be recorded somewhere
+  // (e.g., a channel wait queue) so it can be ready()d when necessary.
+  // The stack is not owned *except* that a channel operation may read or
+  // write parts of the stack under the appropriate channel
+  // lock. Otherwise, it is not safe to access the stack after a
+  // task enters T_WAITING (e.g., it may get moved).
+  T_WAITING, // 4
+
+  // T_DEAD: task is unused.
+  // It may be just exited, on a free list, or just being initialized.
+  // It is not executing user code.
+  // It may or may not have a stack allocated.
+  // The T and its stack (if any) are owned by the M that is exiting the T
+  // or that obtained the T from the free list.
+  T_DEAD, // 5
+};
+
+
 rerr_t rsched_init(rsched_t* s, rmachine_t* machine);
 void rsched_dispose(rsched_t* s);
 
 rerr_t rsched_execrom(rsched_t* s, rrom_t* rom);
 
 void rsched_exec(T* t, u64* iregs, const rin_t* inv, usize pc);
+
+void rsched_park(T* t, tstatus_t);
 
 
 // t_get() and _g_t is thread-local storage of the current task on current OS thread

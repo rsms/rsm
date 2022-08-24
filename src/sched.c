@@ -55,46 +55,6 @@ static_assert(STK_MIN >= ALIGN2_X(sizeof(tctx_t), TCTX_ALIGN), "STK_MIN too smal
 //         Either a "linker" needs to rewrite all data addresses when loading a ROM,
 //         or we need memory translation per ROM (ie. depending on instruction origin.)
 
-enum TStatus {
-  // T_IDLE: task was just allocated and has not yet been initialized
-  T_IDLE = 0,
-
-  // T_RUNNABLE: task is on a run queue.
-  // It is not currently executing user code.
-  // The stack is not owned.
-  T_RUNNABLE, // 1
-
-  // T_RUNNING: task may execute user code.
-  // The stack is owned by this task.
-  // It is not on a run queue.
-  // It is assigned an M and a P (t.m and t.m.p are valid).
-  T_RUNNING, // 2
-
-  // T_SYSCALL: task is executing a system call.
-  // It is not executing user code.
-  // The stack is owned by this task.
-  // It is not on a run queue.
-  // It is assigned an M.
-  T_SYSCALL, // 3
-
-  // T_WAITING: task is blocked in the runtime.
-  // It is not executing user code.
-  // It is not on a run queue, but should be recorded somewhere
-  // (e.g., a channel wait queue) so it can be ready()d when necessary.
-  // The stack is not owned *except* that a channel operation may read or
-  // write parts of the stack under the appropriate channel
-  // lock. Otherwise, it is not safe to access the stack after a
-  // task enters T_WAITING (e.g., it may get moved).
-  T_WAITING, // 4
-
-  // T_DEAD: task is unused.
-  // It may be just exited, on a free list, or just being initialized.
-  // It is not executing user code.
-  // It may or may not have a stack allocated.
-  // The T and its stack (if any) are owned by the M that is exiting the T
-  // or that obtained the T from the free list.
-  T_DEAD, // 5
-};
 
 enum PStatus {
   P_IDLE = 0,
@@ -152,6 +112,21 @@ _Thread_local T* _g_t = NULL; // current task on current OS thread
 #endif
 
 
+#if DEBUG
+UNUSED static const char* tstatus_str(tstatus_t status) {
+  switch ((enum tstatus)status) {
+    case T_IDLE: return "T_IDLE";
+    case T_RUNNABLE: return "T_RUNNABLE";
+    case T_RUNNING: return "T_RUNNING";
+    case T_SYSCALL: return "T_SYSCALL";
+    case T_WAITING: return "T_WAITING";
+    case T_DEAD: return "T_DEAD";
+  }
+  return "?";
+}
+#endif
+
+
 static inline void m_acquire(M* m) { m->locks++; }
 static inline void m_release(M* m) { m->locks--; }
 
@@ -164,27 +139,27 @@ static inline void m_release(M* m) { m->locks--; }
 
 // t_readstatus returns the value of t->status.
 // On many archs, including x86, this is just a plain load.
-static inline TStatus t_readstatus(T* t) {
+static inline tstatus_t t_readstatus(T* t) {
   return AtomicLoad(&t->status, memory_order_relaxed);
 }
 
 // t_setstatus updates t->status using using an atomic store.
 // This is only used when setting up new or recycled Ts.
 // To change T.status for an existing T, use t_casstatus instead.
-static void t_setstatus(T* t, TStatus newval) {
+static void t_setstatus(T* t, tstatus_t newval) {
   AtomicStore(&t->status, newval, memory_order_relaxed);
 }
 
 
 // t_casstatus updates t->status using compare-and-swap.
 // It blocks until it succeeds (until t->status==oldval.)
-static void t_casstatus(T* t, TStatus oldval, TStatus newval) {
+static void t_casstatus(T* t, tstatus_t oldval, tstatus_t newval) {
   assert(oldval != newval);
 
   // use a temporary variable for oldval since AtomicCAS will store the current value
   // to it on failure, but we want to swap values only when the current value is
   // explicitly oldval.
-  TStatus oldvaltmp = oldval;
+  tstatus_t oldvaltmp = oldval;
 
   // // See https://golang.org/cl/21503 for justification of the yield delay.
   // const u64 yieldDelay = 5 * 1000;
@@ -369,12 +344,8 @@ static void m_switchtask(M* m, T* nullable t) {
   tctx_t* ctx =
     (tctx_t*)VM_TRANSLATE(vm_cache, &m->s->vm_pagedir, ctx_vaddr, TCTX_ALIGN);
 
-  dlog("load ctx from stack at vaddr 0x%llx", ctx_vaddr);
-
-
+  //dlog("load ctx from stack at vaddr 0x%llx", ctx_vaddr);
   assertnotnull(ctx);
-
-
   // tctx_t layout:
   //   [byte 0] F{RSM_NTMPREGS} F{RSM_NTMPREGS+1} F{...} F{RSM_NREGS-1} ...
   //        ... R{RSM_NTMPREGS} R{RSM_NTMPREGS+1} R{...} R{RSM_NREGS-2}
@@ -423,7 +394,7 @@ static T* nullable task_create(M* m, u64 stack_vaddr, usize stacksize) {
   tctx_t* ctx = (tctx_t*)ALIGN2_FLOOR((uintptr)sp - sizeof(tctx_t), TCTX_ALIGN);
   ctx->iregs[RSM_MAX_REG - RSM_NTMPREGS - 1] = (u64)(uintptr)t; // CTX reg
 
-  dlog("store ctx to stack at vaddr 0x%llx (haddr %p)", tctx_vaddr(t->sp), ctx);
+  //dlog("store ctx to stack at vaddr 0x%llx (haddr %p)", tctx_vaddr(t->sp), ctx);
 
   trace("T@%p+%zu stack 0x%llx-0x%llx", t, tsize, t->stacktop, stack_vaddr);
 
@@ -546,6 +517,28 @@ static void schedule() {
   _g_t = t;
 
   rsched_exec(t, m->iregs, t->instrv, t->pc);
+}
+
+
+// rsched_park is called by the execution engine when a syscall
+// causes the task to be suspended.
+// status tells us why & how the task is suspended.
+void rsched_park(T* t, tstatus_t status) {
+  trace("%s", tstatus_str(status));
+  assert(_g_t == t);
+  switch (status) {
+    case T_DEAD:
+      // task exited
+      t_setstatus(t, T_DEAD);
+      t->m = NULL;
+      t->parent = NULL;
+      break;
+    case T_SYSCALL:
+      t_setstatus(t, T_SYSCALL);
+      break;
+    default:
+      panic("unexpected task status %u", status);
+  }
 }
 
 

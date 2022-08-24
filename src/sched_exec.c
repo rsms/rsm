@@ -231,7 +231,9 @@ static u64 _read(EXEC_PARAMS, u64 fd, u64 addr, u64 size) {
 
 static int scall(EXEC_PARAMS, u32 syscall_op, rin_t in) {
   switch ((enum syscall_op)syscall_op) {
-    case SC_EXIT: return 1; // suspend execution
+    case SC_EXIT:
+      rsched_park(t, T_DEAD);
+      return 1; // suspend execution
   }
   panic("NOT IMPLEMENTED syscall %u", syscall_op);
   return 0; // continue execution

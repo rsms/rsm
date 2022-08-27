@@ -315,13 +315,20 @@ static void on_overflow(T* t, usize pc, rop_t op, i64 x, i64 y, i64* dst) {
 
 // —————————— interpreter
 
-void rsched_exec(EXEC_PARAMS) {
+
+#ifdef INTERPRET_USE_JUMPTABLE
+  static const void* jumptab[(RSM_OP_COUNT << 1) | 1];
+  static bool jumptab_init = false;
+#endif
+
+
+void rsched_eval(EXEC_PARAMS) {
   // This is the interpreter loop.
-  // It executes instructions until the entry function returns or an error occurs.
+  // It executes instructions until a syscall parks the task (or an error occurs.)
   //
   // First, we define how we will map an instruction to its corresponding handler code.
-  // There are two options: using a label jump table or using a switch statement.
-  #if 1 // use label jump table
+  // There are two options: using a label jump table or a switch statement.
+  #ifdef INTERPRET_USE_JUMPTABLE // use label jump table
     // Instructions are indexed together with the i (immediate) flag bit.
     // Indexed interleaved on r/i handlers like this:
     //   ...
@@ -332,9 +339,10 @@ void rsched_exec(EXEC_PARAMS) {
     //   [32]=&&_op_CAT      op with register or imm (register handler)
     //   [33]=&&_op_CAT_i    op with register or imm (imm handler)
     //   ...
-    static const void* jumptab[(RSM_OP_COUNT << 1) | 1] = {
-      #define L_r(OP)      [rop_##OP << 1]     = &&_op_##OP,
-      #define L_i(OP)      [(rop_##OP << 1)|1] = &&_op_##OP##_i,
+    if UNLIKELY(!jumptab_init) {
+      jumptab_init = true;
+      #define L_r(OP)      jumptab[rop_##OP << 1]     = &&_op_##OP;
+      #define L_i(OP)      jumptab[(rop_##OP << 1)|1] = &&_op_##OP##_i;
       #define L__          L_r
       #define L_A          L_r
       #define L_AB         L_r
@@ -352,7 +360,23 @@ void rsched_exec(EXEC_PARAMS) {
       #define _(OP, enc, ...) L_##enc(OP)
       RSM_FOREACH_OP(_)
       #undef _
-    };
+      #undef L_r
+      #undef L_i
+      #undef L__
+      #undef L_A
+      #undef L_AB
+      #undef L_ABv
+      #undef L_ABC
+      #undef L_ABCD
+      #undef L_Au
+      #undef L_ABu
+      #undef L_ABCu
+      #undef L_ABCDu
+      #undef L_As
+      #undef L_ABs
+      #undef L_ABCs
+      #undef L_ABCDs
+    }
     #define DISPATCH \
       u32 ji = (RSM_GET_OP(in) << 1) | RSM_GET_i(in); \
       assertf(jumptab[ji], "\"%s\" i=%d", rop_name(RSM_GET_OP(in)), RSM_GET_i(in)); \

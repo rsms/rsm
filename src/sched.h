@@ -8,6 +8,10 @@ RSM_ASSUME_NONNULL_BEGIN
 // where exeinfo_t ends.
 #define EXE_TOP_ADDR  ALIGN2_FLOOR_X(VM_ADDR_MAX, 8)
 
+// INTERPRET_USE_JUMPTABLE: define to enable use of jump table in the interpreter.
+// Requires that the compiler supports taking the address of labels, ie. "&&label".
+#define INTERPRET_USE_JUMPTABLE
+
 // S_MAXPROCS is the upper limit of concurrent P's; the effective CPU parallelism limit.
 // There are no fundamental restrictions on the value.
 // S_MAXPROCS pointers are allocated in S.allp[S_MAXPROCS].
@@ -181,8 +185,7 @@ void rsched_dispose(rsched_t* s);
 
 rerr_t rsched_execrom(rsched_t* s, rrom_t* rom);
 
-void rsched_exec(T* t, u64* iregs, const rin_t* inv, usize pc);
-
+void rsched_eval(T* t, u64* iregs, const rin_t* inv, usize pc);
 void rsched_park(T* t, tstatus_t);
 
 

@@ -247,7 +247,9 @@ rerr_t vm_map(
 {
   assertf(IS_ALIGN2((uintptr)haddr, PAGE_SIZE), "haddr 0x%lx not page aligned", haddr);
   assertf(vaddr >= VM_ADDR_MIN && VM_ADDR_MAX >= vaddr, "invalid vaddr 0x%llx", vaddr);
-  assert(npages > 0);
+
+  if (npages == 0)
+    return 0;
 
   rerr_t err = 0;
   u64 vfn = VM_VFN(vaddr);

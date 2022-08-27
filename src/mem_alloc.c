@@ -335,7 +335,7 @@ static void heap_init(heap_t* h, u8* p, usize size  DEBUG_ID_PARAM) {
   //   p, p_end, p + (chunk_cap * CHUNK_SIZE), bitset_end, spill);
   // assert((uintptr)bitset_end <= (uintptr)p_end);
 
-  // // ALT 1: branchless approximation. Spills ~28 kiB for a 2 MiB memory size (~1.2%).
+  // // ALT 1: branchless approximation. Spills ~28 KiB for a 2 MiB memory size (~1.2%).
   // usize chunk_cap = size / (CHUNK_SIZE + 1);
 
   h->chunk_cap = chunk_cap;
@@ -534,7 +534,7 @@ static bool rmem_add_subheap(rmemalloc_t* a, void* storage, usize size) {
     size = newsize;
     storage = newstorage;
     if (size_diff > 0)
-      trace("forfeiting %zu kiB in subheap (%zu B alignment)", size_diff / kiB, halign);
+      trace("forfeiting %zu KiB in subheap (%zu B alignment)", size_diff / KiB, halign);
   }
 
   if (size < HEAP_MIN_SIZE) {
@@ -566,7 +566,7 @@ static bool rmem_add_subheap(rmemalloc_t* a, void* storage, usize size) {
       uintptr start_addr = (uintptr)h->chunks;
       uintptr end_addr = (uintptr)h->chunks + (h->chunk_cap * CHUNK_SIZE);
       uintptr end_addr_use = (uintptr)h->chunks + (h->chunk_len * CHUNK_SIZE);
-      dlog("subheap %zu %zx…%zx %zu kiB (%zu kiB, %zu chunks in use)",
+      dlog("subheap %zu %zx…%zx %zu KiB (%zu KiB, %zu chunks in use)",
         i, start_addr, end_addr,
         (end_addr - start_addr) / 1024,
         (end_addr_use - start_addr) / 1024,
@@ -1162,8 +1162,8 @@ rmemalloc_t* nullable rmem_allocator_create(rmm_t* mm, usize req_heap0size) {
     return NULL;
 
   usize nbyte = npages * PAGE_SIZE;
-  trace("creating allocator in %zu pages (%zu kiB, %.2f kiB usable)",
-    npages,  nbyte / kiB,  (double)(nbyte - sizeof(rmemalloc_t)) / (double)kiB);
+  trace("creating allocator in %zu pages (%zu KiB, %.2f KiB usable)",
+    npages,  nbyte / KiB,  (double)(nbyte - sizeof(rmemalloc_t)) / (double)KiB);
 
   // place the allocator at the end of the page range to increase the chances
   // of perfect alignment of the initial heap (which has HEAP_MAX_ALIGN alignment.)

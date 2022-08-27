@@ -482,7 +482,7 @@ typedef __builtin_va_list va_list;
 })
 
 // kibibyte magnitudes for making code easier to read
-#define kiB 1024lu
+#define KiB 1024lu
 #define MiB 0x100000lu   /* 1024^2 */
 #define GiB 0x40000000lu /* 1024^3 */
 #define TiB 0x10000000000llu /* ... */

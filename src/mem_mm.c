@@ -6,7 +6,7 @@
 // Blocks are managed per order of power of two (0 4096, 1 8192, 2 16384, ...)
 //
 // Here's an illustration of what the hierarchy logically looks like when we
-// manage 64 kiB of memory. Blocks are considered "buddies" when they are split.
+// manage 64 KiB of memory. Blocks are considered "buddies" when they are split.
 // The blocks below are filled with "Buddy #" when they are allocated and left
 // empty when they are free. I.e. the second block of the 3rd order is free.
 //
@@ -164,8 +164,8 @@ static uintptr rmm_allocpages1(rmm_t* mm, int order) {
     usize nextsize = (usize)PAGE_SIZE << (order + 1);
     trace("split block %d:%p (%zu %s) -> blocks %d:%p, %d:%p",
       order, (void*)addr,
-      nextsize >= GiB ? nextsize/GiB : nextsize >= MiB ? nextsize/MiB : nextsize/kiB,
-      nextsize >= GiB ? "GiB" : nextsize >= MiB ? "MiB" : "kiB",
+      nextsize >= GiB ? nextsize/GiB : nextsize >= MiB ? nextsize/MiB : nextsize/KiB,
+      nextsize >= GiB ? "GiB" : nextsize >= MiB ? "MiB" : "KiB",
       order + 1, (void*)addr,
       order + 1, (void*)addr + size);
     #endif
@@ -175,8 +175,8 @@ static uintptr rmm_allocpages1(rmm_t* mm, int order) {
 
   trace("using block %d:%p (%zu %s, 0x%lx, bit %zu)",
     order, (void*)addr,
-    size >= GiB ? size/GiB : size >= MiB ? size/MiB : size/kiB,
-    size >= GiB ? "GiB" : size >= MiB ? "MiB" : "kiB",
+    size >= GiB ? size/GiB : size >= MiB ? size/MiB : size/KiB,
+    size >= GiB ? "GiB" : size >= MiB ? "MiB" : "KiB",
     addr + mm->start_addr, bit);
 
   assert(!bit_get(mm->bitsets[order], bit));
@@ -285,8 +285,8 @@ rmm_t* nullable rmm_create(void* memp, usize memsize) {
   uintptr start = ALIGN2((uintptr)memp, PAGE_SIZE);
   uintptr end = (uintptr)memp + memsize;
   memsize = (usize)(end - start);
-  trace("total      %p … %p (%zu kiB)",
-    (void*)start, (void*)end, memsize / kiB);
+  trace("total      %p … %p (%zu KiB)",
+    (void*)start, (void*)end, memsize / KiB);
 
   // Place the mm struct at the end of memory to increase alignment efficiency,
   // assuming that in most cases start has a large alignment.
@@ -365,9 +365,9 @@ rmm_t* nullable rmm_create(void* memp, usize memsize) {
   mm->end_addr = start + memsize;
   mm->free_size = memsize;
 
-  trace("memory at  %p … %p (%zu kiB in %zu pages)",
-    (void*)mm->start_addr,  (void*)mm->end_addr,  memsize / kiB,  memsize / PAGE_SIZE);
-  trace("max buddy  %11zu kiB", ((usize)MAX_ORDER_NPAGES * PAGE_SIZE) / kiB);
+  trace("memory at  %p … %p (%zu KiB in %zu pages)",
+    (void*)mm->start_addr,  (void*)mm->end_addr,  memsize / KiB,  memsize / PAGE_SIZE);
+  trace("max buddy  %11zu KiB", ((usize)MAX_ORDER_NPAGES * PAGE_SIZE) / KiB);
 
   // Now we need to put initially-free blocks of memory into the free lists.
   // We'll do this by starting with the largest pow2(memsize),
@@ -389,10 +389,10 @@ rmm_t* nullable rmm_create(void* memp, usize memsize) {
     // memory used by this block
     usize block_size = (usize)PAGE_SIZE << order;
 
-    trace("initial free block %d:%p  %p … %p (%zu kiB)",
+    trace("initial free block %d:%p  %p … %p (%zu KiB)",
       order, (void*)(start - mm->start_addr),
       (void*)start, (void*)start + block_size,
-      block_size / kiB);
+      block_size / KiB);
 
     // add the block to its order's freelist
     ilist_append(&mm->freelists[order], (ilist_t*)start);

@@ -69,6 +69,23 @@ u64 nanotime(void) {
   #endif
 }
 
+
+// U64_MAX = 584.9 years (18446744073709551615/1000000000/60/60/24/365)
+u64 rsm_nanosleep(u64 nsec) {
+  #ifdef CO_NO_LIBC
+    #warning TODO non-libc microsleep
+  #else
+    struct timespec ts = { .tv_sec = 0l, .tv_nsec = (long)nsec };
+    if (nanosleep(&ts, &ts) != 0) {
+      u64 remaining_nsec = ((u64)ts.tv_sec * 1000000000llu) + (u64)ts.tv_nsec;
+      assert(remaining_nsec <= nsec);
+      return remaining_nsec;
+    }
+  #endif
+  return 0llu;
+}
+
+
 usize fmtduration(char buf[25], u64 duration_ns) {
   // max value: "18446744073709551615.1ms\0"
   const char* unit = "ns";

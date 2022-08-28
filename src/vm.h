@@ -352,7 +352,7 @@ u64 _vm_cache_miss(vm_cache_t*, vm_pagedir_t*, u64 vaddr, vm_op_t);
   ) \
 )
 
-// VM_TRANSLATE translates a virtual address to a host address
+// uintptr VM_TRANSLATE() translates a virtual address to a host address
 #define VM_TRANSLATE(vm_cache, pagedir, vaddr, align) \
   vm_translate((vm_cache), (pagedir), (vaddr), (align), VM_OP_LOAD + (u32)(align))
 

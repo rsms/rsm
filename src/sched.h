@@ -13,12 +13,13 @@ RSM_ASSUME_NONNULL_BEGIN
 #define INTERPRET_USE_JUMPTABLE
 
 // S_MAXPROCS is the upper limit of concurrent P's; the effective CPU parallelism limit.
-// There are no fundamental restrictions on the value.
-// S_MAXPROCS pointers are allocated in S.allp[S_MAXPROCS].
-#define S_MAXPROCS 256
+// There are no fundamental restrictions on the value. Must be pow2.
+#define S_MAXPROCS  256
+static_assert(IS_POW2_X(S_MAXPROCS), "");
 
 // P_RUNQSIZE is the size of P.runq. Must be power-of-two (2^N)
-#define P_RUNQSIZE 256 // 256 is the value Go 1.16 uses
+#define P_RUNQSIZE  256 // 256 is the value Go 1.16 uses
+static_assert(IS_POW2_X(P_RUNQSIZE), "");
 
 // Main scheduling concepts:
 // - T for Task, a coroutine task
@@ -53,7 +54,6 @@ struct T {
 
 struct M {
   u32         id;
-  T           t0;       // task with scheduling stack (m_start entry)
   rsched_t*   s;        // parent scheduler
   P* nullable p;        // attached p for executing Ts (NULL if not executing)
   T* nullable currt;    // current running task
@@ -73,9 +73,10 @@ struct P {
   u32         id;        // corresponds to offset in s.allp
   u32         schedtick; // incremented on every scheduler call
   PStatus     status;
-  bool        preempt; // this P should be enter the scheduler ASAP
-  rsched_t*   s;       // parent scheduler
-  M* nullable m;       // associated m (NULL when P is idle)
+  bool        preempt;   // this P should be enter the scheduler ASAP
+  rsched_t*   s;         // parent scheduler
+  M* nullable m;         // associated m (NULL when P is idle)
+  P* nullable nextp;     // next P in list (for rsched_t.pidle)
 
   // Queue of runnable tasks. Accessed without lock.
   _Atomic(u32) runqhead;
@@ -90,23 +91,57 @@ struct P {
   // unit and eliminates the (potentially large) scheduling
   // latency that otherwise arises from adding the ready'd
   // coroutines to the end of the run queue.
-  _Atomic(T*) runnext;
+  _Atomic(T* nullable) runnext;
+
+  // timers
+  _Atomic(u32) ntimers; // Number of timers in P's heap (writes uses timers_lock)
+  // timers_lock is the lock for timers.
+  // We normally access the timers while running on this P,
+  // but the scheduler can also do it from a different P.
+  RHMutex timers_lock;
+  // timer0_when is the "when" field of the first entry on the timer heap.
+  // This is updated using atomic functions. 0 if the timer heap is empty.
+  _Atomic(u64) timer0_when;
+  // timer_modified_earliest is the earliest known next_when field of a timer with
+  // TIMER_MODIFIED_EARLIER status. Because the timer may have been modified again,
+  // there need not be any timer with this value.
+  // This is updated using atomic functions.
+  // This is 0 if there are no TIMER_MODIFIED_EARLIER timers.
+  _Atomic(u64) timer_modified_earliest;
 };
+
+typedef struct {
+  _Atomic(usize) bits[S_MAXPROCS / sizeof(usize) / 8];
+} P_bitset_t;
 
 struct rsched_ {
   rmachine_t*  machine;   // host machine
-  T*           t0;        // main task on m0
   u32          maxmcount; // limit number of M's created (ie. OS thread limit)
 
   _Atomic(u64) tidgen; // T.id generator
   _Atomic(u32) midgen; // M.id generator
 
-  P*           allp[S_MAXPROCS]; // all live P's (managed by sched_procresize)
-  _Atomic(u32) nprocs;           // max active Ps (also num valid P's in allp)
+  RHMutex lock; // protects access to allp, pidle and runq
 
-  // TODO: replace with virtual memory
-  void* heapbase; // heap memory base address
-  usize heapsize; // heap memory size
+  P*           allp[S_MAXPROCS]; // all live P's (managed by sched_procresize)
+  _Atomic(u32) nprocs;           // max active Ps (num valid P's in allp; maxprocs)
+  P* nullable  pidle;            // list of idle P's
+  _Atomic(u32) npidle;           // (note: writes use lock)
+  _Atomic(i32) nmspinning;       // number of spinning M's
+
+  // pidle_mask is a bitmask of Ps in PIdle list, one bit per P in allp.
+  // Reads and writes must be atomic. Length may change at safe points.
+  //
+  // Each P must update only its own bit. In order to maintain
+  // consistency, a P going idle must set the idle mask simultaneously with
+  // updates to the idle P list under the sched.lock, otherwise a racing
+  // s_pidle_get may clear the mask before s_pidle_put sets the mask,
+  // corrupting the bitmap.
+  P_bitset_t pidle_mask;
+
+  // timerp_mask is a bitmask of P's that may have a timer, one bit per P in allp.
+  // Reads and writes must be atomic. Length may change at safe points.
+  P_bitset_t timerp_mask;
 
   // allt holds all live T's
   struct {
@@ -115,6 +150,14 @@ struct rsched_ {
     _Atomic(u32) len; // atomic for reading; lock used for writing
     u32          cap; // capacity of ptr array
   } allt;
+
+  // global run queue (when a task is resumed without a P)
+  // T's are linked via T.schedlink
+  struct {
+    _Atomic(T*)  head;
+    _Atomic(T*)  tail;
+    _Atomic(u32) len;
+  } runq;
 
   vm_pagedir_t vm_pagedir; // virtual memory page directory
 
@@ -145,30 +188,20 @@ enum tstatus {
   // T_RUNNABLE: task is on a run queue.
   // It is not currently executing user code.
   // The stack is not owned.
-  T_RUNNABLE, // 1
+  T_RUNNABLE,
 
   // T_RUNNING: task may execute user code.
   // The stack is owned by this task.
   // It is not on a run queue.
   // It is assigned an M and a P (t.m and t.m.p are valid).
-  T_RUNNING, // 2
+  T_RUNNING,
 
   // T_SYSCALL: task is executing a system call.
   // It is not executing user code.
   // The stack is owned by this task.
   // It is not on a run queue.
   // It is assigned an M.
-  T_SYSCALL, // 3
-
-  // T_WAITING: task is blocked in the runtime.
-  // It is not executing user code.
-  // It is not on a run queue, but should be recorded somewhere
-  // (e.g., a channel wait queue) so it can be ready()d when necessary.
-  // The stack is not owned *except* that a channel operation may read or
-  // write parts of the stack under the appropriate channel
-  // lock. Otherwise, it is not safe to access the stack after a
-  // task enters T_WAITING (e.g., it may get moved).
-  T_WAITING, // 4
+  T_SYSCALL,
 
   // T_DEAD: task is unused.
   // It may be just exited, on a free list, or just being initialized.
@@ -176,7 +209,7 @@ enum tstatus {
   // It may or may not have a stack allocated.
   // The T and its stack (if any) are owned by the M that is exiting the T
   // or that obtained the T from the free list.
-  T_DEAD, // 5
+  T_DEAD,
 };
 
 
@@ -185,13 +218,35 @@ void rsched_dispose(rsched_t* s);
 
 rerr_t rsched_execrom(rsched_t* s, rrom_t* rom);
 
-void rsched_eval(T* t, u64* iregs, const rin_t* inv, usize pc);
-void rsched_park(T* t, tstatus_t);
+// return pc
+usize rsched_eval(T* t, u64* iregs, const rin_t* inv, usize pc);
 
+// TODO:
+// change the concepts here
+// - "suspend" (alt "park"): takes a task out of running state (disassoc. M & P from T.)
+//   Must be explicitly resumed with a call to "resume" (alt "unpark")
+// - "release_p" (alt "syscall_begin"): releases a task's P.
+//   Task is expected to not need a P until a call to "retain_p" (alt "syscall_end").
+//   "retain_p" would return to signal if the task can immediately continue execution
+//   (ie it was assigned a P and has is the next task scheduled for P),
+//   or if no P was available and the task was put on a run queue.
+//   In the latter case, T might have been added to either the run queue of P
+//   or to the global (scheduler) run queue.
 
-// t_get() and _g_t is thread-local storage of the current task on current OS thread
-extern _Thread_local T* _g_t;
-static ALWAYS_INLINE T* t_get() { return _g_t; }
+void task_park(T* t, tstatus_t);
+// void task_unpark(T* t, tstatus_t);
+
+// task_disable releases the P associated with the task,
+// making that P available for use by other tasks waiting to run.
+// After this call the task can not be executed until task_enable is called.
+void task_disable(T*);
+
+// task_enable attempts to associate an available P with the task.
+// priority>0 means "important".
+// Returns true if the task should resume execution immediately,
+// otherwise (when false is returend), the task has been put on a run queue
+// and the caller should not continue execution of the task.
+bool task_enable(T*, int priority);
 
 
 // SCHED_TRACE: when defined, verbose log tracing on stderr is enabled.

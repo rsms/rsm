@@ -760,6 +760,11 @@ rerr_t unixtime(i64* sec, u64* nsec);
 // u64 is enough to express 584 years in nanoseconds.
 u64 nanotime();
 
+// rsm_nanosleep suspends the calling thread for nsec nanoseconds.
+// Returns remaining time to sleep (if the thread was interrupted.)
+// U64_MAX = 584.9 years (18446744073709551615/1000000000/60/60/24/365)
+u64 rsm_nanosleep(u64 nsec);
+
 // fmtduration appends human-readable time duration to buf, including a null terminator.
 // Returns number of bytes written, excluding the null terminator.
 usize fmtduration(char buf[25], u64 duration_ns);

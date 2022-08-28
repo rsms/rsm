@@ -30,6 +30,7 @@ static_assert(STK_MIN % STK_ALIGN == 0, "STK_MIN not aligned to STK_ALIGN");
 typedef u32 syscall_op_t;
 enum syscall_op {
   SC_EXIT = 0, // status_code i32
+  SC_SLEEP = 1, // seconds u64, nanoseconds u64
 };
 
 //———————————————————————————————————————————————————————————————————————————————————
@@ -229,14 +230,30 @@ static u64 _read(EXEC_PARAMS, u64 fd, u64 addr, u64 size) {
 
 // —————————— syscall
 
-static int scall(EXEC_PARAMS, u32 syscall_op, rin_t in) {
+// Returns true if execution should continue,
+// returns false if execution should stop (scheduler may later resume the task.)
+static bool scall(EXEC_PARAMS, u32 syscall_op, rin_t in) {
   switch ((enum syscall_op)syscall_op) {
-    case SC_EXIT:
-      rsched_park(t, T_DEAD);
-      return 1; // suspend execution
+
+  case SC_EXIT:
+    task_park(t, T_DEAD);
+    return false;
+
+  case SC_SLEEP: {
+    u64 nsec = iregs[0];
+    if (nsec == 0)
+      return true; // no-op
+    task_disable(t);
+    dlog("sleeping for %llu ns", nsec);
+    u64 remaining = rsm_nanosleep(nsec);
+    dlog("rsm_nanosleep() => remaining %llu", remaining);
+    iregs[0] = remaining;
+    return task_enable(t, /*priority*/0);
+  }
+
   }
   panic("NOT IMPLEMENTED syscall %u", syscall_op);
-  return 0; // continue execution
+  return true;
 }
 
 // —————————— stack operations
@@ -322,7 +339,7 @@ static void on_overflow(T* t, usize pc, rop_t op, i64 x, i64 y, i64* dst) {
 #endif
 
 
-void rsched_eval(EXEC_PARAMS) {
+usize rsched_eval(EXEC_PARAMS) {
   // This is the interpreter loop.
   // It executes instructions until a syscall parks the task (or an error occurs.)
   //
@@ -471,7 +488,7 @@ void rsched_eval(EXEC_PARAMS) {
 
     #define do_JUMP(A)  pc = (usize)A
     #define do_CALL(A)  push_PC(EXEC_ARGS); pc = (usize)A;
-    #define do_SCALL(A) if (scall(EXEC_ARGS, A, in)) return;
+    #define do_SCALL(A) if (!scall(EXEC_ARGS, A, in)) return pc;
 
     #define do_WRITE(D)   RA = _write(EXEC_ARGS, D, RB, RC) // addr=RB size=RC fd=D
     #define do_READ(D)    RA = _read(EXEC_ARGS, D, RB, RC) // addr=RB size=RC fd=D

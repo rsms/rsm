@@ -210,6 +210,29 @@ static u64 copyv(EXEC_PARAMS, u64 n) {
   return (((u64)inv[pc]) << 32) | (u64)inv[pc+1];
 }
 
+// —————————— stack operations
+
+inline static void push(EXEC_PARAMS, u64 size, u64 value) {
+  u64 vaddr = SP;
+  check(vaddr >= t->stacktop + size, EX_E_STACK_OVERFLOW, vaddr);
+  vaddr -= size;
+  SP = vaddr;
+  MSTORE(u64, vaddr, value);
+}
+
+inline static u64 pop(EXEC_PARAMS, u64 size) {
+  u64 vaddr = SP;
+  check(vaddr + size >= t->stacktop, EX_E_STACK_OVERFLOW, vaddr);
+  SP = vaddr + size;
+  return MLOAD(u64, vaddr);
+}
+
+static void push_PC(EXEC_PARAMS) {
+  // save PC on stack
+  check(IS_ALIGN2(SP, STK_ALIGN), EX_E_UNALIGNED_STACK, SP, STK_ALIGN);
+  push(EXEC_ARGS, 8, (u64)pc);
+}
+
 // —————————— I/O
 
 // libc prototypes
@@ -232,7 +255,7 @@ static u64 _read(EXEC_PARAMS, u64 fd, u64 addr, u64 size) {
 
 // Returns true if execution should continue,
 // returns false if execution should stop (scheduler may later resume the task.)
-static bool scall(EXEC_PARAMS, u32 syscall_op, rin_t in) {
+static bool scall(T* t, u64* iregs, usize pc, u32 syscall_op) {
   switch ((enum syscall_op)syscall_op) {
 
   case SC_EXIT:
@@ -243,40 +266,17 @@ static bool scall(EXEC_PARAMS, u32 syscall_op, rin_t in) {
     u64 nsec = iregs[0];
     if (nsec == 0)
       return true; // no-op
-    task_disable(t);
+    enter_syscall(t);
     dlog("sleeping for %llu ns", nsec);
     u64 remaining = rsm_nanosleep(nsec);
     dlog("rsm_nanosleep() => remaining %llu", remaining);
     iregs[0] = remaining;
-    return task_enable(t, /*priority*/0);
+    return exit_syscall(t, /*priority*/0);
   }
 
   }
   panic("NOT IMPLEMENTED syscall %u", syscall_op);
   return true;
-}
-
-// —————————— stack operations
-
-inline static void push(EXEC_PARAMS, u64 size, u64 value) {
-  u64 vaddr = SP;
-  check(vaddr >= t->stacktop + size, EX_E_STACK_OVERFLOW, vaddr);
-  vaddr -= size;
-  SP = vaddr;
-  MSTORE(u64, vaddr, value);
-}
-
-inline static u64 pop(EXEC_PARAMS, u64 size) {
-  u64 vaddr = SP;
-  check(vaddr + size >= t->stacktop, EX_E_STACK_OVERFLOW, vaddr);
-  SP = vaddr + size;
-  return MLOAD(u64, vaddr);
-}
-
-static void push_PC(EXEC_PARAMS) {
-  // save PC on stack
-  check(IS_ALIGN2(SP, STK_ALIGN), EX_E_UNALIGNED_STACK, SP, STK_ALIGN);
-  push(EXEC_ARGS, 8, (u64)pc);
 }
 
 // —————————— arithmetic
@@ -488,8 +488,9 @@ usize rsched_eval(EXEC_PARAMS) {
 
     #define do_JUMP(A)  pc = (usize)A
     #define do_CALL(A)  push_PC(EXEC_ARGS); pc = (usize)A;
-    #define do_SCALL(A) if (!scall(EXEC_ARGS, A, in)) return pc;
 
+    #define do_TSPAWN(A)  iregs[0] = task_spawn(t, A, iregs);
+    #define do_SCALL(A)   if (!scall(t, iregs, pc, A)) return pc;
     #define do_WRITE(D)   RA = _write(EXEC_ARGS, D, RB, RC) // addr=RB size=RC fd=D
     #define do_READ(D)    RA = _read(EXEC_ARGS, D, RB, RC) // addr=RB size=RC fd=D
     #define do_MCOPY(C)   mcopy(EXEC_ARGS, RA, RB, C)

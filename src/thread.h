@@ -187,7 +187,7 @@ typedef struct RWMutex {
   mtx_t        w; // writer lock
   _Atomic(u32) r; // reader count
 } RWMutex;
-static int  RWMutexInit(RWMutex* m, int wtype);
+static bool RWMutexInit(RWMutex* m, int wtype);
 static void RWMutexDispose(RWMutex* m);
 int RWMutexRLock(RWMutex* m);     // acquire read-only lock (blocks until acquired)
 int RWMutexTryRLock(RWMutex* m);  // attempt to acquire read-only lock (non-blocking)
@@ -212,10 +212,10 @@ static bool RHMutexIsLocked(RHMutex* m);
 //———————————————————————————————————————————————
 // inline impl
 
-static inline int RWMutexInit(RWMutex* m, int wtype) {
+static inline bool RWMutexInit(RWMutex* m, int wtype) {
   assertf(wtype != mtx_timed, "mtx_timed not supported");
   m->r = 0;
-  return mtx_init(&m->w, wtype);
+  return mtx_init(&m->w, wtype) == 0;
 }
 static inline void RWMutexDispose(RWMutex* m) { mtx_destroy(&m->w); }
 

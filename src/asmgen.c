@@ -211,6 +211,7 @@ static bool check_named_ref(
   const char* expected;
   switch (op) {
     case rop_CALL:
+    case rop_TSPAWN:
       if (target->namedtype != GNAMED_T_FUN) {
         expected = "function";
         break;
@@ -565,7 +566,7 @@ static bool refnamed(gstate* g, rnode_t* refn, u32 refi, u32 argc, i32* argp) {
   rop_t op = RSM_GET_OP(*rarray_at(rin_t, &g->iv, refi));
 
   grefflag flags = 0;
-  if (op == rop_JUMP || op == rop_CALL)
+  if (op == rop_JUMP || op == rop_CALL || op == rop_TSPAWN)
     flags |= REF_ABS;
 
   #ifdef ASMGEN_TRACE

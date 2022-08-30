@@ -427,6 +427,7 @@ static void vmexec(VMPARAMS) {
 
     #define do_JUMP(A)  pc = (usize)A
     #define do_CALL(A)  push_PC(VMARGS); pc = (usize)A;
+    #define do_TSPAWN(A) goto not_supported;
     #define do_SCALL(A) scall(VMARGS, A, in)
 
     #define do_WRITE(D)   RA = _write(VMARGS, D, RB, RC) // addr=RB size=RC fd=D
@@ -463,6 +464,8 @@ static void vmexec(VMPARAMS) {
 
     DEFAULT
   } // DISPATCH
+  not_supported:
+    panic("%s not supported by v1 interpreter", rop_name(RSM_GET_OP(in)));
   } // loop
 }
 

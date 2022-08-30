@@ -32,7 +32,16 @@ typedef struct T T; // Task, a coroutine task
 typedef struct M M; // Machine, an OS thread (TODO: rename. C; CPU or Core)
 typedef struct P P; // Processor, an execution resource required to execute a T
 typedef u8 tstatus_t; // Task status
-typedef u8 PStatus; // Processor status
+typedef u8 pstatus_t; // Processor status
+
+// mnote_t: sleep and wakeup on one-time events
+typedef struct {
+  // key holds:
+  // a) NULL when unused.
+  // b) pointer to some M.
+  // c) opaque value indicating locked state.
+  _Atomic(uintptr) key; // must be initialized to 0
+} mnote_t;
 
 struct T {
   u64         id;
@@ -53,13 +62,18 @@ struct T {
 };
 
 struct M {
-  u32         id;
   rsched_t*   s;        // parent scheduler
   P* nullable p;        // attached p for executing Ts (NULL if not executing)
+  P* nullable oldp;     // P that was attached before executing a syscall
+  P* nullable nextp;    // P to attach
   T* nullable currt;    // current running task
+  M* nullable nextm;    // next M in list (for s.midle and s.mfree)
+  u32         id;
   u32         locks;    // number of logical locks held by Ts to this M
   bool        spinning; // m is out of work and is actively looking for work
   bool        blocked;  // m is blocked on a note
+  mnote_t     park;     // park notification
+  RSema       parksema; // park notification semaphore
 
   // register values
   u64    iregs[RSM_NREGS];
@@ -70,13 +84,13 @@ struct M {
 };
 
 struct P {
-  u32         id;        // corresponds to offset in s.allp
-  u32         schedtick; // incremented on every scheduler call
-  PStatus     status;
-  bool        preempt;   // this P should be enter the scheduler ASAP
-  rsched_t*   s;         // parent scheduler
-  M* nullable m;         // associated m (NULL when P is idle)
-  P* nullable nextp;     // next P in list (for rsched_t.pidle)
+  u32                id;        // corresponds to offset in s.allp
+  u32                schedtick; // incremented on every scheduler call
+  _Atomic(pstatus_t) status;    // status
+  bool               preempt;   // this P should enter scheduling ASAP
+  rsched_t*          s;         // parent scheduler
+  M* nullable        m;         // associated m (NULL when P is idle)
+  P* nullable        nextp;     // next P in list (for s.pidle)
 
   // Queue of runnable tasks. Accessed without lock.
   _Atomic(u32) runqhead;
@@ -115,19 +129,28 @@ typedef struct {
 } P_bitset_t;
 
 struct rsched_ {
-  rmachine_t*  machine;   // host machine
-  u32          maxmcount; // limit number of M's created (ie. OS thread limit)
+  rmachine_t*  machine;      // host machine
+  _Atomic(u64) tidgen;       // T.id generator
+  RHMutex      lock;         // protects access to midle, pidle, allp, runq
+  bool         main_started; // true when main task has started
 
-  _Atomic(u64) tidgen; // T.id generator
-  _Atomic(u32) midgen; // M.id generator
+  // M's
+  M* nullable  midle;        // idle m's waiting for work
+  _Atomic(u32) nmidle;       // number of idle m's waiting for work
+  u32          nmidlelocked; // number of locked m's waiting for work
+  _Atomic(i32) nmspinning;   // number of spinning M's
+  _Atomic(u32) midgen;       // M.id generator
+  u32          maxmcount;    // limit number of M's created (ie. OS thread limit)
+  u64          nmfreed;      // cumulative number of freed m's
+  M* nullable  mfree;        // m's waiting to be freed when their m.exited is set
 
-  RHMutex lock; // protects access to allp, pidle and runq
-
-  P*           allp[S_MAXPROCS]; // all live P's (managed by sched_procresize)
-  _Atomic(u32) nprocs;           // max active Ps (num valid P's in allp; maxprocs)
-  P* nullable  pidle;            // list of idle P's
-  _Atomic(u32) npidle;           // (note: writes use lock)
-  _Atomic(i32) nmspinning;       // number of spinning M's
+  // P's
+  P*           allp[S_MAXPROCS];     // all live P's (managed by sched_procresize)
+  _Atomic(u32) nprocs;               // max active Ps (num valid P's in allp; maxprocs)
+  P* nullable  pidle;                // list of idle P's
+  _Atomic(u32) npidle;               // (note: writes use lock)
+  u32          stealord[S_MAXPROCS]; // steal order of P's in allp
+  u32          stealordlen;          // entries at stealord
 
   // pidle_mask is a bitmask of Ps in PIdle list, one bit per P in allp.
   // Reads and writes must be atomic. Length may change at safe points.
@@ -143,15 +166,24 @@ struct rsched_ {
   // Reads and writes must be atomic. Length may change at safe points.
   P_bitset_t timerp_mask;
 
-  // allt holds all live T's
+  // exec_lock serializes exec and clone to avoid bugs or unspecified behaviour
+  // around exec'ing while creating/disposing threads.
+  RWMutex exec_lock;
+
+  // allocm_lock is locked for read when creating new Ms in allocm and their
+  // addition to allm. Thus acquiring this lock for write blocks the
+  // creation of new Ms.
+  RWMutex allocm_lock;
+
+  // allt holds all T's, alive or T_DEAD
   struct {
-    mtx_t        lock;
-    _Atomic(T**) ptr; // atomic for reading; lock used for writing
-    _Atomic(u32) len; // atomic for reading; lock used for writing
-    u32          cap; // capacity of ptr array
+    RWMutex      lock;
+    _Atomic(T**) ptr;
+    _Atomic(u32) len;
+    u32          cap;
   } allt;
 
-  // global run queue (when a task is resumed without a P)
+  // global run queue (when a task is resumed without a P.)
   // T's are linked via T.schedlink
   struct {
     _Atomic(T*)  head;
@@ -221,32 +253,32 @@ rerr_t rsched_execrom(rsched_t* s, rrom_t* rom);
 // return pc
 usize rsched_eval(T* t, u64* iregs, const rin_t* inv, usize pc);
 
-// TODO:
-// change the concepts here
-// - "suspend" (alt "park"): takes a task out of running state (disassoc. M & P from T.)
-//   Must be explicitly resumed with a call to "resume" (alt "unpark")
-// - "release_p" (alt "syscall_begin"): releases a task's P.
-//   Task is expected to not need a P until a call to "retain_p" (alt "syscall_end").
-//   "retain_p" would return to signal if the task can immediately continue execution
-//   (ie it was assigned a P and has is the next task scheduled for P),
-//   or if no P was available and the task was put on a run queue.
-//   In the latter case, T might have been added to either the run queue of P
-//   or to the global (scheduler) run queue.
+// task_spawn spawns a new task executing code at pc newtask_pc.
+// t is the task that calls spawns, not the task being spawned.
+// args hold the initial arguments (R0...R7) for the new task.
+// Returns the new spawned task's ID, or <0 on error (value is a rerr_t).
+i64 task_spawn(T* t, usize newtask_pc, const u64 args[RSM_NARGREGS]);
 
+// task_park takes a task out of running state (disassoc. M & P from T.)
+// Must be explicitly resumed with a call to task_unpark
 void task_park(T* t, tstatus_t);
 // void task_unpark(T* t, tstatus_t);
 
-// task_disable releases the P associated with the task,
+// enter_syscall releases the P associated with the task,
 // making that P available for use by other tasks waiting to run.
-// After this call the task can not be executed until task_enable is called.
-void task_disable(T*);
+// After this call the task can not be executed until exit_syscall is called.
+void enter_syscall(T*);
 
-// task_enable attempts to associate an available P with the task.
+// exit_syscall attempts to associate an available P with the task.
 // priority>0 means "important".
 // Returns true if the task should resume execution immediately,
 // otherwise (when false is returend), the task has been put on a run queue
 // and the caller should not continue execution of the task.
-bool task_enable(T*, int priority);
+bool exit_syscall(T*, int priority);
+
+// m_spawn_osthread creates & starts an OS thread, calling mainf on the new thread.
+// Returns the OS-specific thread ID, or 0 on failure.
+uintptr m_spawn_osthread(M* m, rerr_t(*mainf)(M*));
 
 
 // SCHED_TRACE: when defined, verbose log tracing on stderr is enabled.

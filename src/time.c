@@ -75,7 +75,10 @@ u64 rsm_nanosleep(u64 nsec) {
   #ifdef CO_NO_LIBC
     #warning TODO non-libc microsleep
   #else
-    struct timespec ts = { .tv_sec = 0l, .tv_nsec = (long)nsec };
+    struct timespec ts = {
+      .tv_sec = nsec / 1000000000llu,
+      .tv_nsec = (long)(nsec % 1000000000llu),
+    };
     if (nanosleep(&ts, &ts) != 0) {
       u64 remaining_nsec = ((u64)ts.tv_sec * 1000000000llu) + (u64)ts.tv_nsec;
       assert(remaining_nsec <= nsec);

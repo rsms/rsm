@@ -99,8 +99,9 @@ static void vm_ptab_free(rmm_t* mm, vm_ptab_t ptab) {
 
 
 rerr_t vm_pagedir_init(vm_pagedir_t* pagedir, rmm_t* mm) {
-  if (!RHMutexInit(&pagedir->lock))
-    return rerr_not_supported;
+  rerr_t err = RHMutexInit(&pagedir->lock);
+  if UNLIKELY(err)
+    return err;
   vm_ptab_t ptab = vm_ptab_create(mm); // root page table
   if UNLIKELY(!ptab) {
     trace("failed to allocate root page table");

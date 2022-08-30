@@ -8,6 +8,7 @@
 #if !defined(RSM_NO_LIBC)
   #include <pthread.h>
   #include <signal.h>
+  #include <errno.h>
 // #elif !__STDC_NO_THREADS__
 //   #include <threads.h>
 #else

@@ -91,7 +91,7 @@ struct M {
   bool        spinning; // m is out of work and is actively looking for work
   bool        blocked;  // m is blocked on a note
   mnote_t     park;     // park notification
-  RSema       parksema; // park notification semaphore
+  sema_t      parksema; // park notification semaphore
 
   // register values
   u64    iregs[RSM_NREGS];
@@ -211,6 +211,7 @@ struct rsched_ {
 
   // freet is a list of unused T's (status==T_DEAD)
   tlist_t freet;
+  mutex_t freet_lock;
 
   M m0; // main M (bound to the OS thread which rvm_main is called on)
   P p0; // first P

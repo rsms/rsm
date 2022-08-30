@@ -1,43 +1,31 @@
-// OS threads and atomic memory operations
+// threads and atomic memory operations
 // SPDX-License-Identifier: Apache-2.0
-/*
-  typedef int (*thrd_start_t)(void*);
-
-  void YIELD_THREAD()
-    yields for other threads to be scheduled on the current CPU by the OS
-  void YIELD_CPU()
-    yields for other work on a CPU core
-
-  int    thrd_create(thrd_t *thr, thrd_start_t func, void *arg);
-  void   thrd_exit(int res);
-  int    thrd_join(thrd_t thr, int *res);
-  int    thrd_detach(thrd_t thr);
-  thrd_t thrd_current(void);
-  int    thrd_equal(thrd_t a, thrd_t b);
-  int    thrd_sleep(const struct timespec *ts_in, struct timespec *rem_out);
-  void   thrd_yield(void);
-
-  int    mtx_init(mtx_t *mtx, int type);
-  void   mtx_destroy(mtx_t *mtx);
-  int    mtx_lock(mtx_t *mtx);
-  int    mtx_trylock(mtx_t *mtx);
-  int    mtx_timedlock(mtx_t *mtx, const struct timespec *ts);
-  int    mtx_unlock(mtx_t *mtx);
-
-  int    cnd_init(cnd_t *cond);
-  void   cnd_destroy(cnd_t *cond);
-  int    cnd_signal(cnd_t *cond);
-  int    cnd_broadcast(cnd_t *cond);
-  int    cnd_wait(cnd_t *cond, mtx_t *mtx);
-  int    cnd_timedwait(cnd_t *cond, mtx_t *mtx, const struct timespec *ts);
-
-  int    tss_create(tss_t *key, tss_dtor_t dtor);
-  void   tss_delete(tss_t key);
-  int    tss_set(tss_t key, void *val);
-  void*  tss_get(tss_t key);
-
-*/
 #pragma once
+
+// select thread API
+#if defined(__STDC_NO_THREADS__) && __STDC_NO_THREADS__
+  #if defined(RSM_NO_LIBC)
+    #define RSM_THREAD_NONE
+    #warning TODO
+  #else
+    #define RSM_THREAD_PTHREAD
+    #include <pthread.h>
+  #endif
+#else
+  #define RSM_THREAD_C11
+  #include <threads.h>
+#endif
+
+// select semaphore API
+#if defined(_WIN32) || defined(__MACH__)
+  typedef uintptr sema_t;
+  #define RSM_SEMAPHORE_PTR
+#elif defined(__unix__)
+  #include <semaphore.h>
+  #define RSM_SEMAPHORE_POSIX
+#else
+  #warning TODO
+#endif
 
 #if !defined(__STDC_NO_ATOMICS__)
   #include <stdatomic.h>
@@ -128,55 +116,52 @@
 #endif
 
 
-// C11 threads API (with pthread shim)
-#if defined(RSM_NO_LIBC)
-  #error "TODO: impl thread RSM_NO_LIBC"
-#elif defined(__STDC_NO_THREADS__) && __STDC_NO_THREADS__
-  #include "thread_pthread.h"
-#else
-  #include <threads.h>
-#endif
-
-
-// RSema is a portable semaphore; a thin layer over the OS's semaphore implementation.
-#if defined(_WIN32) || defined(__MACH__)
-  typedef uintptr RSema; // intptr instead of void* to improve compiler diagnostics
-#elif defined(__unix__)
-  ASSUME_NONNULL_END
-  #include <semaphore.h>
-  ASSUME_NONNULL_BEGIN
-  typedef sem_t RSema;
-#endif /* RSema */
-
-
 RSM_ASSUME_NONNULL_BEGIN
 
 
-bool RSemaInit(RSema*, u32 initcount); // returns false if system impl failed (rare)
-void RSemaDispose(RSema*);
-bool RSemaWait(RSema*);    // wait for a signal
-bool RSemaTryWait(RSema*); // try acquire a signal; return false instead of blocking
-bool RSemaTimedWait(RSema*, u64 timeout_usecs);
-bool RSemaSignal(RSema*, u32 count /*must be >0*/);
+// sema_t is a thin layer over the OS's semaphore implementation
+#ifdef RSM_SEMAPHORE_POSIX
+  typedef sem_t sema_t;
+#else
+  typedef uintptr sema_t;
+#endif
+rerr_t sema_init(sema_t*, u32 initcount);
+void sema_dispose(sema_t*);
+void sema_signal(sema_t*, u32 count); // count must be >0
+// sema_wait waits for a signal.
+// If timeout_nsec < 0, wait indefinitely.
+// If timeout_nsec >= 0, try to acquire m's semaphore for at most timeout_nsec.
+// Returns true if a signal was received.
+bool sema_wait(sema_t*, i64 timeout_nsec);
 
 
-// RLSema is a "light-weight" semaphore which is more efficient than RSema under
-// high-contention condition, by avoiding syscalls.
-// Waiting when there's already a signal available is extremely cheap and involves
-// no syscalls. If there's no signal the implementation will retry by spinning for
-// a short while before eventually falling back to RSema.
-typedef struct RLSema {
-  _Atomic(isize) count;
-  RSema          sema;
-} RLSema;
+// RHMutex is a regular mutex optimized for unlikely contention.
+// In the uncontended case, as fast as spin locks (just a few instructions),
+// but on the contention path it sleep in the kernel.
+typedef struct RHMutex {
+  sema_t        sema;
+  _Atomic(i32)  nwait;
+  _Atomic(bool) flag;
+} RHMutex;
+static rerr_t RHMutexInit(RHMutex* m);
+static void RHMutexDispose(RHMutex* m);
+static void RHMutexLock(RHMutex* m);
+static void RHMutexUnlock(RHMutex* m);
+static bool RHMutexIsLocked(RHMutex* m);
 
-bool RLSemaInit(RLSema*, u32 initcount); // returns false if system impl failed (rare)
-void RLSemaDispose(RLSema*);
-bool RLSemaWait(RLSema*);
-bool RLSemaTryWait(RLSema*);
-bool RLSemaTimedWait(RLSema*, u64 timeout_usecs);
-void RLSemaSignal(RLSema*, u32 count /*must be >0*/);
-usize RLSemaApproxAvail(RLSema*);
+
+// mutex_t is a regular mutex
+#ifdef RSM_THREAD_PTHREAD
+  typedef pthread_mutex_t mutex_t;
+#elif defined(RSM_THREAD_C11)
+  typedef mtx_t mutex_t;
+#endif
+typedef enum { MUTEX_PLAIN, MUTEX_RECURSIVE } mutexflag_t;
+rerr_t mutex_init(mutex_t*, mutexflag_t);
+void mutex_dispose(mutex_t*);
+static void mutex_lock(mutex_t*);
+static bool mutex_trylock(mutex_t*);
+static void mutex_unlock(mutex_t*);
 
 
 // RWMutex is a read-write mutex.
@@ -184,49 +169,67 @@ usize RLSemaApproxAvail(RLSema*);
 // While no write lock is held, up to 16777214 read locks may be held.
 // While a write lock is held no read locks or other write locks can be held.
 typedef struct RWMutex {
-  mtx_t        w; // writer lock
+  mutex_t      w; // writer lock
   _Atomic(u32) r; // reader count
 } RWMutex;
-static bool RWMutexInit(RWMutex* m, int wtype);
+static rerr_t RWMutexInit(RWMutex* m, mutexflag_t);
 static void RWMutexDispose(RWMutex* m);
-int RWMutexRLock(RWMutex* m);     // acquire read-only lock (blocks until acquired)
-int RWMutexTryRLock(RWMutex* m);  // attempt to acquire read-only lock (non-blocking)
-int RWMutexRUnlock(RWMutex* m);   // release read-only lock
-int RWMutexLock(RWMutex* m);      // acquire read+write lock (blocks until acquired)
-int RWMutexTryLock(RWMutex* m);   // attempt to acquire read+write lock (non-blocking)
-int RWMutexUnlock(RWMutex* m);    // release read+write lock
+void RWMutexRLock(RWMutex* m);     // acquire read-only lock (blocks until acquired)
+bool RWMutexTryRLock(RWMutex* m);  // attempt to acquire read-only lock (non-blocking)
+void RWMutexRUnlock(RWMutex* m);   // release read-only lock
+void RWMutexLock(RWMutex* m);      // acquire read+write lock (blocks until acquired)
+bool RWMutexTryLock(RWMutex* m);   // attempt to acquire read+write lock (non-blocking)
+void RWMutexUnlock(RWMutex* m);    // release read+write lock
 
 
-// RHMutex is a mutex that will spin for a short while and then block
-typedef struct RHMutex {
-  _Atomic(bool) flag;
-  _Atomic(i32)  nwait;
-  RSema         sema;
-} RHMutex;
-static bool RHMutexInit(RHMutex* m); // returns false if system failed to init semaphore
-static void RHMutexDispose(RHMutex* m);
-static void RHMutexLock(RHMutex* m);
-static void RHMutexUnlock(RHMutex* m);
-static bool RHMutexIsLocked(RHMutex* m);
+//———————————————————————————————————————————————————————————————————————————————————————
+// inline impl, mutex_t
+#ifdef RSM_THREAD_C11
+  inline static void mutex_lock(mutex_t* mu) {
+    safecheckxf(mtx_lock(mu) == 0, "mutex_lock");
+  }
+  inline static void mutex_unlock(mutex_t* mu) {
+    safecheckxf(mtx_unlock(mu) == 0, "mutex_unlock");
+  }
+  inline static bool mutex_trylock(mutex_t* mu) {
+    return mtx_trylock(mu) == 0;
+  }
+#elif defined(RSM_THREAD_PTHREAD)
+  inline static void mutex_lock(mutex_t* mu) {
+    safecheckxf(pthread_mutex_lock(mu) == 0, "mutex_lock");
+  }
+  inline static void mutex_unlock(mutex_t* mu) {
+    safecheckxf(pthread_mutex_unlock(mu) == 0, "mutex_unlock");
+  }
+  inline static bool mutex_trylock(mutex_t* mu) {
+    return pthread_mutex_trylock(mu) == 0;
+  }
+#else
+  #error TODO
+#endif
 
-//———————————————————————————————————————————————
-// inline impl
 
-static inline bool RWMutexInit(RWMutex* m, int wtype) {
-  assertf(wtype != mtx_timed, "mtx_timed not supported");
+//———————————————————————————————————————————————————————————————————————————————————————
+// inline impl, RWMutex
+
+static inline rerr_t RWMutexInit(RWMutex* m, mutexflag_t flags) {
+  //assertf((flags & MUTEX_TIMED) == 0, "MUTEX_TIMED not supported");
   m->r = 0;
-  return mtx_init(&m->w, wtype) == 0;
+  return mutex_init(&m->w, flags);
 }
-static inline void RWMutexDispose(RWMutex* m) { mtx_destroy(&m->w); }
+static inline void RWMutexDispose(RWMutex* m) { mutex_dispose(&m->w); }
 
-inline static bool RHMutexInit(RHMutex* m) {
+//———————————————————————————————————————————————————————————————————————————————————————
+// inline impl, RHMutex
+
+inline static rerr_t RHMutexInit(RHMutex* m) {
   m->flag = false;
   m->nwait = 0;
-  return RSemaInit(&m->sema, 0);
+  return sema_init(&m->sema, 0);
 }
 
 inline static void RHMutexDispose(RHMutex* m) {
-  RSemaDispose(&m->sema);
+  sema_dispose(&m->sema);
 }
 
 void _RHMutexLock(RHMutex* m);
@@ -244,8 +247,9 @@ inline static void RHMutexUnlock(RHMutex* m) {
   AtomicExchange(&m->flag, false, memory_order_seq_cst);
   if UNLIKELY(AtomicLoad(&m->nwait, memory_order_seq_cst) != 0) {
     // at least one thread waiting on a semaphore signal -- wake one thread
-    RSemaSignal(&m->sema, 1); // TODO: should we check the return value?
+    sema_signal(&m->sema, 1); // TODO: should we check the return value?
   }
 }
 
+//———————————————————————————————————————————————————————————————————————————————————————
 RSM_ASSUME_NONNULL_END

@@ -181,7 +181,7 @@ static void mnote_wakeup(mnote_t* n) {
     // Nothing was waiting. Done.
     return;
   }
-  RSemaSignal(&((M*)key)->parksema, 1);
+  sema_signal(&((M*)key)->parksema, 1);
 }
 
 
@@ -194,7 +194,7 @@ static void mnote_sleep(mnote_t* n, M* m) {
     return;
   }
   m->blocked = true;
-  RSemaWait(&m->parksema);
+  sema_wait(&m->parksema, -1);
   m->blocked = false;
 }
 
@@ -699,7 +699,7 @@ static void p_init(P* p, rsched_t* s, u32 id) {
   p->id = id;
   p->status = P_IDLE;
   p->s = s;
-  RHMutexInit(&p->timers_lock);
+  safecheckx(RHMutexInit(&p->timers_lock) == 0);
 }
 
 
@@ -927,14 +927,23 @@ static bool tlist_empty(const tlist_t* l) {
 static void tlist_push(tlist_t* l, T* t) {
   t->schedlink = l->head;
   l->head = t;
+  l->len++;
 }
 
 static T* nullable tlist_pop(tlist_t* l) {
   T* t = l->head;
-  if (t)
+  if (t) {
     l->head = t->schedlink;
+    l->len--;
+  }
   return t;
 }
+
+
+// When p.freet.len reaches P_FREET_WATERMARK_HIGH, move T's to global s.freet
+// so that there are P_FREET_WATERMARK_LOW T's left in p.freet.
+#define P_FREET_WATERMARK_HIGH  64u
+#define P_FREET_WATERMARK_LOW   32u
 
 
 // p_freet_add adds T to P's freet list.
@@ -946,6 +955,17 @@ static void p_freet_add(P* p, T* t) {
   trace3("T%llu -> P%u.freet (stacksize %llu)", t->id, p->id, stacksize);
 
   tlist_push(&p->freet, t);
+
+  if (p->freet.len < P_FREET_WATERMARK_HIGH)
+    return;
+
+  // move some T's from local p.freet list to global s.freet list
+  static_assert(P_FREET_WATERMARK_LOW > 0, "");
+  static_assert(P_FREET_WATERMARK_LOW <= P_FREET_WATERMARK_HIGH, "");
+
+  while (p->freet.len >= P_FREET_WATERMARK_LOW) {
+    T* t = tlist_pop(&p->freet);
+  }
 }
 
 
@@ -1055,7 +1075,7 @@ NOINLINE static rerr_t m_start(M* m) {
 
 
 static void m_dispose(M* m) {
-  RSemaDispose(&m->parksema);
+  sema_dispose(&m->parksema);
 }
 
 
@@ -1063,7 +1083,7 @@ static rerr_t m_init(M* m, rsched_t* s, u64 id) {
   m->id = id;
   m->s = s;
   mnote_clear(&m->park);
-  RSemaInit(&m->parksema, 0);
+  safecheckx(sema_init(&m->parksema, 0) == 0);
 
   // virtual memory caches
   for (usize i = 0; i < countof(m->vm_cache); i++)
@@ -1675,26 +1695,19 @@ void task_park(T* t, tstatus_t reason) {
 
 
 rerr_t rsched_init(rsched_t* s, rmachine_t* machine) {
+  rerr_t err;
   memset(s, 0, sizeof(rsched_t));
 
   s->machine = machine;
 
-  if (!RHMutexInit(&s->lock))
-    return rerr_canceled;
-
-  if (!RWMutexInit(&s->exec_lock, mtx_plain))
-    return rerr_canceled;
-
-  if (!RWMutexInit(&s->allocm_lock, mtx_plain))
-    return rerr_canceled;
-
-  // allt
-  if (!RWMutexInit(&s->allt.lock, mtx_plain))
-    return rerr_canceled;
+  if ((err = RHMutexInit(&s->lock))) return err;
+  if ((err = RWMutexInit(&s->exec_lock, 0))) return err;
+  if ((err = RWMutexInit(&s->allocm_lock, 0))) return err;
+  if ((err = RWMutexInit(&s->allt.lock, 0))) return err;
+  if ((err = mutex_init(&s->freet_lock, 0))) return err;
 
   // virtual memory page directory
-  rerr_t err = vm_pagedir_init(&s->vm_pagedir, machine->mm);
-  if (err)
+  if ((err = vm_pagedir_init(&s->vm_pagedir, machine->mm)))
     return err;
 
   // initialize main M (id=0) on current OS thread
@@ -1750,6 +1763,7 @@ void rsched_dispose(rsched_t* s) {
   RWMutexDispose(&s->exec_lock);
   RWMutexDispose(&s->allocm_lock);
   RWMutexDispose(&s->allt.lock);
+  mutex_dispose(&s->freet_lock);
   vm_pagedir_dispose(&s->vm_pagedir);
 }
 

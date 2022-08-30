@@ -241,6 +241,9 @@ rerr_t rerr_errno(int e) {
     case EEXIST: return rerr_exists;
     case ENOENT: return rerr_not_found;
     case EBADF:  return rerr_badfd;
+    case ENOTSUP:
+    case ENOSYS:
+      return rerr_not_supported;
   #endif
     default: return rerr_invalid;
   }

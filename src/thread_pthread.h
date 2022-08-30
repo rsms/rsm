@@ -2,6 +2,8 @@
 #include <pthread.h>
 #include <errno.h>
 
+#define _RSM_THREAD_PTHREAD
+
 #define ONCE_FLAG_INIT  PTHREAD_ONCE_INIT
 
 typedef pthread_t       thrd_t;

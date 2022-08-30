@@ -1103,7 +1103,7 @@ static rmemalloc_t* nullable rmem_allocator_init(
   assertf(IS_ALIGN2((uintptr)heap0p, HEAP_ALIGN), "heap0p %p misaligned", heap0p);
   assertf(mm_origin == NULL || mm != NULL, "mm_origin without a mm");
 
-  if (!RHMutexInit(&a->lock))
+  if (RHMutexInit(&a->lock))
     return NULL;
 
   ilist_init(&a->subheaps);

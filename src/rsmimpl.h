@@ -570,18 +570,22 @@ typedef __builtin_va_list va_list;
 
 // RSM_SAFE -- checks enabled in "debug" and "safe" builds (but not in "fast" builds.)
 //
-// void safecheck(COND)                        -- stripped from non-safe builds
-// void safecheckf(COND, const char* fmt, ...) -- stripped from non-safe builds
-// typeof(EXPR) safecheckexpr(EXPR, EXPECT)    -- included in non-safe builds w/o check
-// typeof(EXPR) safechecknotnull(EXPR)         -- included in non-safe builds w/o check
+// void safecheck(COND)                         stripped from non-safe builds
+// void safecheckf(COND, const char* fmt, ...)  stripped from non-safe builds
+// void safecheckx(COND)                        included in non-safe builds w/o check
+// void safecheckxf(COND, const char* fmt, ...) included in non-safe builds w/o check
+// typeof(EXPR) safecheckexpr(EXPR, EXPECT)     included in non-safe builds w/o check
+// typeof(EXPR) safechecknotnull(EXPR)          included in non-safe builds w/o check
 //
 #if defined(RSM_SAFE)
   #undef RSM_SAFE
   #define RSM_SAFE 1
   #define _safefail(fmt, args...) _panic(__FILE__, __LINE__, __FUNCTION__, fmt, ##args)
-  #define safecheckf(cond, fmt, args...) if UNLIKELY(!(cond)) _safefail(fmt, ##args)
+  #define safecheckf(cond, fmt, args...)  if UNLIKELY(!(cond)) _safefail(fmt, ##args)
+  #define safecheckxf safecheckf
+  #define safecheckx safecheck
   #ifdef DEBUG
-    #define safecheck(cond) if UNLIKELY(!(cond)) _safefail("safecheck (%s)", #cond)
+    #define safecheck(cond)  if UNLIKELY(!(cond)) _safefail("safecheck (%s)", #cond)
     #define safecheckexpr(expr, expect) ({                                        \
       __typeof__(expr) val__ = (expr);                                            \
       safecheckf(val__ == expect, "unexpected value (%s != %s)", #expr, #expect); \
@@ -602,10 +606,12 @@ typedef __builtin_va_list va_list;
       val__; })
   #endif
 #else
-  #define safecheckf(cond, fmt, args...) ((void)0)
-  #define safecheck(cond)                ((void)0)
-  #define safecheckexpr(expr, expect)    (expr) /* intentionally complain if not used */
-  #define safechecknotnull(a)            ({ a; }) /* note: (a) causes "unused" warnings */
+  #define safecheckf(...)             ((void)0)
+  #define safecheck(cond)             ((void)0)
+  #define safecheckx(cond)            do{ UNUSED bool _ = (cond); }while(0)
+  #define safecheckxf(cond, ...)      do{ UNUSED bool _ = (cond); }while(0)
+  #define safecheckexpr(expr, expect) (expr) /* intentionally complain if not used */
+  #define safechecknotnull(a)         ({ a; }) /* note: (a) causes "unused" warnings */
 #endif
 
 // void dlog(const char* fmt, ...)

@@ -4,6 +4,14 @@
 #include "vm.h"
 RSM_ASSUME_NONNULL_BEGIN
 
+// SCHED_TRACE: when defined, verbose log tracing on stderr is enabled.
+#define SCHED_TRACE 3
+// The value decides granularity of logging:
+// 0 (or undefined) - tracing disabled
+// 1  - key aspects of scheduling
+// 2  - detailed aspects of scheduling
+// >2 - very detailed trace
+
 // EXE_TOP_ADDR is the end of the virtual memory-address space,
 // where exeinfo_t ends.
 #define EXE_TOP_ADDR  ALIGN2_FLOOR_X(VM_ADDR_MAX, 8)
@@ -43,11 +51,20 @@ typedef struct {
   _Atomic(uintptr) key; // must be initialized to 0
 } mnote_t;
 
+typedef struct {
+  T* nullable head;
+  u32         len;
+} tlist_t;
+
+typedef struct {
+  _Atomic(usize) bits[S_MAXPROCS / sizeof(usize) / 8];
+} pbitset_t;
+
 struct T {
   u64         id;
-  M* nullable m;         // attached M
   T* nullable parent;    // task that spawned this task
-  T* nullable schedlink; // next task to be scheduled
+  T* nullable schedlink; // next task to be scheduled (used by runq, freet)
+  M* nullable m;         // attached M
 
   usize        pc;     // program counter; next instruction = iv[pc]
   usize        instrc; // instruction count
@@ -55,7 +72,8 @@ struct T {
   const void*  rodata; // global read-only data (from ROM)
 
   u64 sp;       // saved SP register value used by m_switchtask
-  u64 stacktop; // end of stack (lowest valid stack address)
+  u64 stack_lo; // top of stack (lowest valid stack address)
+  u64 stack_hi; // bottom of stack (highest valid stack address)
 
   u64                waitsince; // approx time when the T became blocked
   _Atomic(tstatus_t) status;
@@ -67,7 +85,7 @@ struct M {
   P* nullable oldp;     // P that was attached before executing a syscall
   P* nullable nextp;    // P to attach
   T* nullable currt;    // current running task
-  M* nullable nextm;    // next M in list (for s.midle and s.mfree)
+  M* nullable nextm;    // next M in list (for s.idlem and s.freem)
   u32         id;
   u32         locks;    // number of logical locks held by Ts to this M
   bool        spinning; // m is out of work and is actively looking for work
@@ -90,9 +108,9 @@ struct P {
   bool               preempt;   // this P should enter scheduling ASAP
   rsched_t*          s;         // parent scheduler
   M* nullable        m;         // associated m (NULL when P is idle)
-  P* nullable        nextp;     // next P in list (for s.pidle)
+  P* nullable        nextp;     // next P in list (for s.idlep)
 
-  // Queue of runnable tasks. Accessed without lock.
+  // runq -- queue of runnable tasks, accessed without lock
   _Atomic(u32) runqhead;
   _Atomic(u32) runqtail;
   T*           runq[P_RUNQSIZE];
@@ -106,6 +124,9 @@ struct P {
   // latency that otherwise arises from adding the ready'd
   // coroutines to the end of the run queue.
   _Atomic(T* nullable) runnext;
+
+  // freet is a list of unused T's (status==T_DEAD)
+  tlist_t freet;
 
   // timers
   _Atomic(u32) ntimers; // Number of timers in P's heap (writes uses timers_lock)
@@ -124,47 +145,44 @@ struct P {
   _Atomic(u64) timer_modified_earliest;
 };
 
-typedef struct {
-  _Atomic(usize) bits[S_MAXPROCS / sizeof(usize) / 8];
-} P_bitset_t;
-
 struct rsched_ {
   rmachine_t*  machine;      // host machine
   _Atomic(u64) tidgen;       // T.id generator
-  RHMutex      lock;         // protects access to midle, pidle, allp, runq
+  RHMutex      lock;         // protects access to idlem, idlep, allp, runq
+  vm_pagedir_t vm_pagedir;   // virtual memory page directory
   bool         main_started; // true when main task has started
 
   // M's
-  M* nullable  midle;        // idle m's waiting for work
-  _Atomic(u32) nmidle;       // number of idle m's waiting for work
-  u32          nmidlelocked; // number of locked m's waiting for work
+  M* nullable  idlem;        // idle m's waiting for work
+  _Atomic(u32) nidlem;       // number of idle m's waiting for work
+  u32          nidlemlocked; // number of locked m's waiting for work
   _Atomic(i32) nmspinning;   // number of spinning M's
   _Atomic(u32) midgen;       // M.id generator
   u32          maxmcount;    // limit number of M's created (ie. OS thread limit)
   u64          nmfreed;      // cumulative number of freed m's
-  M* nullable  mfree;        // m's waiting to be freed when their m.exited is set
+  M* nullable  freem;        // list of M's to be freed when their m.exited is set
 
   // P's
   P*           allp[S_MAXPROCS];     // all live P's (managed by sched_procresize)
   _Atomic(u32) nprocs;               // max active Ps (num valid P's in allp; maxprocs)
-  P* nullable  pidle;                // list of idle P's
-  _Atomic(u32) npidle;               // (note: writes use lock)
+  P* nullable  idlep;                // list of idle P's
+  _Atomic(u32) nidlep;               // (note: writes use lock)
   u32          stealord[S_MAXPROCS]; // steal order of P's in allp
   u32          stealordlen;          // entries at stealord
 
-  // pidle_mask is a bitmask of Ps in PIdle list, one bit per P in allp.
+  // idlep_mask is a bitmask of Ps in PIdle list, one bit per P in allp.
   // Reads and writes must be atomic. Length may change at safe points.
   //
   // Each P must update only its own bit. In order to maintain
   // consistency, a P going idle must set the idle mask simultaneously with
   // updates to the idle P list under the sched.lock, otherwise a racing
-  // s_pidle_get may clear the mask before s_pidle_put sets the mask,
+  // s_idlep_get may clear the mask before s_idlep_put sets the mask,
   // corrupting the bitmap.
-  P_bitset_t pidle_mask;
+  pbitset_t idlep_mask;
 
   // timerp_mask is a bitmask of P's that may have a timer, one bit per P in allp.
   // Reads and writes must be atomic. Length may change at safe points.
-  P_bitset_t timerp_mask;
+  pbitset_t timerp_mask;
 
   // exec_lock serializes exec and clone to avoid bugs or unspecified behaviour
   // around exec'ing while creating/disposing threads.
@@ -175,7 +193,7 @@ struct rsched_ {
   // creation of new Ms.
   RWMutex allocm_lock;
 
-  // allt holds all T's, alive or T_DEAD
+  // allt holds all T's (any status, including T_DEAD)
   struct {
     RWMutex      lock;
     _Atomic(T**) ptr;
@@ -191,7 +209,8 @@ struct rsched_ {
     _Atomic(u32) len;
   } runq;
 
-  vm_pagedir_t vm_pagedir; // virtual memory page directory
+  // freet is a list of unused T's (status==T_DEAD)
+  tlist_t freet;
 
   M m0; // main M (bound to the OS thread which rvm_main is called on)
   P p0; // first P
@@ -279,20 +298,12 @@ bool exit_syscall(T*, int priority);
 uintptr m_spawn_osthread(M* m, rerr_t(*mainf)(M*));
 
 
-// SCHED_TRACE: when defined, verbose log tracing on stderr is enabled.
-#define SCHED_TRACE 2
-// The value decides granularity of logging:
-// 0 (or undefined) - tracing disabled
-// 1  - key aspects of scheduling
-// 2  - detailed aspects of scheduling
-// >2 - very detailed trace
-#if defined(SCHED_TRACE) && !SCHED_TRACE
-  #undef SCHED_TRACE
-#endif
-
 // schedtrace1(const char* fmt, ...) -- debug tracing level 1
 // schedtrace2(const char* fmt, ...) -- debug tracing level 2
 // schedtrace3(const char* fmt, ...) -- debug tracing level 3
+#if defined(SCHED_TRACE) && !SCHED_TRACE
+  #undef SCHED_TRACE
+#endif
 #if defined(SCHED_TRACE) && !defined(RSM_NO_LIBC)
   void _schedtrace(int level, const char* nullable fn, const char* fmt, ...)
     ATTR_FORMAT(printf, 3, 4);

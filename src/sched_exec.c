@@ -208,7 +208,7 @@ static u64 copyv(EXEC_PARAMS, u64 n) {
 
 inline static void push(EXEC_PARAMS, u64 size, u64 value) {
   u64 vaddr = SP;
-  check(vaddr >= t->stacktop + size, EX_E_STACK_OVERFLOW, vaddr);
+  check(vaddr >= t->stack_lo + size, EX_E_STACK_OVERFLOW, vaddr);
   vaddr -= size;
   SP = vaddr;
   MSTORE(u64, vaddr, value);
@@ -216,7 +216,7 @@ inline static void push(EXEC_PARAMS, u64 size, u64 value) {
 
 inline static u64 pop(EXEC_PARAMS, u64 size) {
   u64 vaddr = SP;
-  check(vaddr + size >= t->stacktop, EX_E_STACK_OVERFLOW, vaddr);
+  check(vaddr + size >= t->stack_lo, EX_E_STACK_OVERFLOW, vaddr);
   SP = vaddr + size;
   return MLOAD(u64, vaddr);
 }

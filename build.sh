@@ -152,12 +152,12 @@ if $DEBUG; then
 else
   CFLAGS+=( -DNDEBUG )
   # LDFLAGS_WASM+=( -z stack-size=$[128 * 1024] ) # larger stack, smaller heap
-  CFLAGS_HOST+=( -O3 -mtune=native )
+  CFLAGS_HOST+=( -O2 -mtune=native )
   CFLAGS_WASM+=( -Oz )
   if ! $DEBUGGABLE; then
     CFLAGS_HOST+=( -fomit-frame-pointer )
     LDFLAGS_HOST+=( -dead_strip )
-    LDFLAGS_WASM+=( -O3 --lto-O3 --no-lto-legacy-pass-manager )
+    LDFLAGS_WASM+=( -O2 --lto-O3 --no-lto-legacy-pass-manager )
     $CC_IS_CLANG && CFLAGS+=( -flto )
     $CC_IS_CLANG && LDFLAGS_HOST+=( -flto )
   fi

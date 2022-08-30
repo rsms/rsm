@@ -4,10 +4,9 @@
 #include "abuf.h"
 #include "thread.h"
 #include "sched.h"
+#include "syscall.h"
 
 #define TRACE_MEMORY // define to dlog LOAD and STORE operations
-
-#define trace schedtrace
 
 // stack constants
 #define STK_ALIGN    8           // stack alignment (== sizeof(u64))
@@ -25,13 +24,6 @@ static_assert(STK_MIN % STK_ALIGN == 0, "STK_MIN not aligned to STK_ALIGN");
 // EXEC_ARGS: arguments inside a exec function, for calling another function
 #define EXEC_PARAMS T* t, u64* iregs, const rin_t* inv, usize pc
 #define EXEC_ARGS   t, iregs, inv, pc
-
-// syscall operations
-typedef u32 syscall_op_t;
-enum syscall_op {
-  SC_EXIT = 0, // status_code i32
-  SC_SLEEP = 1, // seconds u64, nanoseconds u64
-};
 
 //———————————————————————————————————————————————————————————————————————————————————
 // exec_logstate
@@ -54,8 +46,10 @@ enum syscall_op {
       REG_FMTVAL(RSM_MAX_REG, iregs[RSM_MAX_REG]), pc, buf);
   }
   #ifdef TRACE_MEMORY
-    #ifdef trace
-      #define tracemem trace
+    #if defined(SCHED_TRACE)
+      #define tracemem(fmt, args...) \
+        _schedtrace(2, "[interp/mem]", fmt " \e[2m(%s:%d)\e[0m", \
+          ##args, __FILE__, __LINE__)
     #else
       #define tracemem dlog
     #endif
@@ -255,11 +249,17 @@ static u64 _read(EXEC_PARAMS, u64 fd, u64 addr, u64 size) {
 
 // Returns true if execution should continue,
 // returns false if execution should stop (scheduler may later resume the task.)
-static bool scall(T* t, u64* iregs, usize pc, u32 syscall_op) {
+#undef _syscall
+static bool _syscall(T* t, u64* iregs, usize pc, u32 syscall_op) {
   switch ((enum syscall_op)syscall_op) {
 
   case SC_EXIT:
-    task_park(t, T_DEAD);
+    dlog("TODO exit program");
+    task_exit(t);
+    return false;
+
+  case SC_TEXIT:
+    task_exit(t);
     return false;
 
   case SC_SLEEP: {
@@ -490,7 +490,7 @@ usize rsched_eval(EXEC_PARAMS) {
     #define do_CALL(A)  push_PC(EXEC_ARGS); pc = (usize)A;
 
     #define do_TSPAWN(A)  iregs[0] = task_spawn(t, A, iregs);
-    #define do_SCALL(A)   if (!scall(t, iregs, pc, A)) return pc;
+    #define do_SYSCALL(A) if (!_syscall(t, iregs, pc, A)) return pc;
     #define do_WRITE(D)   RA = _write(EXEC_ARGS, D, RB, RC) // addr=RB size=RC fd=D
     #define do_READ(D)    RA = _read(EXEC_ARGS, D, RB, RC) // addr=RB size=RC fd=D
     #define do_MCOPY(C)   mcopy(EXEC_ARGS, RA, RB, C)

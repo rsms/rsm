@@ -259,10 +259,8 @@ usize rsched_eval(T* t, u64* iregs, const rin_t* inv, usize pc);
 // Returns the new spawned task's ID, or <0 on error (value is a rerr_t).
 i64 task_spawn(T* t, usize newtask_pc, const u64 args[RSM_NARGREGS]);
 
-// task_park takes a task out of running state (disassoc. M & P from T.)
-// Must be explicitly resumed with a call to task_unpark
-void task_park(T* t, tstatus_t);
-// void task_unpark(T* t, tstatus_t);
+// task_exit is called by the interpreter when a task's main function exits
+void task_exit(T*);
 
 // enter_syscall releases the P associated with the task,
 // making that P available for use by other tasks waiting to run.
@@ -282,20 +280,37 @@ uintptr m_spawn_osthread(M* m, rerr_t(*mainf)(M*));
 
 
 // SCHED_TRACE: when defined, verbose log tracing on stderr is enabled.
-// The value is used as a prefix for log messages.
+#define SCHED_TRACE 2
+// The value decides granularity of logging:
+// 0 (or undefined) - tracing disabled
+// 1  - key aspects of scheduling
+// 2  - detailed aspects of scheduling
+// >2 - very detailed trace
 #if defined(SCHED_TRACE) && !SCHED_TRACE
   #undef SCHED_TRACE
-#elif DEBUG
-  #define SCHED_TRACE "\e[1m▍\e[0m "
 #endif
 
-// schedtrace(const char* fmt, ...) -- debug tracing
+// schedtrace1(const char* fmt, ...) -- debug tracing level 1
+// schedtrace2(const char* fmt, ...) -- debug tracing level 2
+// schedtrace3(const char* fmt, ...) -- debug tracing level 3
 #if defined(SCHED_TRACE) && !defined(RSM_NO_LIBC)
-  void _schedtrace(const char* fmt, ...);
-  #define schedtrace(fmt, ...) \
-    _schedtrace("\e[1;36m%-15s\e[39m " fmt "\e[0m\n", __FUNCTION__, ##__VA_ARGS__)
+  void _schedtrace(int level, const char* nullable fn, const char* fmt, ...)
+    ATTR_FORMAT(printf, 3, 4);
+  #define schedtrace1(fmt, args...) _schedtrace(1, __FUNCTION__, fmt, ##args)
+  #if SCHED_TRACE > 1
+    #define schedtrace2(fmt, args...) _schedtrace(2, __FUNCTION__, fmt, ##args)
+  #else
+    #define schedtrace2(...) ((void)0)
+  #endif
+  #if SCHED_TRACE > 2
+    #define schedtrace3(fmt, args...) _schedtrace(3, __FUNCTION__, fmt, ##args)
+  #else
+    #define schedtrace3(...) ((void)0)
+  #endif
 #else
-  #define schedtrace(...) do{}while(0)
+  #define schedtrace1(...) ((void)0)
+  #define schedtrace2(...) ((void)0)
+  #define schedtrace3(...) ((void)0)
 #endif
 
 

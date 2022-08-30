@@ -254,8 +254,8 @@ static u64 _read(VMPARAMS, u64 fd, u64 addr, u64 size) {
   return (u64)read((int)fd, dst, (usize)size);
 }
 
-static void scall(VMPARAMS, u8 ar, rin_t in) {
-  dlog("scall not implemented");
+static void do_syscall(VMPARAMS, u8 ar, rin_t in) {
+  dlog("syscall not implemented");
 }
 
 inline static void push(VMPARAMS, u64 size, u64 val) {
@@ -428,7 +428,7 @@ static void vmexec(VMPARAMS) {
     #define do_JUMP(A)  pc = (usize)A
     #define do_CALL(A)  push_PC(VMARGS); pc = (usize)A;
     #define do_TSPAWN(A) goto not_supported;
-    #define do_SCALL(A) scall(VMARGS, A, in)
+    #define do_SYSCALL(A) do_syscall(VMARGS, A, in)
 
     #define do_WRITE(D)   RA = _write(VMARGS, D, RB, RC) // addr=RB size=RC fd=D
     #define do_READ(D)    RA = _read(VMARGS, D, RB, RC) // addr=RB size=RC fd=D

@@ -23,15 +23,14 @@ uintptr m_spawn_osthread(M* m, rerr_t(*mainf)(M*)) {
     return 0;
   }
 
-  // find out OS stack size
-  uintptr stacksize = 0;
-  if ((err = pthread_attr_getstacksize(&attr, &stacksize)) != 0) {
-    dlog("pthread_attr_getstacksize failed (err %d)", err);
-    goto error;
-  }
-
-  dlog("OS thread stack size: %zu B", stacksize);
-  //m->t0.stack.hi = stacksize; // for m_start
+  // // find out OS stack size
+  // uintptr stacksize = 0;
+  // if ((err = pthread_attr_getstacksize(&attr, &stacksize)) != 0) {
+  //   dlog("pthread_attr_getstacksize failed (err %d)", err);
+  //   goto error;
+  // }
+  // dlog("OS thread stack size: %zu B", stacksize);
+  // //m->t0.stack.hi = stacksize; // for m_start
 
   // Tell the pthread library we won't join with this thread and that
   // the system should reclaim the thread storage upon exit.

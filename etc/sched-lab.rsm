@@ -1,6 +1,5 @@
 // lab program for developing the new scheduler
 const SC_SLEEP = 1
-const MILLISECONDS = 1000000
 
 fun main() {
   // SP = sub SP 64 // reserve 64B of stack memory
@@ -10,12 +9,12 @@ fun main() {
 
   // sleep os thread for 500ms
   R0 = 500000000
-  scall SC_SLEEP
+  syscall SC_SLEEP
 }
 
 fun foo() {
   R1 = 1
   // sleep os thread for 400ms
   R0 = 400000000
-  scall SC_SLEEP
+  syscall SC_SLEEP
 }

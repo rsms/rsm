@@ -155,16 +155,15 @@ contexts:
 
           | ifz?
           | call
-          | scall
           | jump
           | ret
 
+          | tspawn
+          | syscall
           | write
           | read
-          | devopen
           | mcopy
           | mcmp
-          | devopen
           )\b
       scope: keyword.instruction.rsm
 

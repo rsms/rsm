@@ -18,6 +18,7 @@
 #include "sched.h"
 #include "machine.h"
 #include "hash.h"
+#include "syscall.h"
 
 // tctx
 // #define TCTX_ALIGN       PAGE_SIZE
@@ -72,7 +73,9 @@ enum PStatus {
 #define TASK_STACKBASE(t) ((void*)ALIGN2_FLOOR((uintptr)(t),STK_ALIGN))
 
 
-#define trace schedtrace
+#define trace  schedtrace1
+#define trace2 schedtrace2
+#define trace3 schedtrace3
 
 #if defined(SCHED_TRACE) && !defined(RSM_NO_LIBC)
   #include <stdio.h>
@@ -82,13 +85,13 @@ enum PStatus {
   #define TRACE_SET_CURRENT_M(m)  do{ _g_current_m = (m); }while(0)
 
   // "Mn Pn Tn  function  message"
-  void _schedtrace(const char* fmt, ...) {
+  void _schedtrace(int level, const char* fn, const char* fmt, ...) {
     M* m = assertnotnull(_g_current_m);
     T* t = m->currt;
     P* p = m->p;
     FILE* fp = stderr;
     flockfile(fp);
-    const char* prefix = SCHED_TRACE;
+    const char* prefix = "\e[1m▍\e[0m ";
     fwrite(prefix, strlen(prefix), 1, fp);
     char color = (char)('1' + (m->id % 6));
     fprintf(fp, "\e[1;3%cmM%u\e[0m ", color, m->id);
@@ -104,10 +107,12 @@ enum PStatus {
     } else {
       fprintf(fp, "\e[1;2mT- \e[0m ");
     }
+    fprintf(fp, "\e[1;36m%-15s\e[39m ", fn);
     va_list ap;
     va_start(ap, fmt);
     vfprintf(fp, fmt, ap);
     va_end(ap);
+    fprintf(fp, "\e[0m\n");
     funlockfile(fp);
   }
 #else
@@ -278,7 +283,7 @@ static void p_runq_put(P* p, T* t, bool runnext) {
       // into oldnext, thus we can simply loop here without having to explicitly
       // load oldnext=p->runnext.
     }
-    trace("set p.runnext = T%llu", t->id);
+    trace3("set p.runnext = T%llu", t->id);
     if (oldnext == NULL)
       return;
     // Kick the old runnext out to the regular run queue
@@ -290,7 +295,7 @@ static void p_runq_put(P* p, T* t, bool runnext) {
     u32 head = AtomicLoadAcq(&p->runqhead);
     u32 tail = p->runqtail;
     if (tail - head < P_RUNQSIZE) {
-      trace("set p.runq[%u] = T%llu", tail % P_RUNQSIZE, t->id);
+      trace3("set p.runq[%u] = T%llu", tail % P_RUNQSIZE, t->id);
       p->runq[tail % P_RUNQSIZE] = t;
       // store memory_order_release makes the item available for consumption
       AtomicStoreRel(&p->runqtail, tail + 1);
@@ -328,13 +333,13 @@ static T* nullable p_runq_get(P* p, bool* inherit_time) {
     u32 tail = p->runqtail;
     if (tail == head)
       return NULL;
-    // trace("loop2 tail != head; load p->runq[%u]", head % P_RUNQSIZE);
+    // trace3("loop2 tail != head; load p->runq[%u]", head % P_RUNQSIZE);
     T* t = p->runq[head % P_RUNQSIZE];
-    // trace("loop2 t => %p", t);
-    // trace("loop2 t => T%llu", t->id);
+    // trace3("loop2 t => %p", t);
+    // trace3("loop2 t => T%llu", t->id);
     if (AtomicCASRel(&p->runqhead, &head, head + 1)) // cas-release, commits consume
       return t;
-    trace("CAS failure; retry");
+    trace3("CAS failure; retry");
   }
 }
 
@@ -343,7 +348,7 @@ static T* nullable p_runq_get(P* p, bool* inherit_time) {
 // dst_runq is a ring buffer starting at dst_head.
 // Returns number of grabbed tasks.
 static u32 p_runq_grab(P* p, T* dst_runq[P_RUNQSIZE], u32 dst_head, bool steal_runnext) {
-  trace("source P%u (steal_runnext=%u)", p->id, steal_runnext);
+  trace3("source P%u (steal_runnext=%u)", p->id, steal_runnext);
   while (1) {
     // load-acquire, synchronize with other consumers
     u32 h = AtomicLoadAcq(&p->runqhead);
@@ -387,10 +392,10 @@ static T* nullable p_runq_steal(P* p, P* src_p, bool steal_runnext) {
   u32 tail = AtomicLoad(&p->runqtail, memory_order_relaxed);
   u32 n = p_runq_grab(src_p, p->runq, tail, steal_runnext);
   if (n == 0) {
-    trace("could not grab any tasks");
+    trace3("could not grab any tasks");
     return NULL;
   }
-  trace("grabbed %u tasks from P%u", n, src_p->id);
+  trace3("grabbed %u tasks from P%u", n, src_p->id);
   n--;
   T* t = p->runq[(tail + n) % P_RUNQSIZE];
   if (n == 0) // just one task
@@ -418,7 +423,7 @@ static rerr_t s_allt_add(rsched_t* s, T* t) {
     AtomicStore(&s->allt.ptr, mem.p, memory_order_release);
   }
 
-  trace("add s.allt[%u] = T%llu", s->allt.len, t->id);
+  trace3("add s.allt[%u] = T%llu", s->allt.len, t->id);
   s->allt.ptr[s->allt.len++] = t;
   AtomicStore(&s->allt.len, s->allt.len, memory_order_release);
 
@@ -500,7 +505,7 @@ static void s_wakep(rsched_t* s) {
   i32 zero = 0;
   i32 nmspinning = AtomicLoad(&s->nmspinning, memory_order_relaxed);
   if (nmspinning != 0 || !AtomicCASRelaxed(&s->nmspinning, &zero, 1)) {
-    trace("idle P's are spinning");
+    trace2("idle P's are spinning");
     return;
   }
 
@@ -569,7 +574,7 @@ static T* nullable task_create(M* m, u64 stack_vaddr, usize stacksize, usize ins
 
   //dlog("store ctx to stack at vaddr 0x%llx (haddr %p)", tctx_vaddr(t->sp), ctx);
 
-  trace("T@%p+%zu stack 0x%llx-0x%llx", t, tsize, t->stacktop, stack_vaddr);
+  trace2("T@%p+%zu stack 0x%llx-0x%llx", t, tsize, t->stacktop, stack_vaddr);
 
   return t;
 }
@@ -676,7 +681,7 @@ static void p_init(P* p, rsched_t* s, u32 id) {
 
 // p_acquire_m associates P with M
 static void p_acquire_m(P* p, M* m) {
-  trace("P%u", p->id);
+  trace2("P%u", p->id);
   assertf(p->m == NULL, "P%u in use with other M%u", p->id, p->m->id);
   assertf(m->p == NULL, "M%u in use with other P%u", m->id, m->p->id);
   assert(p->status == P_IDLE);
@@ -687,7 +692,7 @@ static void p_acquire_m(P* p, M* m) {
 
 // p_release_m disassociates P from its current M
 static void p_release_m(P* p) {
-  trace("");
+  trace2("");
   assertf(p->status == P_RUNNING, "%u", p->status);
   M* m = assertnotnull(p->m);
   m->p = NULL;
@@ -758,14 +763,14 @@ static void p_update_timerp_mask(P* p) {
 static P* nullable s_pidle_get(rsched_t* s) {
   P* p = s->pidle;
   if (!p) {
-    trace("P- (no idle P)");
+    trace2("P- (no idle P)");
     return NULL;
   }
   pbits_set(&s->timerp_mask, p->id);
   pbits_clear(&s->pidle_mask, p->id);
   s->pidle = p->nextp; // dequeue
   AtomicSub(&s->npidle, 1, memory_order_release);
-  trace("P%u", p->id);
+  trace2("P%u", p->id);
   return p;
 }
 
@@ -773,13 +778,13 @@ static P* nullable s_pidle_get(rsched_t* s) {
 // s.lock must be held.
 static M* nullable s_midle_get(rsched_t* s) {
   M* m = s->midle;
-  if (m) {
-    s->midle = m->nextm;
-    AtomicSub(&s->nmidle, 1, memory_order_relaxed);
-    trace("M%u", m->id);
-  } else {
-    trace("M- (no idle M)");
+  if (!m) {
+    trace2("M- (no idle M)");
+    return NULL;
   }
+  s->midle = m->nextm;
+  AtomicSub(&s->nmidle, 1, memory_order_relaxed);
+  trace2("M%u", m->id);
   return m;
 }
 
@@ -787,7 +792,7 @@ static M* nullable s_midle_get(rsched_t* s) {
 // pidle_put puts P on s.pidle list.
 // p.s.lock must be held.
 static void pidle_put(P* p) {
-  trace("P%u", p->id);
+  trace2("P%u", p->id);
   assert(p_runq_isempty(p) /* trying to put P to sleep with runnable Ts */);
   p_update_timerp_mask(p);
   pbits_set(&p->s->pidle_mask, p->id);
@@ -801,7 +806,7 @@ static void pidle_put(P* p) {
 // midle_put puts M on s.midle list.
 // m.s.lock must be held.
 static void midle_put(M* m) {
-  trace("M%u", m->id);
+  trace2("M%u", m->id);
   assertnull(m->p);
   // TODO: atomic ops on s.midle?
   m->nextm = m->s->midle;
@@ -895,7 +900,7 @@ static rerr_t m_schedule(M* m);
 
 
 static void m_droptask(M* m) {
-  trace("");
+  trace2("");
   T* t = assertnotnull(m->currt);
   assert(t->m == m);
   t->m = NULL;
@@ -904,7 +909,7 @@ static void m_droptask(M* m) {
 
 
 static void m_park(M* m) {
-  trace("");
+  trace2("");
   assertnotnull(m);
   mnote_sleep(&m->park, m);
   mnote_clear(&m->park);
@@ -914,7 +919,7 @@ static void m_park(M* m) {
 // Stops execution of the current m until new work is available.
 // Returns with acquired P. [TODO]
 static void m_stop(M* m) {
-  trace("M%u", m->id);
+  trace2("M%u", m->id);
   assertf(m->p == NULL, "M%u still associated with P%u", m->id, m->p->id);
 
   RHMutexLock(&m->s->lock);
@@ -957,7 +962,7 @@ static rerr_t m_exit(M* m) {
   if (m == &m->s->m0)
     return m_exit_main(m);
 
-  trace("");
+  trace("TODO");
   // TODO
 
   return 0;
@@ -1040,7 +1045,7 @@ static rerr_t p_newm(P* p, bool start_spinning) {
   m->nextp = p;
   m->spinning = start_spinning;
 
-  trace("M%u", m->id);
+  trace2("M%u", m->id);
 
   RWMutexRLock(&p->s->exec_lock);
   m_spawn_osthread(m, m_start);
@@ -1052,12 +1057,12 @@ static rerr_t p_newm(P* p, bool start_spinning) {
 // s_startm schedules some M to run P, creating an M if necessary.
 // If p==NULL, tries to get an idle P, if no idle P's does nothing.
 static void s_startm(rsched_t* s, P* nullable p, bool spinning) {
-  trace("");
+  trace2("");
 
   RHMutexLock(&s->lock);
 
   if (!p && !(p = s_pidle_get(s))) {
-    trace("no idle P's");
+    trace2("no idle P's");
     RHMutexUnlock(&s->lock);
     if (spinning) {
       // caller incremented nmspinning, but there are no idle P's,
@@ -1165,7 +1170,7 @@ static stealresult_t m_steal_work(M* m, bool* inherit_time) {
   u32 steal_attempts = MIN(4, s->nprocs);
 
   for (u32 i = 0; i < steal_attempts; i++) {
-    trace("attempt %u of %u", i+1, steal_attempts);
+    trace3("attempt %u of %u", i+1, steal_attempts);
 
     bool is_final_attempt = i == steal_attempts-1;
 
@@ -1175,7 +1180,7 @@ static stealresult_t m_steal_work(M* m, bool* inherit_time) {
       P* p2 = s->allp[it.index];
       if (p2 == p)
         continue;
-      trace("victim P%u", p2->id);
+      trace3("victim P%u", p2->id);
 
       if (is_final_attempt && pbits_isset(&s->timerp_mask, it.index)) {
         // Steal timers from p2. This call to p_check_timers is the only place where
@@ -1193,16 +1198,18 @@ static stealresult_t m_steal_work(M* m, bool* inherit_time) {
       if (pbits_isset(&s->pidle_mask, it.index))
         continue;
 
-      // steal from p2's runq
+      // steal half of p2's runq
       T* t = p_runq_steal(p, p2, is_final_attempt);
       if (t) {
-        trace("T%llu (stolen from P%u)", t->id, p2->id);
+        trace2("T%llu (stolen from P%u)", t->id, p2->id);
         res.t = t;
         goto end;
       }
 
     }
   }
+
+  trace2("nothing found");
 
 end:
   return res;
@@ -1249,7 +1256,7 @@ static P* nullable s_find_runnable_p(rsched_t* s, u32 nprocs) {
 
 
 static void m_resetspinning(M* m) {
-  trace("M%u", m->id);
+  trace2("M%u", m->id);
   assert(m->spinning);
   m->spinning = false;
   UNUSED i32 nmspinning = AtomicSub(&m->s->nmspinning, 1, memory_order_release);
@@ -1281,21 +1288,21 @@ top:
   // TODO: now = p_check_timers(p, &poll_until)
 
   // try to dequeue a ready-to-run task from p.runq
-  trace("try p.runq");
+  trace3("try p.runq");
   t = p_runq_get(p, inherit_time);
   if (t) {
-    trace("found T%llu on p.runq", t->id);
+    trace3("found T%llu on p.runq", t->id);
     return t;
   }
 
   // global runq
-  trace("try s.runq");
+  trace3("try s.runq");
   if (AtomicLoad(&s->runq.len, memory_order_relaxed)) {
     RHMutexLock(&s->lock);
     t = s_runq_get(s, p, 0); // 0 means "move all to P"
     RHMutexUnlock(&s->lock);
     if (t) {
-      trace("found T%llu on s.runq", t->id);
+      trace3("found T%llu on s.runq", t->id);
       *inherit_time = false;
       return t;
     }
@@ -1328,7 +1335,7 @@ top:
   }
 
   // if we get here, there's probably no work
-  trace("out of work");
+  trace2("out of work");
 
   // Release P for other M's to use.
   RHMutexLock(&s->lock);
@@ -1339,7 +1346,7 @@ top:
     t = s_runq_get(s, p, 0); // 0 means "move all to P"
     assertnotnull(t); // lock held; runq.len not able to change
     RHMutexUnlock(&s->lock);
-    trace("found T%llu in s.runq", t->id);
+    trace3("found T%llu in s.runq", t->id);
     *inherit_time = false;
     return t;
   }
@@ -1370,7 +1377,7 @@ top:
       p_acquire_m(p, m);
       m->spinning = true;
       AtomicAdd(&s->nmspinning, 1, memory_order_release);
-      trace("found P%u with non-empty runq; retrying", p->id);
+      trace3("found P%u with non-empty runq; retrying", p->id);
       goto top;
     }
 
@@ -1437,7 +1444,7 @@ static rerr_t m_schedule(M* m) {
       RHMutexLock(&s->lock);
       t = s_runq_get(s, p, 1);
       RHMutexUnlock(&s->lock);
-      if (t) trace("random runq steal of T%llu", t->id);
+      if (t) trace2("random runq steal of T%llu", t->id);
     }
 
     // if M does not have an associated P, wait for a P to become available
@@ -1475,7 +1482,7 @@ static rerr_t m_schedule(M* m) {
     p->schedtick += (u32)inherit_time;
 
     // execute task
-    trace("eval (pc %lu)", t->pc);
+    trace3("eval (pc %lu)", t->pc);
     t->pc = rsched_eval(t, m->iregs, t->instrv, t->pc);
     // returns here when the task has been parked with task_park
   }
@@ -1556,37 +1563,15 @@ bool exit_syscall(T* t, int priority) {
 }
 
 
-// task_park is called by the execution engine when a task is to be suspended.
-// "reason" tells us why the task is being suspended.
-void task_park(T* t, tstatus_t reason) {
-  trace("%s", tstatus_str(reason));
+// task_exit is called by the execution engine when a task exits.
+void task_exit(T* t) {
+  trace("");
   assert(t->m->currt == t);
 
-  #if RSM_SAFE
-    tstatus_t status = t_status(t);
-    safecheckf(status == T_RUNNING, "status=%u", status);
-  #endif
+  trace("TODO");
 
-  switch (reason) {
+  t_setstatus(t, T_DEAD);
 
-  case T_DEAD:
-    // task exited
-    t_setstatus(t, T_DEAD);
-    t->parent = NULL;
-    break;
-
-  case T_SYSCALL:
-    // task will be waiting for a syscall
-    t_setstatus(t, T_SYSCALL);
-    break;
-
-  default: panic("unexpected task status %u", reason);
-  }
-
-  if (reason != T_DEAD)
-    return;
-
-  // task is dead
   M* m = t->m;
   P* p = m->p;
   m_droptask(m); // disassociate T from M
@@ -1596,8 +1581,18 @@ void task_park(T* t, tstatus_t reason) {
   RHMutexLock(&m->s->lock);
   midle_put(m);
   RHMutexUnlock(&m->s->lock);
+
 }
 
+
+// task_park takes a task out of running state (disassoc. M & P from T.)
+// Must be explicitly resumed with a call to task_unpark
+//
+// task_park is called by the execution engine when a task is to be suspended.
+// "reason" tells us why the task is being suspended.
+void task_park(T* t, tstatus_t reason) {
+  panic("TODO");
+}
 
 // static void task_unpark(T* t, tstatus_t reason) {
 //   trace("%s", tstatus_str(reason));
@@ -1644,7 +1639,7 @@ rerr_t rsched_init(rsched_t* s, rmachine_t* machine) {
   u32 nprocs = 2;
   assertf(nprocs > 0 && nprocs <= S_MAXPROCS, "%u", nprocs);
   s->nprocs = nprocs;
-  trace("s.nprocs=%u", nprocs);
+  trace3("s.nprocs=%u", nprocs);
   p_init(&s->p0, s, 0);
   s->allp[0] = &s->p0;
   s->npidle = nprocs - 1;
@@ -1801,7 +1796,7 @@ static rerr_t rsched_loadrom(
   static_assert(EPILOGUE_LEN*sizeof(rin_t) <= sizeof(rromimg_t),
     "epilogue larger than rom header");
   const rin_t epilogue[EPILOGUE_LEN] = {
-    RSM_MAKE_Au(rop_SCALL, 0), // syscall(SC_EXIT)
+    RSM_MAKE_Au(rop_SYSCALL, SC_TEXIT),
   };
   memcpy(basemem.p + codesize, epilogue, sizeof(epilogue));
 

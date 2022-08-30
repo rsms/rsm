@@ -110,6 +110,8 @@ enum PStatus {
     va_end(ap);
     funlockfile(fp);
   }
+#else
+  #define TRACE_SET_CURRENT_M(m)  ((void)0)
 #endif
 
 

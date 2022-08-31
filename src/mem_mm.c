@@ -65,7 +65,7 @@
 
 
 typedef struct rmm_ {
-  RHMutex lock;
+  mutex_t lock;
   uintptr start_addr; // host address range start (PAGE_SIZE aligned, read-only)
   uintptr end_addr;   // host address range end (exclusive, read-only)
   usize   free_size;  // number of free bytes (i.e. available to allocate)
@@ -95,21 +95,21 @@ usize rmm_cap(const rmm_t* mm) {
 }
 
 usize rmm_avail_total(rmm_t* mm) {
-  RHMutexLock(&mm->lock);
+  mutex_lock(&mm->lock);
   usize npages = mm->free_size / PAGE_SIZE;
-  RHMutexUnlock(&mm->lock);
+  mutex_unlock(&mm->lock);
   return npages;
 }
 
 usize rmm_avail_maxregion(rmm_t* mm) {
   usize npages = 0;
-  RHMutexLock(&mm->lock);
+  mutex_lock(&mm->lock);
   for (int order = 0; order <= MAX_ORDER; order++) {
     usize n = ilist_count(&mm->freelists[order]) * (1lu << order);
     if (n > npages)
       npages = n;
   }
-  RHMutexUnlock(&mm->lock);
+  mutex_unlock(&mm->lock);
   return npages;
 }
 
@@ -197,7 +197,7 @@ void* nullable rmm_allocpages(rmm_t* mm, usize npages) {
   for (usize n = npages; n && !(n & 1); n >>= 1)
     order++;
 
-  RHMutexLock(&mm->lock);
+  mutex_lock(&mm->lock);
 
   uintptr addr = rmm_allocpages1(mm, order);
   if UNLIKELY(addr == UINTPTR_MAX) {
@@ -207,7 +207,7 @@ void* nullable rmm_allocpages(rmm_t* mm, usize npages) {
     mm->free_size -= npages * PAGE_SIZE;
   }
 
-  RHMutexUnlock(&mm->lock);
+  mutex_unlock(&mm->lock);
   return (void*)addr;
 }
 
@@ -271,11 +271,11 @@ static int rmm_freepages1(rmm_t* mm, uintptr addr, int order) {
 void rmm_freepages(rmm_t* mm, void* ptr) {
   assert(IS_ALIGN2((uintptr)ptr, PAGE_SIZE));
   trace("rmm_freepages %p", ptr);
-  RHMutexLock(&mm->lock);
+  mutex_lock(&mm->lock);
   int order = rmm_freepages1(mm, (uintptr)ptr - mm->start_addr, 0);
   if (order >= 0)
     mm->free_size += (usize)PAGE_SIZE << order;
-  RHMutexUnlock(&mm->lock);
+  mutex_unlock(&mm->lock);
 }
 
 
@@ -298,6 +298,7 @@ rmm_t* nullable rmm_create(void* memp, usize memsize) {
   // start                            end
   //
   rmm_t* mm = (rmm_t*)ALIGN2_FLOOR(end - sizeof(rmm_t), _Alignof(rmm_t));
+  mutex_init(&mm->lock);
   mm->owns_host_vmmap = false;
   trace("mm at      %p … %p (%zu B)", mm, (void*)mm + sizeof(rmm_t), sizeof(rmm_t));
 
@@ -441,6 +442,7 @@ rmm_t* nullable rmm_create_host_vmmap(usize memsize) {
 void rmm_dispose(rmm_t* mm) {
   if (!mm->owns_host_vmmap)
     return;
+  mutex_dispose(&mm->lock);
   void* ptr = (void*)rmm_startaddr(mm);
   usize size = ALIGN2(mm->end_addr - mm->start_addr, os_pagesize());
   if (!osvmem_free(ptr, size))

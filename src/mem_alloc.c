@@ -160,7 +160,7 @@ typedef struct {
 } slabheap_t;
 
 typedef struct rmemalloc_ {
-  RHMutex lock;
+  mutex_t lock;
   ilist_t subheaps;
 
   rmm_t* nullable mm;
@@ -558,7 +558,7 @@ static bool rmem_add_subheap(rmemalloc_t* a, void* storage, usize size) {
   UNUSED static void rmem_debug_dump_state(
     rmemalloc_t* a, void* nullable highlight_p, usize highlight_size)
   {
-    RHMutexLock(&a->lock);
+    mutex_lock(&a->lock);
     usize i = 0;
     ilist_for_each(lent, &a->subheaps) {
       subheap_t* sh = ilist_entry(lent, subheap_t, list_entry);
@@ -573,7 +573,7 @@ static bool rmem_add_subheap(rmemalloc_t* a, void* storage, usize size) {
         h->chunk_len);
       heap_debug_dump_state(h, highlight_p, highlight_size);
     }
-    RHMutexUnlock(&a->lock);
+    mutex_unlock(&a->lock);
   }
 #endif
 
@@ -855,7 +855,7 @@ rmem_t rmem_alloc_aligned(rmemalloc_t* a, usize size, usize alignment) {
 
   void* ptr = NULL;
 
-  RHMutexLock(&a->lock);
+  mutex_lock(&a->lock);
 
   // Attempt to allocate space in a slabheap.
   // This succeeds for the common case of a small allocation size.
@@ -887,7 +887,7 @@ rmem_t rmem_alloc_aligned(rmemalloc_t* a, usize size, usize alignment) {
 
 end:
   if (ptr) RMEM_PEDANTIC_SAFECHECK_ALLOCATED(a, ptr, size);
-  RHMutexUnlock(&a->lock);
+  mutex_unlock(&a->lock);
   trace("rmem_alloc_aligned => " RMEM_FMT, RMEM_FMT_ARGS(RMEM(ptr, size)));
   return (rmem_t){ .p=ptr, .size=size };
 }
@@ -929,7 +929,7 @@ static bool free_to_subheaps(rmemalloc_t* a, void* ptr, usize size) {
 void rmem_free(rmemalloc_t* a, rmem_t region) {
   SAFECHECK_VALID_REGION(region);
 
-  RHMutexLock(&a->lock);
+  mutex_lock(&a->lock);
 
   #ifdef RMEM_SLABHEAP_ENABLE
     for (usize i = 0; i < SLABHEAP_COUNT; i++) {
@@ -945,7 +945,7 @@ void rmem_free(rmemalloc_t* a, rmem_t region) {
 
 end:
   RMEM_PEDANTIC_SAFECHECK_FREE(a, region.p, region.size);
-  RHMutexUnlock(&a->lock);
+  mutex_unlock(&a->lock);
   trace("freed region " RMEM_FMT, RMEM_FMT_ARGS(region));
 }
 
@@ -1103,7 +1103,7 @@ static rmemalloc_t* nullable rmem_allocator_init(
   assertf(IS_ALIGN2((uintptr)heap0p, HEAP_ALIGN), "heap0p %p misaligned", heap0p);
   assertf(mm_origin == NULL || mm != NULL, "mm_origin without a mm");
 
-  if (RHMutexInit(&a->lock))
+  if (mutex_init(&a->lock))
     return NULL;
 
   ilist_init(&a->subheaps);
@@ -1248,13 +1248,14 @@ rmemalloc_t* nullable rmem_allocator_create_buf(
 void rmem_allocator_free(rmemalloc_t* a) {
   // TODO: free slabheaps
   // TODO: free additional subheaps
+  mutex_dispose(&a->lock);
   if (a->mm_origin)
     rmm_freepages(assertnotnull(a->mm), a->mm_origin);
 }
 
 
 usize rmem_avail(rmemalloc_t* a) {
-  RHMutexLock(&a->lock);
+  mutex_lock(&a->lock);
   usize nbyte = 0;
 
   #ifdef RMEM_SLABHEAP_ENABLE
@@ -1268,13 +1269,13 @@ usize rmem_avail(rmemalloc_t* a) {
     nbyte += subheap_avail(sh);
   }
 
-  RHMutexUnlock(&a->lock);
+  mutex_unlock(&a->lock);
   return nbyte;
 }
 
 
 usize rmem_cap(rmemalloc_t* a) {
-  RHMutexLock(&a->lock);
+  mutex_lock(&a->lock);
 
   usize nbyte = 0;
 
@@ -1284,7 +1285,7 @@ usize rmem_cap(rmemalloc_t* a) {
     nbyte += subheap_cap(sh);
   }
 
-  RHMutexUnlock(&a->lock);
+  mutex_unlock(&a->lock);
   return nbyte;
 }
 

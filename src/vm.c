@@ -99,7 +99,7 @@ static void vm_ptab_free(rmm_t* mm, vm_ptab_t ptab) {
 
 
 rerr_t vm_pagedir_init(vm_pagedir_t* pagedir, rmm_t* mm) {
-  rerr_t err = RHMutexInit(&pagedir->lock);
+  rerr_t err = mutex_init(&pagedir->lock);
   if UNLIKELY(err)
     return err;
   vm_ptab_t ptab = vm_ptab_create(mm); // root page table
@@ -115,6 +115,7 @@ rerr_t vm_pagedir_init(vm_pagedir_t* pagedir, rmm_t* mm) {
 
 
 void vm_pagedir_dispose(vm_pagedir_t* pagedir) {
+  mutex_dispose(&pagedir->lock);
   vm_ptab_free(pagedir->mm, pagedir->root);
   dlog("TODO: free all PTEs");
 }
@@ -164,7 +165,7 @@ static vm_pte_t* nullable vm_pagedir_access(
   u8 level = 1;
 
   vm_pte_t* pte = NULL;
-  RHMutexLock(&pagedir->lock);
+  mutex_lock(&pagedir->lock);
 
   for (;;) {
     u64 index = getbits(masked_vfn, VFN_BITS - (1+bits), VM_PTAB_BITS);
@@ -198,7 +199,7 @@ static vm_pte_t* nullable vm_pagedir_access(
     ptab = (vm_ptab_t)(uintptr)(pte->outaddr << PAGE_SIZE_BITS);
   }
 
-  RHMutexUnlock(&pagedir->lock);
+  mutex_unlock(&pagedir->lock);
   return pte;
 }
 
@@ -257,7 +258,7 @@ rerr_t vm_map(
   u64 vfn_end = vfn + npages;
 
   vm_pte_t* pte = NULL;
-  RHMutexLock(&pagedir->lock);
+  mutex_lock(&pagedir->lock);
 
   while (vfn < vfn_end) {
     u32 bits = 0;
@@ -320,7 +321,7 @@ end:
   if (err && vfn > VM_VFN(vaddr)) {
     dlog("TODO unmap what was partially mapped");
   }
-  RHMutexUnlock(&pagedir->lock);
+  mutex_unlock(&pagedir->lock);
   return err;
 }
 

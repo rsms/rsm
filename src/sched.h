@@ -133,7 +133,7 @@ struct P {
   // timers_lock is the lock for timers.
   // We normally access the timers while running on this P,
   // but the scheduler can also do it from a different P.
-  RHMutex timers_lock;
+  mutex_t timers_lock;
   // timer0_when is the "when" field of the first entry on the timer heap.
   // This is updated using atomic functions. 0 if the timer heap is empty.
   _Atomic(u64) timer0_when;
@@ -148,7 +148,7 @@ struct P {
 struct rsched_ {
   rmachine_t*  machine;      // host machine
   _Atomic(u64) tidgen;       // T.id generator
-  RHMutex      lock;         // protects access to idlem, idlep, allp, runq
+  mutex_t      lock;         // protects access to idlem, idlep, allp, runq
   vm_pagedir_t vm_pagedir;   // virtual memory page directory
   bool         main_started; // true when main task has started
 
@@ -186,16 +186,16 @@ struct rsched_ {
 
   // exec_lock serializes exec and clone to avoid bugs or unspecified behaviour
   // around exec'ing while creating/disposing threads.
-  RWMutex exec_lock;
+  rwmutex_t exec_lock;
 
   // allocm_lock is locked for read when creating new Ms in allocm and their
   // addition to allm. Thus acquiring this lock for write blocks the
   // creation of new Ms.
-  RWMutex allocm_lock;
+  rwmutex_t allocm_lock;
 
   // allt holds all T's (any status, including T_DEAD)
   struct {
-    RWMutex      lock;
+    rwmutex_t    lock;
     _Atomic(T**) ptr;
     _Atomic(u32) len;
     u32          cap;

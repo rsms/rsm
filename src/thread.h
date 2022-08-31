@@ -5,7 +5,6 @@
 // select thread API
 #if defined(__STDC_NO_THREADS__) && __STDC_NO_THREADS__
   #if defined(RSM_NO_LIBC)
-    #define RSM_THREAD_NONE
     #warning TODO
   #else
     #define RSM_THREAD_PTHREAD
@@ -70,6 +69,8 @@
   #define AtomicCASWeakRelAcq(p, oldval, newval) \
     AtomicCASWeak((p), (oldval), (newval), memory_order_release, memory_order_acquire)
 
+  // T AtomicExchange(volatile T* p, T desired, memory_order)
+  // Returns the previous value
   #define AtomicExchange(p, desired_next_value, order) \
     atomic_exchange_explicit((p), (desired_next_value), (order))
 
@@ -78,48 +79,80 @@
 #endif
 
 
-// YIELD_THREAD() yields for other threads to be scheduled on the current CPU by the OS
-#if (defined(WIN32) || defined(_WIN32))
-  #include <windows.h>
-  #define YIELD_THREAD() ((void)0)
-#elif defined(RSM_NO_LIBC)
-  #define YIELD_THREAD() ((void)0)
-#else
-  #include <sched.h>
-  #define YIELD_THREAD() sched_yield() // equivalent to thrd_yield
-#endif
-
-
-// YIELD_CPU() yields for other work on a CPU core
+// cpu_yield() yields for other work on a CPU core
 #if defined(__i386) || defined(__i386__) || defined(__x86_64__)
-  #define YIELD_CPU() __asm__ __volatile__("pause")
+  #define cpu_yield() __asm__ __volatile__("pause")
 #elif defined(__arm__) || defined(__arm64__) || defined(__aarch64__)
-  #define YIELD_CPU() __asm__ __volatile__("yield")
+  #define cpu_yield() __asm__ __volatile__("yield")
 #elif defined(mips) || defined(__mips__) || defined(MIPS) || defined(_MIPS_) || defined(__mips64)
   #if defined(_ABI64) && (_MIPS_SIM == _ABI64)
-    #define YIELD_CPU() __asm__ __volatile__("pause")
+    #define cpu_yield() __asm__ __volatile__("pause")
   #else
     // comment from WebKit source:
     //   The MIPS32 docs state that the PAUSE instruction is a no-op on older
     //   architectures (first added in MIPS32r2). To avoid assembler errors when
     //   targeting pre-r2, we must encode the instruction manually.
-    #define YIELD_CPU() __asm__ __volatile__(".word 0x00000140")
+    #define cpu_yield() __asm__ __volatile__(".word 0x00000140")
   #endif
 #elif (defined(WIN32) || defined(_WIN32))
   #include <immintrin.h>
-  #define YIELD_CPU() _mm_pause()
+  #define cpu_yield() _mm_pause()
 #elif defined(RSM_NO_LIBC)
-  #define YIELD_CPU() ((void)0)
+  #define cpu_yield() ((void)0)
 #else
   // GCC & clang intrinsic
-  #define YIELD_CPU() __builtin_ia32_pause()
+  #define cpu_yield() __builtin_ia32_pause()
+#endif
+
+
+// thread_yield() yields for other threads to be scheduled on the current CPU by the OS
+#if (defined(WIN32) || defined(_WIN32))
+  #define thread_yield() cpu_yield()
+#elif defined(RSM_NO_LIBC)
+  #define thread_yield() ((void)0)
+#else
+  #include <sched.h>
+  #define thread_yield() sched_yield() // equivalent to thrd_yield
 #endif
 
 
 RSM_ASSUME_NONNULL_BEGIN
 
 
-// sema_t is a thin layer over the OS's semaphore implementation
+// mutex_t is a regular mutex
+typedef struct {
+  #ifdef RSM_THREAD_PTHREAD
+    pthread_mutex_t m;
+  #elif defined(RSM_THREAD_C11)
+    mtx_t m;
+  #endif
+  _Atomic(u32) w; // writer count
+  _Atomic(u32) r; // reader count (only used by rwmutex, here for compactness)
+} mutex_t;
+rerr_t mutex_init(mutex_t*);
+void mutex_dispose(mutex_t*);
+static void mutex_lock(mutex_t*);
+static bool mutex_trylock(mutex_t*);
+static void mutex_unlock(mutex_t*);
+static bool mutex_islocked(mutex_t*);
+
+
+// rwmutex_t supports multiple concurrent readers when there are no writers.
+// There can be many concurrent readers but only one writer.
+// While no write lock is held, up to 16777214 read locks may be held.
+// While a write lock is held no read locks or other write locks can be held.
+typedef struct { mutex_t m; } rwmutex_t;
+rerr_t rwmutex_init(rwmutex_t*);
+void rwmutex_dispose(rwmutex_t*);
+void rwmutex_rlock(rwmutex_t*);     // acquire read-only lock (blocks until acquired)
+bool rwmutex_tryrlock(rwmutex_t*);  // attempt to acquire read-only lock (non-blocking)
+void rwmutex_runlock(rwmutex_t*);   // release read-only lock
+void rwmutex_lock(rwmutex_t*);      // acquire excludive lock (blocks until acquired)
+bool rwmutex_trylock(rwmutex_t*);   // attempt to acquire excludive lock (non-blocking)
+void rwmutex_unlock(rwmutex_t*);    // release excludive lock
+
+
+// sema_t is a (thin layer over the OS's) semaphore implementation
 #ifdef RSM_SEMAPHORE_POSIX
   typedef sem_t sema_t;
 #else
@@ -135,120 +168,34 @@ void sema_signal(sema_t*, u32 count); // count must be >0
 bool sema_wait(sema_t*, i64 timeout_nsec);
 
 
-// RHMutex is a regular mutex optimized for unlikely contention.
-// In the uncontended case, as fast as spin locks (just a few instructions),
-// but on the contention path it sleep in the kernel.
-typedef struct RHMutex {
-  sema_t        sema;
-  _Atomic(i32)  nwait;
-  _Atomic(bool) flag;
-} RHMutex;
-static rerr_t RHMutexInit(RHMutex* m);
-static void RHMutexDispose(RHMutex* m);
-static void RHMutexLock(RHMutex* m);
-static void RHMutexUnlock(RHMutex* m);
-static bool RHMutexIsLocked(RHMutex* m);
-
-
-// mutex_t is a regular mutex
-#ifdef RSM_THREAD_PTHREAD
-  typedef pthread_mutex_t mutex_t;
-#elif defined(RSM_THREAD_C11)
-  typedef mtx_t mutex_t;
-#endif
-typedef enum { MUTEX_PLAIN, MUTEX_RECURSIVE } mutexflag_t;
-rerr_t mutex_init(mutex_t*, mutexflag_t);
-void mutex_dispose(mutex_t*);
-static void mutex_lock(mutex_t*);
-static bool mutex_trylock(mutex_t*);
-static void mutex_unlock(mutex_t*);
-
-
-// RWMutex is a read-write mutex.
-// There can be many concurrent readers but only one writer.
-// While no write lock is held, up to 16777214 read locks may be held.
-// While a write lock is held no read locks or other write locks can be held.
-typedef struct RWMutex {
-  mutex_t      w; // writer lock
-  _Atomic(u32) r; // reader count
-} RWMutex;
-static rerr_t RWMutexInit(RWMutex* m, mutexflag_t);
-static void RWMutexDispose(RWMutex* m);
-void RWMutexRLock(RWMutex* m);     // acquire read-only lock (blocks until acquired)
-bool RWMutexTryRLock(RWMutex* m);  // attempt to acquire read-only lock (non-blocking)
-void RWMutexRUnlock(RWMutex* m);   // release read-only lock
-void RWMutexLock(RWMutex* m);      // acquire read+write lock (blocks until acquired)
-bool RWMutexTryLock(RWMutex* m);   // attempt to acquire read+write lock (non-blocking)
-void RWMutexUnlock(RWMutex* m);    // release read+write lock
-
-
 //———————————————————————————————————————————————————————————————————————————————————————
-// inline impl, mutex_t
+// inline impl
+
 #ifdef RSM_THREAD_C11
-  inline static void mutex_lock(mutex_t* mu) {
-    safecheckxf(mtx_lock(mu) == 0, "mutex_lock");
-  }
-  inline static void mutex_unlock(mutex_t* mu) {
-    safecheckxf(mtx_unlock(mu) == 0, "mutex_unlock");
-  }
-  inline static bool mutex_trylock(mutex_t* mu) {
-    return mtx_trylock(mu) == 0;
-  }
+  #define _mutex_lock(mu)    (mtx_lock(&(mu)->m) == 0)
+  #define _mutex_unlock(mu)  (mtx_unlock(&(mu)->m) == 0)
 #elif defined(RSM_THREAD_PTHREAD)
-  inline static void mutex_lock(mutex_t* mu) {
-    safecheckxf(pthread_mutex_lock(mu) == 0, "mutex_lock");
-  }
-  inline static void mutex_unlock(mutex_t* mu) {
-    safecheckxf(pthread_mutex_unlock(mu) == 0, "mutex_unlock");
-  }
-  inline static bool mutex_trylock(mutex_t* mu) {
-    return pthread_mutex_trylock(mu) == 0;
-  }
-#else
-  #error TODO
+  #define _mutex_lock(mu)    (pthread_mutex_lock(&(mu)->m) == 0)
+  #define _mutex_unlock(mu)  (pthread_mutex_unlock(&(mu)->m) == 0)
 #endif
 
-
-//———————————————————————————————————————————————————————————————————————————————————————
-// inline impl, RWMutex
-
-static inline rerr_t RWMutexInit(RWMutex* m, mutexflag_t flags) {
-  //assertf((flags & MUTEX_TIMED) == 0, "MUTEX_TIMED not supported");
-  m->r = 0;
-  return mutex_init(&m->w, flags);
-}
-static inline void RWMutexDispose(RWMutex* m) { mutex_dispose(&m->w); }
-
-//———————————————————————————————————————————————————————————————————————————————————————
-// inline impl, RHMutex
-
-inline static rerr_t RHMutexInit(RHMutex* m) {
-  m->flag = false;
-  m->nwait = 0;
-  return sema_init(&m->sema, 0);
+inline static void mutex_lock(mutex_t* mu) {
+  if UNLIKELY(AtomicAdd(&mu->w, 1, memory_order_seq_cst))
+    safecheckxf(_mutex_lock(mu), "mutex_lock");
 }
 
-inline static void RHMutexDispose(RHMutex* m) {
-  sema_dispose(&m->sema);
+inline static void mutex_unlock(mutex_t* mu) {
+  if UNLIKELY(AtomicSub(&mu->w, 1, memory_order_seq_cst) > 1)
+    safecheckxf(_mutex_unlock(mu), "mutex_unlock");
 }
 
-void _RHMutexLock(RHMutex* m);
-
-inline static void RHMutexLock(RHMutex* m) {
-  if UNLIKELY(AtomicExchange(&m->flag, true, memory_order_acquire))
-    _RHMutexLock(m); // already locked -- slow path
+inline static bool mutex_trylock(mutex_t* mu) {
+  u32 w = 0;
+  return AtomicCAS(&mu->w, &w, 1, memory_order_seq_cst, memory_order_relaxed);
 }
 
-inline static bool RHMutexIsLocked(RHMutex* m) {
-  return AtomicLoad(&m->flag, memory_order_acquire);
-}
-
-inline static void RHMutexUnlock(RHMutex* m) {
-  AtomicExchange(&m->flag, false, memory_order_seq_cst);
-  if UNLIKELY(AtomicLoad(&m->nwait, memory_order_seq_cst) != 0) {
-    // at least one thread waiting on a semaphore signal -- wake one thread
-    sema_signal(&m->sema, 1); // TODO: should we check the return value?
-  }
+inline static bool mutex_islocked(mutex_t* mu) {
+  return AtomicLoadAcq(&mu->w) > 0;
 }
 
 //———————————————————————————————————————————————————————————————————————————————————————

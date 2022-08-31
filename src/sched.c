@@ -62,7 +62,7 @@ static_assert(IS_ALIGN2(HEAP_INITSIZE, PAGE_SIZE), "");
 #define EPILOGUE_LEN 1
 
 // void s_assert_locked(rsched_t*)
-#define s_assert_locked(s)  assertf(RHMutexIsLocked(&(s)->lock), "s locked")
+#define s_assert_locked(s)  assertf(mutex_islocked(&(s)->lock), "s locked")
 
 
 enum PStatus {
@@ -274,7 +274,7 @@ static void t_casstatus(T* t, tstatus_t oldval, tstatus_t newval) {
     // }
     //
     // temporary solution until the above has been researched & implemented
-    YIELD_THREAD();
+    thread_yield();
   }
 }
 
@@ -386,7 +386,7 @@ static u32 p_runq_grab(P* p, T* dst_runq[P_RUNQSIZE], u32 dst_head, bool steal_r
           // The important use case here is when the T running on p readies another T
           // and then almost immediately blocks.
           if (p->status == P_RUNNING)
-            YIELD_THREAD();
+            thread_yield();
           if (!AtomicCASRel(&p->runnext, &next, NULL))
             continue;
           dst_runq[dst_head % P_RUNQSIZE] = next;
@@ -431,13 +431,13 @@ static T* nullable p_runq_steal(P* p, P* src_p, bool steal_runnext) {
 static rerr_t s_allt_add(rsched_t* s, T* t) {
   assert_not_tstatus(t, T_IDLE);
 
-  RWMutexLock(&s->allt.lock);
+  rwmutex_lock(&s->allt.lock);
 
   if (s->allt.len == s->allt.cap) {
     rmem_t mem = { s->allt.ptr, (usize)s->allt.cap * sizeof(void*) };
     bool ok = rmem_resize(s->machine->malloc, &mem, (s->allt.cap + 64) * sizeof(void*));
     if UNLIKELY(!ok) {
-      RWMutexUnlock(&s->allt.lock);
+      rwmutex_unlock(&s->allt.lock);
       return rerr_nomem;
     }
     s->allt.cap = mem.size / sizeof(void*);
@@ -448,7 +448,7 @@ static rerr_t s_allt_add(rsched_t* s, T* t) {
   s->allt.ptr[s->allt.len++] = t;
   AtomicStore(&s->allt.len, s->allt.len, memory_order_release);
 
-  RWMutexUnlock(&s->allt.lock);
+  rwmutex_unlock(&s->allt.lock);
   return 0;
 }
 
@@ -699,12 +699,12 @@ static void p_init(P* p, rsched_t* s, u32 id) {
   p->id = id;
   p->status = P_IDLE;
   p->s = s;
-  safecheckx(RHMutexInit(&p->timers_lock) == 0);
+  safecheckx(mutex_init(&p->timers_lock) == 0);
 }
 
 
 // static void p_dispose(P* p) {
-//   RHMutexDispose(&p->timers_lock);
+//   mutex_dispose(&p->timers_lock);
 // }
 
 
@@ -780,10 +780,10 @@ static void p_update_timerp_mask(P* p) {
     return;
   // Looks like there are no timers, however another P may transiently
   // decrement ntimers when handling a timer_modified timer in p_check_timers.
-  RHMutexLock(&p->timers_lock);
+  mutex_lock(&p->timers_lock);
   if (AtomicLoadAcq(&p->ntimers) == 0)
     pbits_clear(&p->s->timerp_mask, p->id);
-  RHMutexUnlock(&p->timers_lock);
+  mutex_unlock(&p->timers_lock);
 }
 
 
@@ -1010,9 +1010,9 @@ static void m_stop(M* m) {
   trace2("M%u", m->id);
   assertf(m->p == NULL, "M%u still associated with P%u", m->id, m->p->id);
 
-  RHMutexLock(&m->s->lock);
+  mutex_lock(&m->s->lock);
   idlem_put(m);
-  RHMutexUnlock(&m->s->lock);
+  mutex_unlock(&m->s->lock);
 
   m_park(m);
 
@@ -1036,10 +1036,10 @@ static rerr_t m_exit_main(M* m) {
     handoff_p(p);
   }
 
-  RHMutexLock(&m->s->lock);
+  mutex_lock(&m->s->lock);
   m->s->nmfreed++;
   s_check_deadlock(m->s);
-  RHMutexUnlock(&m->s->lock);
+  mutex_unlock(&m->s->lock);
 
   return 0;
 }
@@ -1097,7 +1097,7 @@ static rerr_t m_init(M* m, rsched_t* s, u64 id) {
 // Can use P for allocation context if needed.
 static M* nullable p_allocm(P* p) {
   rsched_t* s = p->s;
-  RWMutexRLock(&s->allocm_lock);
+  rwmutex_rlock(&s->allocm_lock);
 
   if (s->freem)
     trace("TODO: release freem list");
@@ -1115,7 +1115,7 @@ static M* nullable p_allocm(P* p) {
     }
   }
 
-  RWMutexRUnlock(&s->allocm_lock);
+  rwmutex_runlock(&s->allocm_lock);
   return m;
 }
 
@@ -1135,9 +1135,9 @@ static rerr_t p_newm(P* p, bool start_spinning) {
 
   trace2("M%u", m->id);
 
-  RWMutexRLock(&p->s->exec_lock);
+  rwmutex_rlock(&p->s->exec_lock);
   m_spawn_osthread(m, m_start);
-  RWMutexRUnlock(&p->s->exec_lock);
+  rwmutex_runlock(&p->s->exec_lock);
   return 0;
 }
 
@@ -1147,11 +1147,11 @@ static rerr_t p_newm(P* p, bool start_spinning) {
 static void s_startm(rsched_t* s, P* nullable p, bool spinning) {
   trace2("");
 
-  RHMutexLock(&s->lock);
+  mutex_lock(&s->lock);
 
   if (!p && !(p = s_idlep_get(s))) {
     trace2("no idle P's");
-    RHMutexUnlock(&s->lock);
+    mutex_unlock(&s->lock);
     if (spinning) {
       // caller incremented nmspinning, but there are no idle P's,
       // so it's okay to just undo the increment and give up.
@@ -1163,7 +1163,7 @@ static void s_startm(rsched_t* s, P* nullable p, bool spinning) {
   // try to acquire an idle M
   M* m = s_idlem_get(s);
 
-  RHMutexUnlock(&s->lock);
+  mutex_unlock(&s->lock);
 
   if (!m) {
     // No M is available, we must release s.lock and call p_newm.
@@ -1334,9 +1334,9 @@ static P* nullable s_find_runnable_p(rsched_t* s, u32 nprocs) {
     P* p = s->allp[id];
     if (pbits_isset(&s->idlep_mask, id) || p_runq_isempty(p))
       continue;
-    RHMutexLock(&s->lock);
+    mutex_lock(&s->lock);
     p = s_idlep_get(s);
-    RHMutexUnlock(&s->lock);
+    mutex_unlock(&s->lock);
     return p; // ok to return NULL (don't bother checking other P's)
   }
   return NULL;
@@ -1386,9 +1386,9 @@ top:
   // global runq
   trace3("try s.runq");
   if (AtomicLoad(&s->runq.len, memory_order_relaxed)) {
-    RHMutexLock(&s->lock);
+    mutex_lock(&s->lock);
     t = s_runq_get(s, p, 0); // 0 means "move all to P"
-    RHMutexUnlock(&s->lock);
+    mutex_unlock(&s->lock);
     if (t) {
       trace3("found T%llu on s.runq", t->id);
       *inherit_time = false;
@@ -1426,21 +1426,21 @@ top:
   trace2("out of work");
 
   // Release P for other M's to use.
-  RHMutexLock(&s->lock);
+  mutex_lock(&s->lock);
   // Before we drop our P, make a snapshot of nprocs
   u32 nprocs = s->nprocs;
   // We might just find a task on the global s.runq, but probably not.
   if (AtomicLoad(&s->runq.len, memory_order_relaxed) > 0) {
     t = s_runq_get(s, p, 0); // 0 means "move all to P"
     assertnotnull(t); // lock held; runq.len not able to change
-    RHMutexUnlock(&s->lock);
+    mutex_unlock(&s->lock);
     trace3("found T%llu in s.runq", t->id);
     *inherit_time = false;
     return t;
   }
   p_release_m(p); // disassociate P from M
   idlep_put(p);
-  RHMutexUnlock(&s->lock);
+  mutex_unlock(&s->lock);
 
   // Delicate dance: thread transitions from spinning to non-spinning state,
   // potentially concurrently with submission of new tasks.
@@ -1489,14 +1489,14 @@ top:
 
   // check if there are any live tasks
   bool has_live_tasks = false;
-  RWMutexRLock(&s->allt.lock);
+  rwmutex_rlock(&s->allt.lock);
   for (u32 i = 0, len = AtomicLoad(&s->allt.len, memory_order_relaxed); i < len; i++) {
     if (s->allt.ptr[i]->status != T_DEAD) {
       has_live_tasks = true;
       break;
     }
   }
-  RWMutexRUnlock(&s->allt.lock);
+  rwmutex_runlock(&s->allt.lock);
 
   // look again if there are live tasks
   if (has_live_tasks) {
@@ -1529,17 +1529,17 @@ static rerr_t m_schedule(M* m) {
     if (p && p->schedtick % 61 == 0 &&
         AtomicLoad(&s->runq.len, memory_order_relaxed) > 0)
     {
-      RHMutexLock(&s->lock);
+      mutex_lock(&s->lock);
       t = s_runq_get(s, p, 1);
-      RHMutexUnlock(&s->lock);
+      mutex_unlock(&s->lock);
       if (t) trace2("random runq steal of T%llu", t->id);
     }
 
     // if M does not have an associated P, wait for a P to become available
     if (!p) {
-      RHMutexLock(&s->lock);
+      mutex_lock(&s->lock);
       p = s_idlep_get(s);
-      RHMutexUnlock(&s->lock);
+      mutex_unlock(&s->lock);
       if (!p)
         panic("TODO wait for a P to become available");
       p_acquire_m(p, m);
@@ -1615,9 +1615,9 @@ bool exit_syscall(T* t, int priority) {
     trace("re-acquired oldp P%u", p->id);
   } else {
     // try to get an idle P
-    RHMutexLock(&m->s->lock);
+    mutex_lock(&m->s->lock);
     p = s_idlep_get(m->s);
-    RHMutexUnlock(&m->s->lock);
+    mutex_unlock(&m->s->lock);
     if (p)
       trace("acquired idle P%u", p->id);
   }
@@ -1636,14 +1636,14 @@ bool exit_syscall(T* t, int priority) {
   t_casstatus(t, T_SYSCALL, T_RUNNABLE);
 
   // put task on global run queue
-  RHMutexLock(&m->s->lock);
+  mutex_lock(&m->s->lock);
   if (priority > 0) {
     s_runq_prepend(m->s, t);
   } else {
     // m_droptask(m); // release M to allow other waiting tasks to run
     s_runq_append(m->s, t);
   }
-  RHMutexUnlock(&m->s->lock);
+  mutex_unlock(&m->s->lock);
 
   // suspend M and return false to make caller stop execution
   m_stop(m);
@@ -1664,10 +1664,10 @@ void task_exit(T* t) {
   m_droptask(m);  // disassociate T from M
   p_release_m(p); // disassociate P from M
 
-  RHMutexLock(&m->s->lock);
+  mutex_lock(&m->s->lock);
   idlep_put(p); // put P on idlep list
   idlem_put(m); // put M on idlem list
-  RHMutexUnlock(&m->s->lock);
+  mutex_unlock(&m->s->lock);
 
   // put T on P's freet list
   p_freet_add(p, t);
@@ -1700,11 +1700,11 @@ rerr_t rsched_init(rsched_t* s, rmachine_t* machine) {
 
   s->machine = machine;
 
-  if ((err = RHMutexInit(&s->lock))) return err;
-  if ((err = RWMutexInit(&s->exec_lock, 0))) return err;
-  if ((err = RWMutexInit(&s->allocm_lock, 0))) return err;
-  if ((err = RWMutexInit(&s->allt.lock, 0))) return err;
-  if ((err = mutex_init(&s->freet_lock, 0))) return err;
+  if ((err = mutex_init(&s->lock))) return err;
+  if ((err = rwmutex_init(&s->exec_lock))) return err;
+  if ((err = rwmutex_init(&s->allocm_lock))) return err;
+  if ((err = rwmutex_init(&s->allt.lock))) return err;
+  if ((err = mutex_init(&s->freet_lock))) return err;
 
   // virtual memory page directory
   if ((err = vm_pagedir_init(&s->vm_pagedir, machine->mm)))
@@ -1759,10 +1759,10 @@ error:
 
 
 void rsched_dispose(rsched_t* s) {
-  RHMutexDispose(&s->lock);
-  RWMutexDispose(&s->exec_lock);
-  RWMutexDispose(&s->allocm_lock);
-  RWMutexDispose(&s->allt.lock);
+  mutex_dispose(&s->lock);
+  rwmutex_dispose(&s->exec_lock);
+  rwmutex_dispose(&s->allocm_lock);
+  rwmutex_dispose(&s->allt.lock);
   mutex_dispose(&s->freet_lock);
   vm_pagedir_dispose(&s->vm_pagedir);
 }

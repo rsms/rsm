@@ -244,7 +244,7 @@ typedef vm_pte_t* vm_ptab_t;
 // vm_pagedir_t is a page directory, managing mapping between virtual and host pages
 typedef struct {
   rmm_t*    mm;
-  RHMutex   lock;
+  mutex_t   lock;
   vm_ptab_t root; // L0
 } vm_pagedir_t;
 

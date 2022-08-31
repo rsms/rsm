@@ -106,6 +106,12 @@ typedef unsigned long       usize;
   #define ATTR_ALIGNED(alignment)
 #endif
 
+#if __has_attribute(packed)
+  #define ATTR_PACKED __attribute__((__packed__))
+#else
+  #define ATTR_PACKED
+#endif
+
 #ifdef __wasm__
   #define WASM_EXPORT __attribute__((visibility("default")))
   #define WASM_IMPORT __attribute__((visibility("default")))
@@ -622,11 +628,13 @@ typedef __builtin_va_list va_list;
   #else
     #include <unistd.h> // isatty
     #define dlog(format, args...) ({                                 \
+      flockfile(stderr);                                             \
       if (isatty(2)) log("\e[1;30m▍\e[0m" format " \e[2m%s:%d\e[0m", \
                          ##args, __FILE__, __LINE__);                \
       else           log("[D] " format " (%s:%d)",                   \
                          ##args, __FILE__, __LINE__);                \
-      fflush(stderr); })
+      fflush(stderr);                                                \
+      funlockfile(stderr); })
   #endif
 #else
   #define dlog(format, ...) ((void)0)

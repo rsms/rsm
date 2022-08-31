@@ -5,8 +5,6 @@
 #ifndef RSM_SEMAPHORE_POSIX
   #if defined(_WIN32)
     #include <windows.h>
-    #undef min
-    #undef max
   #elif defined(__MACH__)
     #undef panic // mach/mach.h defines a function called panic()
     #include <mach/mach.h>
@@ -17,7 +15,7 @@
   #endif
 #endif
 
-#ifdef RSM_THREAD_PTHREAD
+#if defined(RSM_THREAD_PTHREAD) || defined(RSM_SEMAPHORE_POSIX)
   #include <errno.h>
 #endif
 

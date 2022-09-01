@@ -14,7 +14,7 @@
 
   // backtrace* (for _panic) is not a libc standard
   // macOS has it, glibc has it (but we can't check at compile time)
-  #if (defined(__MACH__) && defined(__APPLE__))
+  #if defined(__MACH__) && defined(__APPLE__)
     #define RSM_HAS_BACKTRACE
     #include <execinfo.h>
   #endif

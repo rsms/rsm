@@ -95,7 +95,7 @@ if [ -n "$WATCH" ]; then
   while true; do
     printf "\x1bc"  # clear screen ("scroll to top" style)
     BUILD_OK=1
-    ${SHELL:-bash} "./$(basename "$0")" -_w_ "${NON_WATCH_ARGS[@]}" "$@" || BUILD_OK=
+    bash "./$(basename "$0")" -_w_ "${NON_WATCH_ARGS[@]}" "$@" || BUILD_OK=
     printf "\e[2m> watching files for changes...\e[m\n"
     if [ -n "$BUILD_OK" -a -n "$RUN" ]; then
       export ASAN_OPTIONS=detect_stack_use_after_return=1

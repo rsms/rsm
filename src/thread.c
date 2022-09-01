@@ -33,6 +33,10 @@ rerr_t mutex_init(mutex_t* mu) {
 }
 
 void mutex_dispose(mutex_t* mu) {
+  #if DEBUG
+  if (mutex_islocked(mu))
+    dlog("warning: mutex_dispose called on locked mutex");
+  #endif
   mtx_destroy(&mu->m);
 }
 
@@ -209,6 +213,7 @@ void sema_signal(sema_t* sp, u32 count) {
 
 //———————————————————————————————————————————————————————————————————————————————————
 #elif defined(_WIN32)
+#warning "This was dry coded based on MSDN. Needs testing"
 
 rerr_t sema_init(sema_t* sp, u32 initcount) {
   assert(initcount <= 0x7fffffff);

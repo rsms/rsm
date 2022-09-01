@@ -15,7 +15,7 @@ RSM_ASSUME_NONNULL_BEGIN
 #define VM_ADDR_BITS       48u /* 256 TiB */
 #define VM_ADDR_MIN        ((u64)( 1llu << PAGE_SIZE_BITS ))
 #define VM_ADDR_MAX        ((u64)( (1llu << VM_ADDR_BITS) - 1llu ))
-#define VM_ADDR_OFFS_MASK  ((u64)( (ull_t)PAGE_SIZE - 1llu ))
+#define VM_ADDR_OFFS_MASK  ((u64)( PAGE_SIZE - 1llu ))
 #define VM_ADDR_PAGE_MASK  ((u64)( ~0llu ^ ((u64)PAGE_SIZE - 1llu) ))
 
 // page table constants

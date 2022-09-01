@@ -49,11 +49,11 @@ static_assert(offsetof(vmstate,pub) == 0, "vmstate.pub is not first member");
   }
   static void logstate(VMPARAMS) {
     for (int i = 0; i < 6; i++)
-      fprintf(stderr, REG_FMTVAL_PAT("%5llx"), REG_FMTVAL(i, (ull_t)iregs[i]));
+      fprintf(stderr, REG_FMTVAL_PAT("%5llx"), REG_FMTVAL(i, iregs[i]));
     char buf[128];
     rsm_fmtinstr(buf, sizeof(buf), inv[pc], NULL, RSM_FMT_COLOR);
     fprintf(stderr, REG_FMTVAL_PAT("%6llx") "  │ %3ld  %s\n",
-      REG_FMTVAL(RSM_MAX_REG, (ull_t)iregs[RSM_MAX_REG]), pc, buf);
+      REG_FMTVAL(RSM_MAX_REG, iregs[RSM_MAX_REG]), pc, buf);
   }
   #ifdef DEBUG_VM_LOG_LOADSTORE
     #define log_loadstore dlog
@@ -119,11 +119,10 @@ enum vmerror {
   VM_E_SHIFT_EXP,
 } RSM_END_ENUM(vmerror)
 
-static void _vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
+static void _vmerr(VMPARAMS, vmerror err, u64 a1, u64 a2) {
   char buf[2048];
   abuf_t s1 = abuf_make(buf, sizeof(buf)); abuf_t* s = &s1;
   pc--; // undo the increment to make pc point to the violating instruction
-  ull_t a1 = (ull_t)arg1, a2 = (ull_t)arg2;
   #define S(ERR, fmt, args...) case ERR: abuf_fmt(s, fmt, ##args); break;
   switch ((enum vmerror)err) {
     S(VM_E_UNALIGNED_STORE, "unaligned memory store %llx (align %llu B)", a1, a2)
@@ -151,11 +150,11 @@ static void _vmerr(VMPARAMS, vmerror err, u64 arg1, u64 arg2) {
       abuf_fmt(s, "\n  R%u…%u", i, MIN(i+7, endi-1));
       abuf_fill(s, ' ', 10 - (s->len - len - 1));
     }
-    abuf_fmt(s, " %8llx", (ull_t)iregs[i]);
+    abuf_fmt(s, " %8llx", iregs[i]);
   }
   usize stacktop = ALIGN2(vs->datasize, STK_ALIGN);
   usize stacksize = vs->stackbase - stacktop;
-  abuf_fmt(s, "\n  SP     %8llx", (ull_t)SP);
+  abuf_fmt(s, "\n  SP     %8llx", SP);
 
   usize heapsize = vs->msize[0] - vs->heapbase;
   abuf_fmt(s, "\nMemory: (%lu B)", vs->msize[0]);
@@ -219,13 +218,13 @@ inline static void* hostaddr_check_access(VMPARAMS, u64 align, u64 addr) {
 // inline u64 LOAD(TYPE, u64 addr)
 #define LOAD(TYPE, addr) ({ u64 a__=(addr); \
   u64 v__ = *(TYPE*)hostaddr_check_access(VMARGS, sizeof(TYPE), a__); \
-  log_loadstore("LOAD  %s mem[0x%llx] => 0x%llx", #TYPE, (ull_t)a__, (ull_t)v__); \
+  log_loadstore("LOAD  %s mem[0x%llx] => 0x%llx", #TYPE, a__, v__); \
   v__; \
 })
 
 // inline void STORE(TYPE, u64 addr, u64 value)
 #define STORE(TYPE, addr, value) { u64 a__=(addr), v__=(value); \
-  log_loadstore("STORE %s mem[0x%llx] <= 0x%llx", #TYPE, (ull_t)a__, (ull_t)v__); \
+  log_loadstore("STORE %s mem[0x%llx] <= 0x%llx", #TYPE, a__, v__); \
   check_loadstore(a__, sizeof(TYPE), VM_E_UNALIGNED_STORE, VM_E_OOB_STORE); \
   usize index = mbase_index(VMARGS, a__); \
   *(TYPE*)(vs->mbase[index] + a__ - index*M_SEG_SIZE) = v__; \
@@ -233,7 +232,7 @@ inline static void* hostaddr_check_access(VMPARAMS, u64 align, u64 addr) {
 
 // inline void STORE_RAM(TYPE, u64 addr, u64 value)
 #define STORE_RAM(TYPE, addr, value) { u64 a__=(addr), v__=(value);  \
-  log_loadstore("STORE %s mem[0x%llx] <= 0x%llx", #TYPE, (ull_t)a__, (ull_t)v__); \
+  log_loadstore("STORE %s mem[0x%llx] <= 0x%llx", #TYPE, a__, v__); \
   assert(a__ < M_SEG_SIZE); \
   check_loadstore(a__, sizeof(TYPE), VM_E_UNALIGNED_STORE, VM_E_OOB_STORE); \
   *(u64*)(vs->mbase[0] + (uintptr)a__) = v__; \

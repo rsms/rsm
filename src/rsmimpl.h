@@ -15,8 +15,6 @@
   typedef uint16_t  u16;
   typedef int32_t   i32;
   typedef uint32_t  u32;
-  typedef int64_t   i64;
-  typedef uint64_t  u64;
   typedef size_t    usize;
   typedef ssize_t   isize;
   typedef intptr_t  intptr;
@@ -28,8 +26,6 @@
   typedef unsigned short     u16;
   typedef signed int         i32;
   typedef unsigned int       u32;
-  typedef signed long long   i64;
-  typedef unsigned long long u64;
   #ifdef __INTPTR_MAX__
     #define INTPTR_MIN  (-__INTPTR_MAX__-1L)
     #define INTPTR_MAX  __INTPTR_MAX__
@@ -60,9 +56,8 @@
   #endif
 #endif
 
-// because PRIu64 is sad
-typedef unsigned long long ull_t;
-typedef long long          ill_t;
+typedef signed long long   i64;
+typedef unsigned long long u64;
 
 typedef float  f32;
 typedef double f64;

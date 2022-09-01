@@ -1,0 +1,7 @@
+Found a stupid bug yesterday night before, going to sleep.
+I sometimes review my code in "downtime" moments.
+Realized I had left a "zero the vm pages" ppc conditional in there from when I was working on the virtual memory page tables and zeroed out the page table entries rather than the actual memory pages. Dooh.
+
+Been setting up a fresh Alpine Linux installation in virtualbox and getting RSM building there on musl libc.
+
+Ended up reverting the u64 hack (ull_t) and introduced a rsm_u64_t in the API header and defining u64 & i64 as long long in rsmimpl.h

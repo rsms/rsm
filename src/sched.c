@@ -106,7 +106,7 @@ enum PStatus {
     }
     if (t) {
       color = (char)('1' + (t->id % 6));
-      fprintf(fp, "\e[1;3%cmT%-2llu\e[0m ", color, (ull_t)t->id);
+      fprintf(fp, "\e[1;3%cmT%-2llu\e[0m ", color, t->id);
     } else {
       fprintf(fp, "\e[1;2mT- \e[0m ");
     }
@@ -304,7 +304,7 @@ static void p_runq_put(P* p, T* t, bool runnext) {
       // into oldnext, thus we can simply loop here without having to explicitly
       // load oldnext=p->runnext.
     }
-    trace3("set p.runnext = T%llu", (ull_t)t->id);
+    trace3("set p.runnext = T%llu", t->id);
     if (oldnext == NULL)
       return;
     // Kick the old runnext out to the regular run queue
@@ -316,7 +316,7 @@ static void p_runq_put(P* p, T* t, bool runnext) {
     u32 head = AtomicLoadAcq(&p->runqhead);
     u32 tail = p->runqtail;
     if (tail - head < P_RUNQSIZE) {
-      trace3("set p.runq[%u] = T%llu", tail % P_RUNQSIZE, (ull_t)t->id);
+      trace3("set p.runq[%u] = T%llu", tail % P_RUNQSIZE, t->id);
       p->runq[tail % P_RUNQSIZE] = t;
       // store memory_order_release makes the item available for consumption
       AtomicStoreRel(&p->runqtail, tail + 1);
@@ -357,7 +357,7 @@ static T* nullable p_runq_get(P* p, bool* inherit_time) {
     // trace3("loop2 tail != head; load p->runq[%u]", head % P_RUNQSIZE);
     T* t = p->runq[head % P_RUNQSIZE];
     // trace3("loop2 t => %p", t);
-    // trace3("loop2 t => T%llu", (ull_t)t->id);
+    // trace3("loop2 t => T%llu", t->id);
     if (AtomicCASRel(&p->runqhead, &head, head + 1)) // cas-release, commits consume
       return t;
     trace3("CAS failure; retry");
@@ -444,7 +444,7 @@ static rerr_t s_allt_add(rsched_t* s, T* t) {
     AtomicStore(&s->allt.ptr, mem.p, memory_order_release);
   }
 
-  trace3("add s.allt[%u] = T%llu", s->allt.len, (ull_t)t->id);
+  trace3("add s.allt[%u] = T%llu", s->allt.len, t->id);
   s->allt.ptr[s->allt.len++] = t;
   AtomicStore(&s->allt.len, s->allt.len, memory_order_release);
 
@@ -468,13 +468,13 @@ static u64 tctx_vaddr(u64 sp) {
 static tctx_t* nullable m_get_tctx(M* m, T* t) {
   // A suspended task's tctx is stored on the task's stack, just above SP
   u64 ctx_vaddr = tctx_vaddr(t->sp);
-  assertf(ctx_vaddr >= t->stack_lo, "%llx, %llx", (ull_t)ctx_vaddr, (ull_t)t->stack_lo);
+  assertf(ctx_vaddr >= t->stack_lo, "%llx, %llx", ctx_vaddr, t->stack_lo);
 
   // get backing memory
   vm_cache_t* vm_cache = &m->vm_cache[VM_PERM_RW];
   uintptr haddr = VM_TRANSLATE(vm_cache, &m->s->vm_pagedir, ctx_vaddr, TCTX_ALIGN);
 
-  //dlog("load ctx from stack at vaddr 0x%llx (haddr %p)", (ull_t)ctx_vaddr, (void*)haddr);
+  //dlog("load ctx from stack at vaddr 0x%llx (haddr %p)", ctx_vaddr, (void*)haddr);
   return (tctx_t*)haddr;
 }
 
@@ -538,7 +538,7 @@ static void s_wakep(rsched_t* s) {
 // m_switchtask configures m to execute task t.
 // It first saves the current task's state, then restores the state of t.
 static void m_switchtask(M* m, T* nullable t) {
-  if (t) trace("-> T%llu", (ull_t)t->id);
+  if (t) trace("-> T%llu", t->id);
   else   trace("-> T-");
 
   assert(t != m->currt);
@@ -573,10 +573,10 @@ static T* nullable task_create(M* m, u64 stack_vaddr, usize stacksize, usize ins
   vm_cache_t* vm_cache = &m->vm_cache[VM_PERM_RW];
   void* stackptr =
     (void*)VM_TRANSLATE(vm_cache, &m->s->vm_pagedir, stack_vaddr, STK_ALIGN);
-  assertf(stackptr != NULL, "stack memory not mapped for 0x%llx", (ull_t)stack_vaddr);
+  assertf(stackptr != NULL, "stack memory not mapped for 0x%llx", stack_vaddr);
 
   //dlog("stack 0x%llx => haddr %p ... %p",
-  //  (ull_t)stack_vaddr, stackptr - stacksize, stackptr);
+  //  stack_vaddr, stackptr - stacksize, stackptr);
 
   // space for T, below stack, with strongest alignment
   usize tsize = ALIGN2(sizeof(T), MAX(_Alignof(T), STK_ALIGN));
@@ -595,9 +595,9 @@ static T* nullable task_create(M* m, u64 stack_vaddr, usize stacksize, usize ins
   tctx_t* ctx = (tctx_t*)ALIGN2_FLOOR((uintptr)sp - sizeof(tctx_t), TCTX_ALIGN);
   ctx->iregs[RSM_MAX_REG - RSM_NTMPREGS - 1] = (u64)(uintptr)t; // CTX reg
 
-  //dlog("store ctx to stack at vaddr 0x%llx (haddr %p)", (ull_t)tctx_vaddr(t->sp), ctx);
+  //dlog("store ctx to stack at vaddr 0x%llx (haddr %p)", tctx_vaddr(t->sp), ctx);
 
-  trace2("T@%p+%zu stack 0x%llx-0x%llx", t, tsize, (ull_t)t->stack_lo, (ull_t)t->stack_hi);
+  trace2("T@%p+%zu stack 0x%llx-0x%llx", t, tsize, t->stack_lo, t->stack_hi);
 
   return t;
 }
@@ -690,7 +690,7 @@ i64 task_spawn(T* t, usize newtask_pc, const u64 args[RSM_NARGREGS]) {
   T* newt = m_spawn(m, instrv, instrc, newtask_pc, stack_vaddr, stacksize, &err);
   if (!newt)
     return (i64)err;
-  trace("-> T%llu (pc %lu)", (ull_t)newt->id, newtask_pc);
+  trace("-> T%llu (pc %lu)", newt->id, newtask_pc);
   return (i64)newt->id;
 }
 
@@ -953,7 +953,7 @@ static void p_freet_add(P* p, T* t) {
   assert_tstatus(t, T_DEAD);
 
   u64 stacksize = t->stack_hi - t->stack_lo;
-  trace3("T%llu -> P%u.freet (stacksize %llu)", (ull_t)t->id, p->id, (ull_t)stacksize);
+  trace3("T%llu -> P%u.freet (stacksize %llu)", t->id, p->id, stacksize);
 
   tlist_push(&p->freet, t);
 
@@ -1290,7 +1290,7 @@ static stealresult_t m_steal_work(M* m, bool* inherit_time) {
       // steal half of p2's runq
       T* t = p_runq_steal(p, p2, is_final_attempt);
       if (t) {
-        trace2("T%llu (stolen from P%u)", (ull_t)t->id, p2->id);
+        trace2("T%llu (stolen from P%u)", t->id, p2->id);
         res.t = t;
         goto end;
       }
@@ -1380,7 +1380,7 @@ top:
   trace3("try p.runq");
   t = p_runq_get(p, inherit_time);
   if (t) {
-    trace3("found T%llu on p.runq", (ull_t)t->id);
+    trace3("found T%llu on p.runq", t->id);
     return t;
   }
 
@@ -1391,7 +1391,7 @@ top:
     t = s_runq_get(s, p, 0); // 0 means "move all to P"
     mutex_unlock(&s->lock);
     if (t) {
-      trace3("found T%llu on s.runq", (ull_t)t->id);
+      trace3("found T%llu on s.runq", t->id);
       *inherit_time = false;
       return t;
     }
@@ -1435,7 +1435,7 @@ top:
     t = s_runq_get(s, p, 0); // 0 means "move all to P"
     assertnotnull(t); // lock held; runq.len not able to change
     mutex_unlock(&s->lock);
-    trace3("found T%llu in s.runq", (ull_t)t->id);
+    trace3("found T%llu in s.runq", t->id);
     *inherit_time = false;
     return t;
   }
@@ -1533,7 +1533,7 @@ static rerr_t m_schedule(M* m) {
       mutex_lock(&s->lock);
       t = s_runq_get(s, p, 1);
       mutex_unlock(&s->lock);
-      if (t) trace2("random runq steal of T%llu", (ull_t)t->id);
+      if (t) trace2("random runq steal of T%llu", t->id);
     }
 
     // if M does not have an associated P, wait for a P to become available
@@ -1821,7 +1821,7 @@ static void dlog_memory_map(
       (name), haddr__, (size)); \
     } else { \
       dlog("  %-7s %12lx  %012llx-%012llx %8zu", \
-        (name), haddr__, (ull_t)vaddr__, (ull_t)vaddr_end__, (size)); \
+        (name), haddr__, vaddr__, vaddr_end__, (size)); \
     } \
   }
 
@@ -1976,7 +1976,7 @@ static rerr_t rsched_loadrom(
   usize lo_nbyte = (stacksize + exeinfo_size) - hi_nbyte;
   u64 lo_vaddr = STACK_VADDR - stacksize;
   usize lo_npages = lo_nbyte / PAGE_SIZE;
-  //dlog("map %zu pages: 0x%llx (lazy)", lo_npages, (ull_t)lo_vaddr);
+  //dlog("map %zu pages: 0x%llx (lazy)", lo_npages, lo_vaddr);
   err = vm_map(&s->vm_pagedir, 0, lo_vaddr, lo_npages, VM_PERM_RW);
   if UNLIKELY(err) {
     dlog("vm_map failed: %s", rerr_str(err));
@@ -1987,7 +1987,7 @@ static rerr_t rsched_loadrom(
   // map the high-address pages of the stack WITH backing memory
   u64 vaddr = lo_vaddr + lo_nbyte;
   assertf(IS_ALIGN2(hi_nbyte, PAGE_SIZE), "%zu", hi_nbyte);
-  //dlog("map %zu pages: 0x%llx => %p", hi_nbyte/PAGE_SIZE, (ull_t)vaddr, (void*)haddr);
+  //dlog("map %zu pages: 0x%llx => %p", hi_nbyte/PAGE_SIZE, vaddr, (void*)haddr);
   err = vm_map(&s->vm_pagedir, haddr, vaddr, hi_nbyte/PAGE_SIZE, VM_PERM_RW);
   if UNLIKELY(err) {
     dlog("vm_map failed: %s", rerr_str(err));

@@ -25,7 +25,6 @@
   #else
     typedef unsigned char      uint8_t;
     typedef unsigned int       uint32_t;
-    typedef unsigned long long uint64_t;
     typedef unsigned long      size_t;
     #ifdef __INTPTR_TYPE__
       typedef __INTPTR_TYPE__   intptr_t;
@@ -36,6 +35,7 @@
     #endif
   #endif
 #endif
+typedef unsigned long long rsm_u64_t;
 #ifndef __has_attribute
   #define __has_attribute(x)  0
 #endif
@@ -559,7 +559,7 @@ rerr_t rmachine_execrom(rmachine_t*, rrom_t*);
 typedef uint8_t rvmstatus_t;
 typedef struct {
   rvmstatus_t status;
-  uint64_t    iregs[RSM_NREGS];
+  rsm_u64_t   iregs[RSM_NREGS];
   double      fregs[RSM_NREGS];
   void*       rambase;
   size_t      ramsize;
@@ -727,7 +727,7 @@ struct rnode {
     rnode_t* nullable tail;
   } children;
   union { // depends on value of t
-    uint64_t ival;
+    rsm_u64_t ival;
     // sval is valid while origin rasm struct is valid
     struct { const char* p; uint32_t len; } sval;
   };

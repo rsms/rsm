@@ -952,7 +952,7 @@ static rnode_t* parraytype(PPARAMS, rnode_t* elemtype) {
   if (!tokisintlit(p->tok)) {
     perrunexpected(p, NULL, "size constant as integer literal", tokname(p->tok));
   } else if (p->ival == 0 || (tokissint(p->tok) && (i64)p->ival < 0)) {
-    perr(p, NULL, "invalid array size %lld", (ull_t)p->ival);
+    perr(p, NULL, "invalid array size %lld", p->ival);
   }
   n->ival = p->ival;
   sadvance(p);

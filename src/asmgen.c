@@ -414,7 +414,7 @@ static bool patch_imm(gstate* g, rnode_t* patcher, u32 inindex, u64 value, i32* 
 largeval:
   // Does not fit in immediate value for the instruction.
   // Synthesize instructions to compute the value in a register.
-  trace("op %s; large value 0x%llx", rop_name(RSM_GET_OP(*in)), (ull_t)value);
+  trace("op %s; large value 0x%llx", rop_name(RSM_GET_OP(*in)), value);
 
   if (scratchreg >= RSM_NREGS) {
     // >RSM_NREGS: no scratch register; instruction does not produce a register result.
@@ -551,7 +551,7 @@ static void resolve_undefined_names(gstate* g) {
     d->nrefs++;
 
     dlog_datalayout("patching data reference %.*s (gdata %p, addr 0x%llx)",
-      (int)namelen, name, d, (ull_t)d->addr);
+      (int)namelen, name, d, d->addr);
 
     i32 ignore;
     patch_imm(g, ref->n, ref->i, d->addr, &ignore);
@@ -626,7 +626,7 @@ static bool refnamed(gstate* g, rnode_t* refn, u32 refi, u32 argc, i32* argp) {
 
       // get the constant's value (e.g. 0xBEEF for "const x = 0xBEEF").
       u64 value = *(const u64*)assertnotnull( ((gdata*)target)->initp );
-      trace("constant value: 0x%llx", (ull_t)value);
+      trace("constant value: 0x%llx", value);
 
       // patch_imm sets last argument of the rin_t at g->iv[refi] to value
       return patch_imm(g, refn, refi, value, argp);
@@ -657,10 +657,10 @@ static void errintsize(
 {
   if (minval != 0 || issigned) {
     errf(c, pr, "value %lld out of range %lld...%llu for %s",
-      (ill_t)val, (ill_t)minval, (ull_t)maxval, rop_name(op));
+      val, minval, maxval, rop_name(op));
   } else {
     errf(c, pr, "value %llu out of range 0...%llu for %s",
-      (ull_t)val, (ull_t)maxval, rop_name(op));
+      val, maxval, rop_name(op));
   }
 }
 
@@ -680,7 +680,7 @@ static bool getiargs(
   rop_t op = (rop_t)n->ival;
 
   trace("[%s] wantargc %u, minval %lld, maxval 0x%llx",
-    rop_name(op), wantargc, (ill_t)minval, (ull_t)maxval);
+    rop_name(op), wantargc, (ill_t)minval, maxval);
 
   // first argc-1 args are registers
   rnode_t* arg = n->children.head;
@@ -1176,7 +1176,7 @@ static void dlog_gdata(gdata* nullable d) {
   if (namelen > namemax) { namemax--; namelen = namemax; nametail = "…"; }
   if (datalen > datamax) { datamax--; datalen = datamax; datatail = "…"; }
   log("0x%016llx %-*.*s%s %10zu     %2u  %.*s%s",
-    (ull_t)d->addr,
+    d->addr,
     namemax, namelen, d->name, nametail,
     d->size, d->align,
     datalen, reprbuf, datatail);

@@ -1,4 +1,5 @@
 /out
+/out-*
 /deps
 /work
 /build.ninja

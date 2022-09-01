@@ -18,10 +18,10 @@ RSM_ASSUME_NONNULL_BEGIN
 // VM_ADDR_PAGE_MASK: AND with vaddr to get the virtual page address
 // e.g. 1111111111111111111111111111111111111111111111111111000000000000
 #define VM_ADDR_BITS       48u /* 256 TiB */
-#define VM_ADDR_MIN        (1llu << PAGE_SIZE_BITS)
-#define VM_ADDR_MAX        ((1llu << VM_ADDR_BITS) - 1llu)
-#define VM_ADDR_OFFS_MASK  ((u64)PAGE_SIZE - 1llu)
-#define VM_ADDR_PAGE_MASK  ( ~0llu ^ ((u64)PAGE_SIZE - 1llu) )
+#define VM_ADDR_MIN        ((u64)( 1llu << PAGE_SIZE_BITS ))
+#define VM_ADDR_MAX        ((u64)( (1llu << VM_ADDR_BITS) - 1llu ))
+#define VM_ADDR_OFFS_MASK  ((u64)( (ull_t)PAGE_SIZE - 1llu ))
+#define VM_ADDR_PAGE_MASK  ((u64)( ~0llu ^ ((u64)PAGE_SIZE - 1llu) ))
 
 // page table constants
 //   VM_PTAB_BITS: bits per page table; a divisor of VM_VFN_BITS.

@@ -46,6 +46,9 @@ WASM_IMPORT rerr_t unixtime(i64* sec, u64* nsec);
   WASM_IMPORT double wasm_nanotime(void);
 #endif
 
+#if !defined(CLOCK_MONOTONIC)
+  #error CLOCK_MONOTONIC not defined
+#endif
 
 u64 nanotime(void) {
   #if defined(__APPLE__)
@@ -59,7 +62,7 @@ u64 nanotime(void) {
   //   QueryPerformanceCounter
   #elif !defined(RSM_NO_LIBC)
     struct timeval tv;
-    safecheckexpr(gettimeofday(&tv, nullptr), 0);
+    safecheckexpr(gettimeofday(&tv, NULL), 0);
     return ((u64)(tv.tv_sec) * 1000000000) + ((u64)(tv.tv_usec) * 1000);
   #elif defined(__wasm__)
     return (u64)wasm_nanotime();

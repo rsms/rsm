@@ -321,7 +321,7 @@ static void* nullable bufslab_alloc_more(bufslabs* slabs, rmemalloc_t* ma, u32 l
     goto finalize;
   }
   // no free space found -- allocate new slab
-  u32 cap = MAX(BUFSLAB_MIN_CAP, ALIGN2(len, 16));
+  u32 cap = MAX(BUFSLAB_MIN_CAP, ALIGN2(len, 16u));
   rmem_t m = rmem_alloc_aligned(ma, sizeof(bufslab) + cap, _Alignof(bufslab));
   if UNLIKELY(!m.p)
     return NULL;

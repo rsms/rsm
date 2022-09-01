@@ -50,8 +50,10 @@ uintptr m_spawn_osthread(M* m, rerr_t(*mainf)(M*)) {
   }
 
   // create the thread, executing mainf
+  DIAGNOSTIC_IGNORE_PUSH("-Wcast-function-type")
   pthread_t t;
   err = pthread_create(&t, &attr, (void*nullable(*_Nonnull)(void*nullable))mainf, m);
+  DIAGNOSTIC_IGNORE_POP()
 
   // restore signal mask
   sigprocmask(SIG_SETMASK, &sigset_prev, NULL);

@@ -1,0 +1,24 @@
+Put together a tool for keeping a logbook.
+Since I'm a very creative person I named it "logbook".
+
+But really, today is about getting RSM building on Linux with GCC.
+It turns out there are a lot of things that GCC doesn't like but
+which clang is happy with. For example, a CPP macro that includes
+__has_builtin will cause GCC to cry a little so I'm unboxing HAS_LIBC_BUILTIN.
+
+It's been a few hours now and it finally builds without any warnings in GCC 11.
+
+Interestingly, GCC defines uint64_t as unsigned long on x86_64 and
+sizeof(long long) == sizeof(long). Clang does what I would expect and defines
+uint64_t as unsigned long long. Very odd. This GCC weirdness meant I had to change
+A TON of printf-like calls that use %ll for u64 values. Instead of the madness that
+is PRIu64, I ended up with typedef unsigned long long ull_t (and ill_t) which are
+used in typecasts for a u64 value when it is printed.
+
+Thought: Maybe define i64 as long long instead.
+It would require some tricky stuff for the API header rsm.h which uses stdint
+uint64_t types. I.e. without changing all uint64_t types in rsm.h to something like
+rsm_u64_t, its ABI would be incorrect; i.e. on GCC the prototype would say "long"
+but the implementation would use "long long."
+
+A nut to crack on another day.

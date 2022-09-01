@@ -19,17 +19,21 @@
     #define true  ((bool)1)
     #define false ((bool)0)
   #endif
-  typedef unsigned char      u8;
-  typedef unsigned int       u32;
-  typedef unsigned long long u64;
-  typedef signed long        isize;
-  typedef unsigned long      usize;
-  #ifdef __INTPTR_TYPE__
-    typedef __INTPTR_TYPE__   intptr;
-    typedef __UINTPTR_TYPE__  uintptr;
+  #ifndef RSM_NO_LIBC
+    #include <stdint.h>
+    #include <stddef.h> // size_t
   #else
-    typedef signed long       intptr;
-    typedef unsigned long     uintptr;
+    typedef unsigned char      uint8_t;
+    typedef unsigned int       uint32_t;
+    typedef unsigned long long uint64_t;
+    typedef unsigned long      size_t;
+    #ifdef __INTPTR_TYPE__
+      typedef __INTPTR_TYPE__   intptr_t;
+      typedef __UINTPTR_TYPE__  uintptr_t;
+    #else
+      typedef signed long       intptr_t;
+      typedef unsigned long     uintptr_t;
+    #endif
   #endif
 #endif
 #ifndef __has_attribute
@@ -88,7 +92,7 @@ RSM_ASSUME_NONNULL_BEGIN
 // PC and jump- & branch destinations are expressed in #instructions rather than bytes.
 // There is room for 256 operations and 32+32 (int+float) registers (8 bit OP, 5 bit reg)
 // Most instructions accept reg or immediate (i bit is set) as last argument.
-typedef u32 rin_t;
+typedef uint32_t rin_t;
 //
 //        ┌───────────────┬─────────┬─────────┬─────────┬─┬───────────────┐
 //  bit   │3 3 2 2 2 2 2 2│2 2 2 2 1│1 1 1 1 1│1 1 1 1  │ │               │
@@ -233,7 +237,7 @@ _( MCMP    , ABCDu , reg , "mcmp"    /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 #define RSM_MASK0(n,p) \
   (~RSM_MASK1(n,p))  /* n 0 bits at position p */
 #define RSM_GET_ARGN(i,pos,size) \
-  ((u32)( ((i) >> (pos)) & RSM_MASK1(size,0) ))
+  ((uint32_t)( ((i) >> (pos)) & RSM_MASK1(size,0) ))
 #define RSM_SET_ARGN(i,pos,size,v) \
   ( ((i) & RSM_MASK0(size,pos)) | ( (((rin_t)v) << pos) & RSM_MASK1(size,pos)) )
 
@@ -305,7 +309,7 @@ _( MCMP    , ABCDu , reg , "mcmp"    /* RA = mem[RB:Du] <> mem[RC:Du] */)\
 // RSM_ROM_ALIGN is the alignment of ROM images and also maximum alignment of data
 #define RSM_ROM_ALIGN 64u
 
-typedef u8 rop_t; // opcode
+typedef uint8_t rop_t; // opcode
 enum rop {
   #define _(name, ...) rop_##name,
   RSM_FOREACH_OP(_)
@@ -313,7 +317,7 @@ enum rop {
   RSM_OP_COUNT,
 } RSM_END_ENUM2(rop, rop_t)
 
-typedef u8 rfmtflag_t; // string formatting flags
+typedef uint8_t rfmtflag_t; // string formatting flags
 enum rfmtflag {
   RSM_FMT_COLOR = 1 << 0, // use ANSI colors
 } RSM_END_ENUM2(rfmtflag, rfmtflag_t)
@@ -349,7 +353,7 @@ RSMAPI const char* rerr_str(rerr_t); // short description of an error
 // rmem_t: memory region
 typedef struct {
   void* nullable p;    // start address
-  usize          size; // size in bytes
+  size_t         size; // size in bytes
 } rmem_t;
 
 #define RMEM(p, size)  ((rmem_t){ (p), (size) })
@@ -360,12 +364,14 @@ typedef struct {
 
 // RMEM_IS_VALID returns true if region has a non-NULL address and a non-zero size
 #define RMEM_IS_VALID(region)     (!RMEM_IS_NULL(region) & !RMEM_IS_OVERFLOW(region))
-#define RMEM_IS_NULL(region)      (!(uintptr)(region).p | !(uintptr)(region).size)
+#define RMEM_IS_NULL(region)      (!(uintptr_t)(region).p | !(uintptr_t)(region).size)
 #define RMEM_IS_OVERFLOW(region) \
-  (((uintptr)(region).p + (uintptr)(region).size) < (uintptr)(region).p)
+  (((uintptr_t)(region).p + (uintptr_t)(region).size) < (uintptr_t)(region).p)
 
 // rmem_fill fills memory with a byte value
-inline static void rmem_fill(rmem_t m, u8 byte) { __builtin_memset(m.p, byte, m.size); }
+inline static void rmem_fill(rmem_t m, uint8_t byte) {
+  __builtin_memset(m.p, byte, m.size);
+}
 
 // rmem_zerofill fills memory with zeroes
 inline static void rmem_zerofill(rmem_t m) { __builtin_memset(m.p, 0, m.size); }
@@ -374,7 +380,7 @@ inline static void rmem_zerofill(rmem_t m) { __builtin_memset(m.p, 0, m.size); }
 // by rounding the address region.p up and its region.size down.
 // If the region is too small to be aligned, false is returned
 // and region is left unchanged.
-bool rmem_align(rmem_t* region, usize alignment);
+bool rmem_align(rmem_t* region, size_t alignment);
 
 //———————————————————————————————————————————————————————————————————————————————————————
 // rmm_t is a Memory Manager.
@@ -385,27 +391,27 @@ typedef struct rmm_ rmm_t;
 
 #define RMM_MIN_SIZE 4096
 
-rmm_t* nullable rmm_create(void* memp, usize memsize);
-rmm_t* nullable rmm_create_host_vmmap(usize memsize);
+rmm_t* nullable rmm_create(void* memp, size_t memsize);
+rmm_t* nullable rmm_create_host_vmmap(size_t memsize);
 void rmm_dispose(rmm_t*);
-void* nullable rmm_allocpages(rmm_t*, usize npages);
+void* nullable rmm_allocpages(rmm_t*, size_t npages);
 void rmm_freepages(rmm_t* restrict mm, void* restrict ptr);
-uintptr rmm_startaddr(const rmm_t*);
-usize rmm_cap(const rmm_t* mm); // total capacity (number of pages)
+uintptr_t rmm_startaddr(const rmm_t*);
+size_t rmm_cap(const rmm_t* mm); // total capacity (number of pages)
 
 // rmm_avail_total returns the total number of pages available to allocate
-usize rmm_avail_total(rmm_t*);
+size_t rmm_avail_total(rmm_t*);
 
 // rmm_avail_maxregion returns the number of pages of the largest, free region
 // of contiguous pages.
-usize rmm_avail_maxregion(rmm_t*);
+size_t rmm_avail_maxregion(rmm_t*);
 
 // rmm_allocpages_min performs a best-effort allocation; it attempts to allocate
 // req_npages and if there's no contiguous region of that many pages, it tries to
 // allocate one order less (req_npages << 1).
 // min_npages is the smallest number of pages it will attempt to allocate.
 // On success, req_npages is updated with the actual number of pages allocated.
-void* nullable rmm_allocpages_min(rmm_t* mm, usize* req_npages, usize min_npages);
+void* nullable rmm_allocpages_min(rmm_t* mm, size_t* req_npages, size_t min_npages);
 
 //———————————————————————————————————————————————————————————————————————————————————————
 // rmemalloc_t is a generic memory allocator
@@ -424,14 +430,14 @@ typedef struct rmemalloc_ rmemalloc_t;
 // where CHUNK_SIZE = sizeof(void*) * 8. Since backing memory has alignment
 // requirements, the actual memory available may be different than the requested
 // initsize; use rmem_cap to get the actual capacity.
-rmemalloc_t* nullable rmem_allocator_create(rmm_t* mm, usize initsize);
+rmemalloc_t* nullable rmem_allocator_create(rmm_t* mm, size_t initsize);
 
 // rmem_allocator_create_buf creates a new allocator in memory at buf.
 // If no memory manager is provided (mm is NULL), the allocator will
 // not have the ability to grow.
 // Returns NULL if (after alignment) bufsize is too small.
 rmemalloc_t* nullable rmem_allocator_create_buf(
-  rmm_t* nullable mm, void* buf, usize bufsize);
+  rmm_t* nullable mm, void* buf, size_t bufsize);
 
 // rmem_allocator_free disposes of an allocator.
 // The allocator is invalid after this call.
@@ -444,11 +450,11 @@ void rmem_allocator_free(rmemalloc_t*);
 // Allocations >= CHUNK_SIZE are sized in CHUNK_SIZE steps with a minimum alignment
 // of CHUNK_SIZE. Eg. size=130,alignment=16 returns 256 bytes with CHUNK_SIZE alignment.
 // Returns .start==NULL if the allocator is out of memory.
-rmem_t rmem_alloc_aligned(rmemalloc_t*, usize size, usize alignment);
+rmem_t rmem_alloc_aligned(rmemalloc_t*, size_t size, size_t alignment);
 
 // rmem_alloc allocates size bytes with sizeof(void*) alignment.
 // Returns .start==NULL if the allocator is out of memory.
-inline static rmem_t rmem_alloc(rmemalloc_t* a, usize size) {
+inline static rmem_t rmem_alloc(rmemalloc_t* a, size_t size) {
   return rmem_alloc_aligned(a, size, 1);
 }
 
@@ -461,10 +467,10 @@ inline static rmem_t rmem_alloc(rmemalloc_t* a, usize size) {
 #define rmem_freet(a, ptr)  rmem_free((a), RMEM((ptr), sizeof(*(ptr))) )
 
 // rmem_alloc_array allocates an array of elements, checking for overflow
-rmem_t rmem_alloc_array(rmemalloc_t*, usize count, usize elemsize, usize alignment);
+rmem_t rmem_alloc_array(rmemalloc_t*, size_t count, size_t elemsize, size_t alignment);
 
 // rmem_alloc_arrayt allocates an array of type T elements, checking for overflow
-// rmem_t rmem_alloc_arrayt(rmemalloc_t* a, usize count, TYPE T)
+// rmem_t rmem_alloc_arrayt(rmemalloc_t* a, size_t count, TYPE T)
 #define rmem_alloc_arrayt(a, count, T) \
   rmem_alloc_array((a), (count), sizeof(T), _Alignof(T))
 
@@ -474,59 +480,59 @@ void rmem_free(rmemalloc_t*, rmem_t);
 // rmem_resize grows or shrinks the size of an allocated memory region to newsize.
 // If resizing fails, false is returned and the region is unchanged; it is still valid.
 // Address alignment of new address is min(pow2(newsize),oldalignment).
-bool rmem_resize(rmemalloc_t*, rmem_t*, usize newsize);
+bool rmem_resize(rmemalloc_t*, rmem_t*, size_t newsize);
 
 // rmem_must_* works like rmem_* but panics on failure
-rmem_t rmem_must_alloc(rmemalloc_t*, usize size);
-void rmem_must_resize(rmemalloc_t*, rmem_t*, usize newsize);
+rmem_t rmem_must_alloc(rmemalloc_t*, size_t size);
+void rmem_must_resize(rmemalloc_t*, rmem_t*, size_t newsize);
 
 // rmem_alloc_size returns the effective size of an allocation of that size.
 // E.g. rmem_alloc_size(size) == rmem_alloc(a, size).size
-usize rmem_alloc_size(usize);
+size_t rmem_alloc_size(size_t);
 
 // rmem_avail returns the total number of bytes available to allocate
-usize rmem_avail(rmemalloc_t*);
+size_t rmem_avail(rmemalloc_t*);
 
 // rmem_cap returns the total number of bytes managed by the allocator
-usize rmem_cap(rmemalloc_t*);
+size_t rmem_cap(rmemalloc_t*);
 
 //——————————————————————————————————————————————————————————————————————————————————————
 
 // rromflag_t: describes properties of a ROM image
-typedef u8 rromflag_t;
+typedef uint8_t rromflag_t;
 enum rromflag {
   RROM_LZ4 = 1 << 0, // data is compressed with LZ4
 };
 
 // rromimg_t: ROM image layout, a portable binary blob
 typedef struct {
-  u8         magic[4]; // "RSM\0"
-  u8         version;
+  uint8_t    magic[4]; // "RSM\0"
+  uint8_t    version;
   rromflag_t flags;
-  u8         data[];
+  uint8_t    data[];
 } rromimg_t;
 
 // rrom_t: ROM (read only media); the container for an RSM program
 typedef struct {
   // read-only, potentially-compressed image
   rromimg_t* img;
-  usize      imgsize; // size of img, in bytes
+  size_t     imgsize; // size of img, in bytes
 
   // fields populated by rasm_gen
-  usize imgmemsize; // size of memory allocation backing img
+  size_t imgmemsize; // size of memory allocation backing img
 
   // fields populated by rsm_loadrom
   rmem_t       datamem;   // memory of loaded (uncompressed) data
   const rin_t* code;      // vm instructions array (pointer into datamem)
-  usize        codelen;   // vm instructions array length
+  size_t       codelen;   // vm instructions array length
   const void*  data;      // data segment initializer (pointer into datamem)
-  usize        datasize;  // data segment size
-  u32          dataalign; // data segment alignment
+  size_t       datasize;  // data segment size
+  uint32_t     dataalign; // data segment alignment
 } rrom_t;
 
 // rromimg_loadsize returns the number of bytes needed to load a ROM.
 // Returns USIZE_MAX if the image is invalid, 0 if empty.
-RSMAPI usize rromimg_loadsize(const rromimg_t* img, usize imgsize);
+RSMAPI size_t rromimg_loadsize(const rromimg_t* img, size_t imgsize);
 
 // rsm_loadrom parses rom->img of rom->imgsize bytes,
 // populating the rest of the fields of the rrom_t struct.
@@ -550,13 +556,13 @@ rerr_t rmachine_execrom(rmachine_t*, rrom_t*);
 
 //———————————————————————————————————————————————————————————————————————————————————————
 // rvm_t: VM instance  (execution engine v1)
-typedef u8 rvmstatus_t;
+typedef uint8_t rvmstatus_t;
 typedef struct {
   rvmstatus_t status;
-  u64         iregs[RSM_NREGS];
+  uint64_t    iregs[RSM_NREGS];
   double      fregs[RSM_NREGS];
   void*       rambase;
-  usize       ramsize;
+  size_t      ramsize;
   void*       internal;
 } rvm_t;
 enum rvmstatus {
@@ -585,12 +591,12 @@ void rsm_unloadfile(rmem_t); // unload file loaded with rsm_loadfile
 // discarded. The output is always null-terminated, unless size is 0.
 // Returns the number of characters that would have been printed if bufcap was
 // unlimited (not including the final `\0').
-RSMAPI usize rsm_fmtprog(
-  char* buf, usize bufcap, const rin_t* nullable ip, usize ilen, rfmtflag_t);
+RSMAPI size_t rsm_fmtprog(
+  char* buf, size_t bufcap, const rin_t* nullable ip, size_t ilen, rfmtflag_t);
 // if pcaddp is not null, it is set to the PC advance for the instruction,
 // which is 1 for all except COPYV.
-RSMAPI usize rsm_fmtinstr(
-  char* buf, usize bufcap, rin_t, u32* nullable pcaddp, rfmtflag_t);
+RSMAPI size_t rsm_fmtinstr(
+  char* buf, size_t bufcap, rin_t, uint32_t* nullable pcaddp, rfmtflag_t);
 
 
 //———————————————————————————————————————————————————————————————————————————————————————
@@ -598,7 +604,7 @@ RSMAPI usize rsm_fmtinstr(
 #ifndef RSM_NO_ASM
 
 // rtok_t: source token
-typedef u8 rtok_t;
+typedef uint8_t rtok_t;
 #define RSM_FOREACH_TOKEN(_) \
 _( RT_END ) \
 _( RT_COMMENT ) \
@@ -678,7 +684,7 @@ typedef struct rdiag {
   const char* msgshort;  // short descriptive message without source location
   const char* srclines;  // source context (a few lines of the source; may be empty)
   const char* srcname;   // eg filename
-  u32         line, col; // origin (0 if unknown or not line-specific)
+  uint32_t    line, col; // origin (0 if unknown or not line-specific)
 } rdiag_t;
 
 // rdiaghandler_t is called with a diagnostic report.
@@ -686,7 +692,7 @@ typedef struct rdiag {
 typedef bool(*rdiaghandler_t)(const rdiag_t*, void* nullable userdata);
 
 // rasmflag_t are flags for rasm_t
-typedef u32 rasmflag_t;
+typedef uint32_t rasmflag_t;
 enum rasmflag {
   RASM_NOCOMPRESS = 1 << 0, // disable ROM image compression
 };
@@ -695,19 +701,19 @@ enum rasmflag {
 typedef struct {
   rmemalloc_t*   memalloc;    // memory allocator
   const char*    srcdata;     // input source bytes
-  usize          srclen;      // length of srcdata
+  size_t         srclen;      // length of srcdata
   const char*    srcname;     // symbolic name of source (e.g. filename)
   rasmflag_t     flags;       // control generation
-  u32            errcount;    // number of errors reported
+  uint32_t       errcount;    // number of errors reported
   rdiag_t        diag;        // last diagnostic report
   rdiaghandler_t diaghandler; // diagnostic report callback
   void* nullable userdata;    // passed along to diaghandler
-  void* _internal[8];
+  uintptr_t _internal[8];
 } rasm_t;
 
 // rsrcpos_t: line & column source position
 typedef struct rsrcpos {
-  u32 line, col;
+  uint32_t line, col;
 } rsrcpos_t;
 
 // rnode_t: AST node
@@ -721,8 +727,9 @@ struct rnode {
     rnode_t* nullable tail;
   } children;
   union { // depends on value of t
-    u64 ival;
-    struct { const char* p; u32 len; } sval; // valid while origin rasm struct is valid
+    uint64_t ival;
+    // sval is valid while origin rasm struct is valid
+    struct { const char* p; uint32_t len; } sval;
   };
 };
 

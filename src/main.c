@@ -36,7 +36,7 @@ static int setreg(u64* iregs, const char* s) {
   if (parseu64(s, p-1, 10, &regno, 0xff) != 0)
     goto malformed;
   if (regno > RSM_MAX_REG) {
-    errmsg("invalid register -R%llu", regno);
+    errmsg("invalid register -R%llu", (ull_t)regno);
     return 1;
   }
   if (parseu64(vals, vallen, base, &iregs[regno], 0xffffffffffffffff) == 0)
@@ -211,7 +211,7 @@ static void print_regstate_x64(bool pad, u64 v) {
     v > 0xfff ? 4 :              v > 0xff ? 3 :
     v > 0xf ? 2 :                         1
   );
-  printf(pad ? " %*s0x%llx" : "%*s0x%llx", 18 - w, "", v);
+  printf(pad ? " %*s0x%llx" : "%*s0x%llx", 18 - w, "", (ull_t)v);
 }
 
 static void print_regstate(u64* iregs) {
@@ -219,20 +219,20 @@ static void print_regstate(u64* iregs) {
   for(u32 i=0;i<4;i++)
     printf(i==3 ? " R%u" : i ? " R%-19u" : "                      R%-19u", i);
   printf("\nU64 "); for (u32 i=0;i<4;i++) print_regstate_x64(i, iregs[i]);
-  printf("\nU64 "); for(u32 i=0;i<4;i++) printf(i ? " %20llu" : "%20llu", iregs[i]);
-  printf("\nS64 "); for(u32 i=0;i<4;i++) printf(i ? " %20lld" : "%20lld", (i64)iregs[i]);
-  printf("\nS32 "); for(u32 i=0;i<4;i++) printf(i ? " %20d"   : "%20d",   (i32)iregs[i]);
-  printf("\nS16 "); for(u32 i=0;i<4;i++) printf(i ? " %20d"   : "%20d",   (i16)iregs[i]);
-  printf("\nS8  "); for(u32 i=0;i<4;i++) printf(i ? " %20d"   : "%20d",   (i8)iregs[i]);
+  printf("\nU64 "); for(u32 i=0;i<4;i++) printf(i ? " %20llu" : "%20llu",(ull_t)iregs[i]);
+  printf("\nS64 "); for(u32 i=0;i<4;i++) printf(i ? " %20lld" : "%20lld",(ill_t)iregs[i]);
+  printf("\nS32 "); for(u32 i=0;i<4;i++) printf(i ? " %20d"   : "%20d",  (i32)iregs[i]);
+  printf("\nS16 "); for(u32 i=0;i<4;i++) printf(i ? " %20d"   : "%20d",  (i16)iregs[i]);
+  printf("\nS8  "); for(u32 i=0;i<4;i++) printf(i ? " %20d"   : "%20d",  (i8)iregs[i]);
   printf("\n\n");
   for(u32 i=4;i<8;i++)
     printf(i==7 ? " R%u" : i>4 ? " R%-19u" : "                      R%-19u", i);
   printf("\nU64 "); for(u32 i=4;i<8;i++) print_regstate_x64(i>4, iregs[i]);
-  printf("\nU64 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20llu" : "%20llu", iregs[i]);
-  printf("\nS64 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20lld" : "%20lld", (i64)iregs[i]);
-  printf("\nS32 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20d"   : "%20d",   (i32)iregs[i]);
-  printf("\nS16 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20d"   : "%20d",   (i16)iregs[i]);
-  printf("\nS8  "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20d"   : "%20d",   (i8)iregs[i]);
+  printf("\nU64 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20llu" : "%20llu",(ull_t)iregs[i]);
+  printf("\nS64 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20lld" : "%20lld",(ill_t)iregs[i]);
+  printf("\nS32 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20d"   : "%20d",  (i32)iregs[i]);
+  printf("\nS16 "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20d"   : "%20d",  (i16)iregs[i]);
+  printf("\nS8  "); for(u32 i=4;i<8;i++) printf(i>4 ? " %20d"   : "%20d",  (i8)iregs[i]);
   printf("\n");
 }
 

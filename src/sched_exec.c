@@ -39,11 +39,11 @@ static_assert(STK_MIN % STK_ALIGN == 0, "STK_MIN not aligned to STK_ALIGN");
   }
   static void exec_logstate(EXEC_PARAMS) {
     for (int i = 0; i < 6; i++)
-      fprintf(stderr, REG_FMTVAL_PAT("%5llx"), REG_FMTVAL(i, iregs[i]));
+      fprintf(stderr, REG_FMTVAL_PAT("%5llx"), REG_FMTVAL(i, (ull_t)iregs[i]));
     char buf[128];
     rsm_fmtinstr(buf, sizeof(buf), inv[pc], NULL, RSM_FMT_COLOR);
     fprintf(stderr, REG_FMTVAL_PAT("%6llx") "  │ %3ld  %s\n",
-      REG_FMTVAL(RSM_MAX_REG, iregs[RSM_MAX_REG]), pc, buf);
+      REG_FMTVAL(RSM_MAX_REG, (ull_t)iregs[RSM_MAX_REG]), pc, buf);
   }
   #ifdef TRACE_MEMORY
     #if defined(SCHED_TRACE)
@@ -82,17 +82,18 @@ enum execerr_t {
     char buf[2048];
     abuf_t s1 = abuf_make(buf, sizeof(buf)); abuf_t* b = &s1;
     pc--; // undo the increment to make pc point to the violating instruction
+    ull_t a1 = (ull_t)arg1, a2 = (ull_t)arg2;
     #define _(ERR, fmt, args...) case ERR: abuf_fmt(b, fmt, ##args); break;
     switch ((enum execerr_t)err) {
-      _(EX_E_UNALIGNED_STORE, "unaligned memory store %llx (align %llu B)", arg1, arg2)
-      _(EX_E_UNALIGNED_ACCESS,"unaligned memory access %llx (align %llu B)", arg1, arg2)
-      _(EX_E_UNALIGNED_STACK, "unaligned stack pointer SP=%llx (align %d B)", arg1, STK_ALIGN)
-      _(EX_E_STACK_OVERFLOW,  "stack overflow %llx (align %llu B)", arg1, arg2)
-      _(EX_E_OOB_LOAD,        "memory load out of bounds %llx (align %llu B)", arg1, arg2)
-      _(EX_E_OOB_STORE,       "memory store out of bounds %llx (align %llu B)", arg1, arg2)
-      _(EX_E_OOB_PC,          "PC out of bounds %llx", arg1)
-      _(EX_E_OPNOI,           "op %s does not accept immediate value", rop_name(arg1))
-      _(EX_E_SHIFT_EXP,       "shift exponent %llu is too large", arg1)
+      _(EX_E_UNALIGNED_STORE, "unaligned memory store %llx (align %llu B)", a1, a2)
+      _(EX_E_UNALIGNED_ACCESS,"unaligned memory access %llx (align %llu B)", a1, a2)
+      _(EX_E_UNALIGNED_STACK, "unaligned stack pointer SP=%llx (align %d B)", a1, STK_ALIGN)
+      _(EX_E_STACK_OVERFLOW,  "stack overflow %llx (align %llu B)", a1, a2)
+      _(EX_E_OOB_LOAD,        "memory load out of bounds %llx (align %llu B)", a1, a2)
+      _(EX_E_OOB_STORE,       "memory store out of bounds %llx (align %llu B)", a1, a2)
+      _(EX_E_OOB_PC,          "PC out of bounds %llx", a1)
+      _(EX_E_OPNOI,           "op %s does not accept immediate value", rop_name(a1))
+      _(EX_E_SHIFT_EXP,       "shift exponent %llu is too large", a1)
     }
     #undef _
     abuf_c(b, '\n');
@@ -108,7 +109,7 @@ enum execerr_t {
         abuf_fmt(b, "\n  R%u…%u", i, MIN(i+7, endi-1));
         abuf_fill(b, ' ', 10 - (b->len - len - 1));
       }
-      abuf_fmt(b, " %8llx", iregs[i]);
+      abuf_fmt(b, " %8llx", (ull_t)iregs[i]);
     }
 
     abuf_terminate(b);
@@ -174,7 +175,7 @@ enum execerr_t {
   u64 value__ = VM_LOAD( \
     TYPE, &(t)->m->vm_cache[VM_PERM_RW], &(t)->m->s->vm_pagedir, vaddr__); \
   tracemem("LOAD %s 0x%llx (align %lu) => 0x%llx", \
-    #TYPE, vaddr__, _Alignof(TYPE), value__); \
+    #TYPE, (ull_t)vaddr__, _Alignof(TYPE), (ull_t)value__); \
   value__; \
 })
 
@@ -183,7 +184,7 @@ enum execerr_t {
   u64 vaddr__ = (vaddr); \
   u64 value__ = (value); \
   tracemem("STORE %s 0x%llx (align %lu) => 0x%llx", \
-    #TYPE, vaddr__, _Alignof(TYPE), value__); \
+    #TYPE, (ull_t)vaddr__, _Alignof(TYPE), (ull_t)value__); \
   VM_STORE( \
     TYPE, &(t)->m->vm_cache[VM_PERM_RW], &(t)->m->s->vm_pagedir, vaddr__, value__); \
 }
@@ -267,9 +268,9 @@ static bool _syscall(T* t, u64* iregs, usize pc, u32 syscall_op) {
     if (nsec == 0)
       return true; // no-op
     enter_syscall(t);
-    dlog("sleeping for %llu ns", nsec);
+    dlog("sleeping for %llu ns", (ull_t)nsec);
     u64 remaining = rsm_nanosleep(nsec);
-    dlog("rsm_nanosleep() => remaining %llu", remaining);
+    dlog("rsm_nanosleep() => remaining %llu", (ull_t)remaining);
     iregs[0] = remaining;
     return exit_syscall(t, /*priority*/0);
   }
@@ -282,7 +283,7 @@ static bool _syscall(T* t, u64* iregs, usize pc, u32 syscall_op) {
 // —————————— arithmetic
 
 static void on_overflow(T* t, usize pc, rop_t op, i64 x, i64 y, i64* dst) {
-  char opch;
+  char opch = '?';
   const char* typename = "i64";
 
   switch (op) {
@@ -310,7 +311,8 @@ static void on_overflow(T* t, usize pc, rop_t op, i64 x, i64 y, i64* dst) {
   }
 
   // TODO raise error in scheduler/current task
-  panic("signed integer overflow: %lld %c %lld overflows %s", x, opch, y, typename);
+  panic("signed integer overflow: %lld %c %lld overflows %s",
+    (ill_t)x, opch, (ill_t)y, typename);
 }
 
 // void CHECK_OVERFLOW(name OP, name T, T x, T y, T* dstptr)

@@ -34,8 +34,8 @@
 
 // RSM addition: silence -Wcovered-switch-default
 // "default label in switch which covers all enumeration values"
-#if defined(__clang__) || defined(__gcc__)
-_Pragma("GCC diagnostic ignored \"-Wcovered-switch-default\"")
+#if defined(__clang__) && defined(_Pragma)
+    _Pragma("GCC diagnostic ignored \"-Wcovered-switch-default\"")
 #endif
 
 /*-************************************

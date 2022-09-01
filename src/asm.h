@@ -15,15 +15,15 @@ typedef struct rposrange {
 
 // rasm._internal[0] -- negated diaghandler return value
 #define rasm_stop(a)        ( (bool)(a)->_internal[0] )
-#define rasm_stop_set(a,v)  ( *(bool*)&(a)->_internal[0] = (v) )
+#define rasm_stop_set(a,v)  ( (a)->_internal[0] = (uintptr)(v) )
 
 // rasm._internal[1]-- reusable internal codegen state
 #define rasm_gstate(a)        ( (gstate*)(a)->_internal[1] )
-#define rasm_gstate_set(a,v)  ( *(gstate**)&(a)->_internal[1] = (v) )
+#define rasm_gstate_set(a,v)  ( (a)->_internal[1] = (uintptr)(v) )
 
 // rasm._internal[2]-- reusable internal codegen state
 #define rasm_pstate(a)        ( (pstate*)(a)->_internal[2] )
-#define rasm_pstate_set(a,v)  ( *(pstate**)&(a)->_internal[2] = (v) )
+#define rasm_pstate_set(a,v)  ( (a)->_internal[2] = (uintptr)(v) )
 
 const char* tokname(rtok_t t);
 
@@ -76,8 +76,8 @@ static void dlog_asm(rmemalloc_t* ma, const rin_t* iv, usize icount);
 // ————————————————
 // bufslab
 
-#define BUFSLAB_MIN_CAP 512
-#define BUFSLAB_ALIGN   16
+#define BUFSLAB_MIN_CAP 512u
+#define BUFSLAB_ALIGN   16u
 static_assert(BUFSLAB_MIN_CAP >= BUFSLAB_ALIGN, "");
 static_assert(IS_ALIGN2(BUFSLAB_MIN_CAP, BUFSLAB_ALIGN), "");
 

@@ -5,8 +5,8 @@
 
 // ROM version range this code can handle.
 // rom_build produces version ROM_VERSION_MAX ROMs.
-#define ROM_VERSION_MIN 0
-#define ROM_VERSION_MAX 0
+#define ROM_VERSION_MIN 0u
+#define ROM_VERSION_MAX 0u
 
 // RSM_WITH_LZ4: define to enable creation of LZ4 compressed ROMs
 #define RSM_WITH_LZ4
@@ -146,7 +146,7 @@ usize rromimg_loadsize(const rromimg_t* img, usize imgsize) {
 
     int z = LZ4_decompress_safe(src, dstmem.p, (int)compressed_size, (int)dstmem.size);
     if UNLIKELY(z < 0 || (u64)z != uncompressed_size) {
-      dlog("LZ4_decompress_safe => %d (expected %llu)", z, uncompressed_size);
+      dlog("LZ4_decompress_safe => %d (expected %llu)", z, (ull_t)uncompressed_size);
       log("%scorrupt compressed image", errprefix);
       return rerr_invalid;
     }
@@ -196,7 +196,7 @@ static rerr_t load_section_DATA(LPARAMS) {
 static rerr_t load_section_CODE(LPARAMS) {
   ALIGN_P_AND_CHECK_BOUNDS(CODE_ALIGNMENT);
   if UNLIKELY(!IS_ALIGN2(size, CODE_ALIGNMENT))
-    return perr("CODE section size %llu not aligned to %zu", size, CODE_ALIGNMENT);
+    return perr("CODE section size %llu not aligned to %zu", (ull_t)size,CODE_ALIGNMENT);
   rom->code = (const void*)p;
   rom->codelen = (usize)( size / CODE_ALIGNMENT ); // #bytes -> #instructions
   p += size;

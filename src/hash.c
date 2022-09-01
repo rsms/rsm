@@ -16,6 +16,8 @@ void fastrand_seed(u64 seed) {
   fastrand_state = seed;
 }
 
+typedef u64 ATTR_MAY_ALIAS u64a_t;
+
 u32 fastrand() {
   #ifdef __SIZEOF_INT128__
     // wyrand (https://github.com/wangyi-fudan/wyhash)
@@ -24,9 +26,9 @@ u32 fastrand() {
     __uint128_t r =
       (__uint128_t)fastrand_state * (__uint128_t)(fastrand_state ^ 0xe7037ed1a0b428db);
     #if RSM_LITTLE_ENDIAN
-      u64 hi = ((u64*)&r)[0], lo = ((u64*)&r)[1];
+      u64a_t hi = ((u64a_t*)&r)[0], lo = ((u64a_t*)&r)[1];
     #else
-      u64 hi = ((u64*)&r)[1], lo = ((u64*)&r)[0];
+      u64a_t hi = ((u64a_t*)&r)[1], lo = ((u64a_t*)&r)[0];
     #endif
     return (u32)(hi ^ lo);
   #else

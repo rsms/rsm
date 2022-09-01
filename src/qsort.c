@@ -27,16 +27,10 @@
 //       void* ctx,                                             ← ctx position
 //       int (*cmp)(void* ctx, const void* x, const void* y));  ← cmp & ctx position
 //
-// For this reason we use qsort from musl (unless we are linking with a compatible libc)
+// For this reason we use qsort from musl
 //
 #include "rsmimpl.h"
-#if !defined(RSM_NO_LIBC) && defined(__linux__)
-#include <stdlib.h>
-void rsm_qsort(void* base, usize nmemb, usize size, rsm_qsort_cmp cmp, void* nullable ctx) {
-  return qsort_r(base, nmemb, size, cmp, ctx);
-}
-#else
-// use qsort from musl, licensed as follows:
+// qsort from musl, licensed as follows:
 
 /* Copyright (C) 2011 by Valentin Ochs
  *
@@ -255,6 +249,3 @@ void rsm_qsort(void *base, size_t nel, size_t width, cmpfun cmp, void* nullable 
     head -= width;
   }
 }
-
-
-#endif // RSM_NO_LIBC

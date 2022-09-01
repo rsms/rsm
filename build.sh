@@ -13,6 +13,7 @@ NINJA_ARGS=()
 NON_WATCH_ARGS=()
 TESTING_ENABLED=
 STRIP=false
+STATIC=false
 DEBUGGABLE=false
 
 while [[ $# -gt 0 ]]; do
@@ -28,6 +29,8 @@ while [[ $# -gt 0 ]]; do
   -fast)   BUILD_MODE=fast; TESTING_ENABLED=; shift ;;
   -debug)  BUILD_MODE=debug; TESTING_ENABLED=1; DEBUGGABLE=true; shift ;;
   -strip)  STRIP=true; DEBUGGABLE=false; shift ;;
+  -static) STATIC=true; shift ;;
+  -out=*)  OUTDIR=${1:5}; shift; continue ;;
   -g)      DEBUGGABLE=true; shift ;;
   -v)      NINJA_ARGS+=(-v); shift ;;
   -h|-help|--help) cat << _END
@@ -41,6 +44,7 @@ options:
   -w         Rebuild as sources change
   -wf=<file> Watch <file> for changes (can be provided multiple times)
   -run=<cmd> Run <cmd> after successful build
+  -out=<dir> Build in <dir> instead of "$OUTDIR".
   -help      Show help on stdout and exit
 _END
     exit ;;
@@ -52,7 +56,22 @@ esac; done
 
 # -w to enter "watch & build & run" mode
 if [ -n "$WATCH" ]; then
-  command -v fswatch >/dev/null || _err "fswatch not found in PATH"
+  WATCH_TOOL=fswatch
+  # note: inotifywait is part of inotify-tools
+  command -v $WATCH_TOOL >/dev/null || WATCH_TOOL=inotifywait
+  command -v $WATCH_TOOL >/dev/null ||
+    _err "no watch tool available (looked for fswatch and inotifywait in PATH)"
+
+  _fswatch() {
+    if [ "$WATCH_TOOL" = fswatch ]; then
+      fswatch --one-event --extended --latency=0.1 \
+        --exclude='\.(a|o)$' --recursive "$@"
+    else
+      inotifywait -e modify -e create -e delete -e move -qq \
+        --exclude='\.(a|o)$' --recursive "$@"
+    fi
+  }
+
   # case "$RUN" in
   #   *" "*) RUN="$SHELL -c '$RUN'" ;;
   # esac
@@ -94,15 +113,13 @@ if [ -n "$WATCH" ]; then
         echo "$RUN (#$RUN_PID) exited"
       ) &
     fi
-    fswatch --one-event --extended --latency=0.1 \
-            --exclude='\.(a|o)$' \
-            --recursive \
-            src "$(basename "$0")" "${WATCH_ADDL_FILES[@]}"
+    _fswatch src "$(basename "$0")" "${WATCH_ADDL_FILES[@]}"
   done
   exit 0
 fi
 
 CC_IS_CLANG=false
+CC_IS_GCC=false
 if [ -z "$CC" ]; then
   # use clang from known preferred location, if available
   if [ -x /usr/local/opt/llvm/bin/clang ]; then
@@ -113,14 +130,20 @@ if [ -z "$CC" ]; then
     export PATH=/opt/homebrew/opt/llvm/bin:$PATH
     export CC=clang
     CC_IS_CLANG=true
+  elif command -v gcc > /dev/null; then
+    export CC=gcc
+    CC_IS_GCC=true
   else
     export CC=cc
   fi
 fi
 CC_PATH=$(command -v "$CC" || true)
-[ -f "$CC_PATH" ] || _err "CC (\"$CC\") not found"
-if ! $CC_IS_CLANG && $CC --version 2>/dev/null | head -n1 | grep -q clang; then
-  CC_IS_CLANG=true
+[ -f "$CC_PATH" ] || _err "no suitable compiler found (CC=\"$CC\")"
+if ! $CC_IS_CLANG && ! $CC_IS_GCC; then
+  case "$($CC --version 2>/dev/null)" in
+    *clang*) CC_IS_CLANG=true ;;
+    *"Free Software Foundation"*) CC_IS_GCC=true ;;
+  esac
 fi
 [ -z "$_WATCHED" ] && echo "using compiler $CC_PATH"
 
@@ -148,7 +171,7 @@ LDFLAGS_HOST=( $LDFLAGS )      # LDFLAGS from env
 LDFLAGS_WASM=( $LDFLAGS_WASM ) # LDFLAGS_WASM from env (note: liker is wasm-ld, not cc)
 
 if $DEBUG; then
-  CFLAGS+=( -O0 -DDEBUG -ferror-limit=6 )
+  CFLAGS+=( -O0 -DDEBUG )
 else
   CFLAGS+=( -DNDEBUG )
   # LDFLAGS_WASM+=( -z stack-size=$[128 * 1024] ) # larger stack, smaller heap
@@ -170,11 +193,36 @@ elif $DEBUGGABLE; then
   CFLAGS+=( -g -feliminate-unused-debug-types )
 fi
 
+if $STATIC; then
+  LDFLAGS_HOST+=( -static )
+fi
+
+if $CC_IS_CLANG; then
+  CFLAGS+=(
+    -fcolor-diagnostics \
+    -Wcovered-switch-default \
+    -Werror=implicit-function-declaration \
+    -Werror=incompatible-pointer-types \
+    -Werror=format-insufficient-args \
+  )
+elif $CC_IS_GCC; then
+  CFLAGS+=(
+    -fdiagnostics-color \
+    -Wswitch-enum \
+    -Wno-format-zero-length \
+    -Wno-comment \
+    -Wno-expansion-to-defined \
+    -Wno-type-limits \
+  )
+fi
+
 # enable llvm address and UD sanitizer in debug builds
 if $DEBUG && $CC_IS_CLANG; then
   # See https://clang.llvm.org/docs/AddressSanitizer.html
   # See https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html
   CFLAGS_HOST+=(
+    -ferror-limit=6 \
+    \
     -fsanitize=address,undefined \
     \
     -fsanitize-address-use-after-scope \
@@ -201,16 +249,12 @@ objdir = \$builddir/$BUILD_MODE
 
 cflags = $
   -std=c11 $
-  -fcolor-diagnostics $
   -fvisibility=hidden $
   -Wall -Wextra -Wvla $
   -Wimplicit-fallthrough $
   -Wno-missing-field-initializers $
   -Wno-unused-parameter $
-  -Werror=implicit-function-declaration $
-  -Werror=incompatible-pointer-types $
-  -Werror=format-insufficient-args $
-  -Wcovered-switch-default ${CFLAGS[@]}
+  ${CFLAGS[@]}
 
 cflags_host = ${CFLAGS_HOST[@]}
 

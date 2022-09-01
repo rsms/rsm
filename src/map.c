@@ -382,7 +382,7 @@ usize smap_cfmt(char* buf, usize bufcap, const smap* m, const char* name) {
     "static const struct{u32 cap,len,gcap;maplf lf;hash_t hash0;const smapent* ep;}\n"
     "%s_data={%u,%u,%u,%u,0x%llx,%s_entries};\n"
     "static const smap* %s = (const smap*)&%s_data;",
-    name, m->cap, m->len, m->gcap, m->lf, (u64)m->hash0, name, name, name
+    name, m->cap, m->len, m->gcap, m->lf, (ull_t)m->hash0, name, name, name
   );
   return abuf_terminate(&s);
 }

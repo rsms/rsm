@@ -6,27 +6,66 @@
   #undef RSM_NO_INT_DEFS
 #endif
 #include "rsm.h"
-
-typedef signed char         i8;
-typedef unsigned char       u8;
-typedef signed short        i16;
-typedef unsigned short      u16;
-typedef signed int          i32;
-typedef unsigned int        u32;
-typedef signed long long    i64;
-typedef unsigned long long  u64;
-typedef float               f32;
-typedef double              f64;
-typedef unsigned int        uint;
-typedef signed long         isize;
-typedef unsigned long       usize;
-#ifdef __INTPTR_TYPE__
-  typedef __INTPTR_TYPE__   intptr;
-  typedef __UINTPTR_TYPE__  uintptr;
+#ifndef RSM_NO_LIBC
+  // note that rsm.h includes <stdint.h> and <stddef.h>
+  #include <sys/types.h> // ssize_t
+  typedef int8_t    i8;
+  typedef uint8_t   u8;
+  typedef int16_t   i16;
+  typedef uint16_t  u16;
+  typedef int32_t   i32;
+  typedef uint32_t  u32;
+  typedef int64_t   i64;
+  typedef uint64_t  u64;
+  typedef size_t    usize;
+  typedef ssize_t   isize;
+  typedef intptr_t  intptr;
+  typedef uintptr_t uintptr;
 #else
-  typedef signed long       intptr;
-  typedef unsigned long     uintptr;
+  typedef signed char        i8;
+  typedef unsigned char      u8;
+  typedef signed short       i16;
+  typedef unsigned short     u16;
+  typedef signed int         i32;
+  typedef unsigned int       u32;
+  typedef signed long long   i64;
+  typedef unsigned long long u64;
+  #ifdef __INTPTR_MAX__
+    #define INTPTR_MIN  (-__INTPTR_MAX__-1L)
+    #define INTPTR_MAX  __INTPTR_MAX__
+    #define UINTPTR_MAX __UINTPTR_MAX__
+  #else
+    #define INTPTR_MIN  ISIZE_MIN
+    #define INTPTR_MAX  ISIZE_MAX
+    #define UINTPTR_MAX USIZE_MAX
+  #endif
+  #ifdef __SIZE_TYPE__
+    typedef __SIZE_TYPE__ usize;
+    #if defined(__UINTPTR_MAX__) && defined(__INTPTR_TYPE__) && \
+        __SIZE_MAX__ == __UINTPTR_MAX__
+      typedef __INTPTR_TYPE__ isize;
+    #else
+      typedef signed long isize;
+    #endif
+  #else
+    typedef unsigned long usize;
+    typedef signed long   isize;
+  #endif
+  #ifdef __INTPTR_TYPE__
+    typedef __INTPTR_TYPE__  intptr;
+    typedef __UINTPTR_TYPE__ uintptr;
+  #else
+    typedef signed long      intptr;
+    typedef unsigned long    uintptr;
+  #endif
 #endif
+
+// because PRIu64 is sad
+typedef unsigned long long ull_t;
+typedef long long          ill_t;
+
+typedef float  f32;
+typedef double f64;
 
 #define I8_MAX    0x7f
 #define I16_MAX   0x7fff
@@ -44,16 +83,10 @@ typedef unsigned long       usize;
 #define U16_MAX   0xffff
 #define U32_MAX   0xffffffff
 #define U64_MAX   0xffffffffffffffff
-#define USIZE_MAX (__LONG_MAX__ *2UL+1UL)
-
-#ifdef __INTPTR_MAX__
-  #define INTPTR_MIN  (-__INTPTR_MAX__-1L)
-  #define INTPTR_MAX  __INTPTR_MAX__
-  #define UINTPTR_MAX __UINTPTR_MAX__
+#ifdef __SIZE_MAX__
+  #define USIZE_MAX __SIZE_MAX__
 #else
-  #define INTPTR_MIN  ISIZE_MIN
-  #define INTPTR_MAX  ISIZE_MAX
-  #define UINTPTR_MAX USIZE_MAX
+  #define USIZE_MAX (__LONG_MAX__ *2UL+1UL)
 #endif
 
 #ifndef __cplusplus
@@ -112,6 +145,12 @@ typedef unsigned long       usize;
   #define ATTR_PACKED
 #endif
 
+#if __has_attribute(may_alias)
+  #define ATTR_MAY_ALIAS __attribute__((__may_alias__))
+#else
+  #define ATTR_MAY_ALIAS
+#endif
+
 #ifdef __wasm__
   #define WASM_EXPORT __attribute__((visibility("default")))
   #define WASM_IMPORT __attribute__((visibility("default")))
@@ -133,6 +172,20 @@ typedef unsigned long       usize;
   #define ATTR_FORMAT(...)
 #endif
 
+// don't use __builtin_* compiler intrinsics for WASM
+#if defined(__wasm__) && !defined(__wasi__)
+  #define RSM_NO_CC_BUILTINS 1
+#endif
+
+// expose Linux/GNU specific libc APIs
+#ifdef __linux__
+  #define _GNU_SOURCE
+#endif
+
+#ifndef _Nonnull
+  #define _Nonnull
+#endif
+
 // RSM_LITTLE_ENDIAN=0|1
 #ifndef RSM_LITTLE_ENDIAN
   #if defined(__LITTLE_ENDIAN__) || \
@@ -142,7 +195,7 @@ typedef unsigned long       usize;
         (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
     #define RSM_LITTLE_ENDIAN 0
   #else
-    #error Can't determine endianness -- please define RSM_LITTLE_ENDIAN=0|1
+    #error "Can't determine endianness -- please define RSM_LITTLE_ENDIAN=0|1"
   #endif
 #endif
 
@@ -211,14 +264,14 @@ typedef unsigned long       usize;
   #define UNREACHABLE abort()
 #endif
 
-#if defined(__clang__) || defined(__gcc__)
-  #define _DIAGNOSTIC_IGNORE_PUSH(x)  _Pragma("GCC diagnostic push") _Pragma(#x)
-  #define DIAGNOSTIC_IGNORE_PUSH(STR) _DIAGNOSTIC_IGNORE_PUSH(GCC diagnostic ignored STR)
-  #define DIAGNOSTIC_IGNORE_POP()     _Pragma("GCC diagnostic pop")
-#else
-  #define DIAGNOSTIC_IGNORE_PUSH(STR)
-  #define DIAGNOSTIC_IGNORE_POP()
+#ifndef _Pragma
+  #error no _Pragma
+  #define _Pragma(x)
 #endif
+
+#define _DIAGNOSTIC_IGNORE_PUSH(x)  _Pragma("GCC diagnostic push") _Pragma(#x)
+#define DIAGNOSTIC_IGNORE_PUSH(STR) _DIAGNOSTIC_IGNORE_PUSH(GCC diagnostic ignored STR)
+#define DIAGNOSTIC_IGNORE_POP()     _Pragma("GCC diagnostic pop")
 
 #ifndef countof
   #define countof(x) \
@@ -299,10 +352,10 @@ typedef unsigned long       usize;
 // branchless ( on ? (flags | flag) : (flags & ~flag) )
 #define COND_FLAG(flags, flag, on) ({ \
   __typeof__(flags) flags__ = (flags); \
-  (flags__ ^ ( (__typeof__(flags))-(!!(on)) ^ flags__ ) & (__typeof__(flags))(flag)); \
+  (flags__ ^ (( (__typeof__(flags))-(!!(on)) ^ flags__ ) & (__typeof__(flags))(flag)));\
 })
 #define COND_FLAG_X(flags, flag, on) \
-  ((flags) ^ ( (__typeof__(flags))-(!!(on)) ^ (flags) ) & (__typeof__(flags))(flag))
+  ((flags) ^ (( (__typeof__(flags))-(!!(on)) ^ (flags) ) & (__typeof__(flags))(flag)))
 
 // POISON constants are non-NULL addresses which will result in page faults on access.
 // Values match those of Linux.
@@ -352,7 +405,7 @@ typedef unsigned long       usize;
   i16:  __builtin_ctz,   u16:   __builtin_ctz, \
   i32:  __builtin_ctz,   u32:   __builtin_ctz, \
   long: __builtin_ctzl,  unsigned long: __builtin_ctzl, \
-  i64:  __builtin_ctzll, u64:   __builtin_ctzll)(x)
+  long long:  __builtin_ctzll, unsigned long long:   __builtin_ctzll)(x)
 
 // int rsm_clz(ANYUINT x) counts leading zeroes in x,
 // starting at the most significant bit position.
@@ -363,7 +416,7 @@ typedef unsigned long       usize;
     i16:  __builtin_clz,   u16:   __builtin_clz, \
     i32:  __builtin_clz,   u32:   __builtin_clz, \
     long: __builtin_clzl,  unsigned long: __builtin_clzl, \
-    i64:  __builtin_clzll, u64:   __builtin_clzll \
+    long long:  __builtin_clzll, unsigned long long:   __builtin_clzll \
   )(x) - ( 32 - MIN_X(4, (int)sizeof(__typeof__(x)))*8 ) \
 )
 #define RSM_CLZ_X rsm_clz
@@ -376,7 +429,7 @@ typedef unsigned long       usize;
   i16:  __builtin_ffs,   u16:   __builtin_ffs, \
   i32:  __builtin_ffs,   u32:   __builtin_ffs, \
   long: __builtin_ffsl,   unsigned long: __builtin_ffsl, \
-  i64:  __builtin_ffsll, u64:   __builtin_ffsll \
+  long long:  __builtin_ffsll, unsigned long long: __builtin_ffsll \
 )(x)
 #define RSM_FFS_X  rsm_ffs
 
@@ -644,46 +697,44 @@ typedef __builtin_va_list va_list;
 RSM_ASSUME_NONNULL_BEGIN
 
 // minimal set of libc functions
-#define HAS_LIBC_BUILTIN(f) \
-  (__has_builtin(f) && (!defined(__wasm__) || defined(__wasi__)))
 
-#if HAS_LIBC_BUILTIN(__builtin_memset)
+#if __has_builtin(__builtin_memset) && !RSM_NO_CC_BUILTINS
   #define memset __builtin_memset
 #else
   void* memset(void* p, int c, usize n);
 #endif
 
-#if HAS_LIBC_BUILTIN(__builtin_memcpy)
+#if __has_builtin(__builtin_memcpy) && !RSM_NO_CC_BUILTINS
   #define memcpy __builtin_memcpy
 #else
   void* memcpy(void* restrict dst, const void* restrict src, usize n);
 #endif
 
-#if HAS_LIBC_BUILTIN(__builtin_memmove)
+#if __has_builtin(__builtin_memmove) && !RSM_NO_CC_BUILTINS
   #define memmove __builtin_memmove
 #else
   void* memmove(void* dest, const void* src, usize n);
 #endif
 
-#if HAS_LIBC_BUILTIN(__builtin_memcmp)
+#if __has_builtin(__builtin_memcmp) && !RSM_NO_CC_BUILTINS
   #define memcmp __builtin_memcmp
 #else
   int memcmp(const void* l, const void* r, usize n);
 #endif
 
-#if HAS_LIBC_BUILTIN(__builtin_strlen)
+#if __has_builtin(__builtin_strlen) && !RSM_NO_CC_BUILTINS
   #define strlen __builtin_strlen
 #else
   usize strlen(const char* s);
 #endif
 
-#if HAS_LIBC_BUILTIN(__builtin_strcmp)
+#if __has_builtin(__builtin_strcmp) && !RSM_NO_CC_BUILTINS
   #define strcmp __builtin_strcmp
 #else
   int strcmp(const char* l, const char* r);
 #endif
 
-#if defined(__wasm__) && !defined(__wasi__)
+#if RSM_NO_CC_BUILTINS
   int vsnprintf(char *restrict s, usize n, const char *restrict fmt, va_list ap);
   int snprintf(char* restrict s, usize n, const char* restrict fmt, ...);
 #endif // printf
@@ -713,7 +764,7 @@ void rsm_qsort(void* base, usize nmemb, usize size, rsm_qsort_cmp cmp, void* nul
 
 #define tolower(c) ((c) | 0x20)
 
-usize stru64(char buf[64], u64 v, u32 base);
+usize stru64(char* buf, u64 v, u32 base);
 rerr_t parseu64(const char* src, usize srclen, int base, u64* result, u64 cutoff);
 
 rerr_t mmapfile(const char* filename, rmem_t* data_out);

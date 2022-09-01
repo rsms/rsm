@@ -38,7 +38,7 @@ static_assert(sizeof(vm_pte_t) == sizeof(u64), "vm_pte_t too large");
 
 // vm_pte_t printf formatting
 #define PTE_FMT          "(0x%llx)"
-#define PTE_FMTARGS(pte) (pte).outaddr
+#define PTE_FMTARGS(pte) ((ull_t)(pte).outaddr)
 
 
 // getbits returns the (right adjusted) n-bit field of x that begins at position p.
@@ -86,7 +86,7 @@ static vm_ptab_t nullable vm_ptab_create(rmm_t* mm) {
   vm_ptab_t ptab = rmm_allocpages(mm, VM_PTAB_SIZE / PAGE_SIZE);
   if UNLIKELY(ptab == NULL)
     return NULL;
-  #ifdef VM_ZERO_PAGES
+  #ifndef VM_ZERO_PAGES
   memset(ptab, 0, VM_PTAB_SIZE);
   #endif
   return ptab;
@@ -158,7 +158,7 @@ static vm_pte_t* nullable alloc_backing_page(vm_pagedir_t* pagedir, vm_pte_t* pt
 static vm_pte_t* nullable vm_pagedir_access(
   vm_pagedir_t* pagedir, u64 vfn, bool isaccess)
 {
-  assertf(vfn <= VM_VFN_MAX, "invalid VFN 0x%llx", vfn);
+  assertf(vfn <= VM_VFN_MAX, "invalid VFN 0x%llx", (ull_t)vfn);
   u32 bits = 0;
   u64 masked_vfn = vfn;
   vm_ptab_t ptab = pagedir->root;
@@ -168,12 +168,12 @@ static vm_pte_t* nullable vm_pagedir_access(
   mutex_lock(&pagedir->lock);
 
   for (;;) {
-    u64 index = getbits(masked_vfn, VFN_BITS - (1+bits), VM_PTAB_BITS);
+    usize index = (usize)getbits(masked_vfn, VFN_BITS - (1+bits), VM_PTAB_BITS);
     pte = &ptab[index];
 
     trace(
-      "lookup vfn 0x%llx L %u; index %llu = getbits(0x%llx, %u-(1+%u), %u)",
-      vfn+1, level, index, masked_vfn, VFN_BITS, bits, VM_PTAB_BITS);
+      "lookup vfn 0x%llx L %u; index %zu = getbits(0x%llx, %u-(1+%u), %u)",
+      (ull_t)vfn+1, level, index, (ull_t)masked_vfn, VFN_BITS, bits, VM_PTAB_BITS);
 
     if (level == VM_PTAB_LEVELS) {
       if UNLIKELY(*(u64*)pte == 0) {
@@ -208,7 +208,8 @@ rerr_t vm_unmap(vm_pagedir_t* pagedir, u64 vaddr, usize npages) {
   // TODO: rewrite this function like vm_map (based on logic in vm_pagedir_access)
   u64 vfn = VM_VFN(vaddr);
 
-  trace("unmap 0x%llx (vfn 0x%llx, %zu pages)", VM_PAGE_ADDR(vaddr), vfn, npages);
+  trace("unmap 0x%llx (vfn 0x%llx, %zu pages)",
+    (ull_t)VM_PAGE_ADDR(vaddr), (ull_t)vfn, npages);
 
   for (u64 vfn_end = vfn + npages; vfn < vfn_end; vfn++) {
     vm_pte_t* pte = vm_pagedir_access(pagedir, vfn, /*is_access*/false);
@@ -221,7 +222,7 @@ rerr_t vm_unmap(vm_pagedir_t* pagedir, u64 vaddr, usize npages) {
 }
 
 
-static vm_ptab_t nullable new_ptab(vm_pagedir_t* pagedir, vm_ptab_t parent, u64 index) {
+static vm_ptab_t nullable new_ptab(vm_pagedir_t* pagedir, vm_ptab_t parent, usize index) {
   vm_ptab_t ptab = vm_ptab_create(pagedir->mm);
   if UNLIKELY(!ptab) {
     // out of backing memory
@@ -233,8 +234,8 @@ static vm_ptab_t nullable new_ptab(vm_pagedir_t* pagedir, vm_ptab_t parent, u64 
   u64 ptab_hfn = ((u64)(uintptr)ptab) >> PAGE_SIZE_BITS;
   parent[index] = (vm_pte_t){ .outaddr = ptab_hfn };
 
-  trace("allocated page table %p (HFN 0x%llx) +0x%lx at parent[%llu]",
-    ptab, ptab_hfn, VM_PTAB_SIZE, index);
+  trace("allocated page table %p (HFN 0x%llx) +0x%lx at parent[%zu]",
+    ptab, (ull_t)ptab_hfn, VM_PTAB_SIZE, index);
 
   assertf(IS_ALIGN2((u64)(uintptr)ptab, PAGE_SIZE),
     "ptab_create did not allocate vm_ptab_t on a page boundary (0x%lx/%u)",
@@ -248,7 +249,8 @@ rerr_t vm_map(
   vm_pagedir_t* pagedir, uintptr haddr, u64 vaddr, usize npages, vm_perm_t perm)
 {
   assertf(IS_ALIGN2((uintptr)haddr, PAGE_SIZE), "haddr 0x%lx not page aligned", haddr);
-  assertf(vaddr >= VM_ADDR_MIN && VM_ADDR_MAX >= vaddr, "invalid vaddr 0x%llx", vaddr);
+  assertf(vaddr >= VM_ADDR_MIN && VM_ADDR_MAX >= vaddr,
+    "invalid vaddr 0x%llx", (ull_t)vaddr);
 
   if (npages == 0)
     return 0;
@@ -265,11 +267,16 @@ rerr_t vm_map(
     u64 masked_vfn = vfn;
     vm_ptab_t ptab = pagedir->root;
     u8 level = 1;
-    u64 index;
+    usize index;
+
 
   visit_next_ptab:
-    index = getbits(masked_vfn, VFN_BITS - (1+bits), VM_PTAB_BITS);
+    index = (usize)getbits(masked_vfn, VFN_BITS - (1+bits), VM_PTAB_BITS);
+
     pte = &ptab[index];
+
+    if (ptab == NULL) panic("NULL ptab");
+    if (pte == NULL) panic("NULL pte at index %zu", index);
 
     if (level < VM_PTAB_LEVELS) {
       // page table branch
@@ -286,6 +293,7 @@ rerr_t vm_map(
         // traverse existing table
         assert(pte->outaddr != 0);
         ptab = (vm_ptab_t)(uintptr)(pte->outaddr << PAGE_SIZE_BITS);
+        if (ptab == NULL) panic("NULL ptab (2)");
       }
       goto visit_next_ptab;
     }
@@ -293,11 +301,12 @@ rerr_t vm_map(
     // page table leaf entry
     assert(npages > 0);
     for (;;) {
-      trace("map 0x%llx => 0x%lx %s (vfn 0x%llx, ptab[%llu])",
-        VM_VFN_VADDR(vfn), haddr, vm_perm_str(perm), vfn, index);
+      trace("map 0x%llx => 0x%lx %s (vfn 0x%llx, ptab[%zu])",
+        (ull_t)VM_VFN_VADDR(vfn), haddr, vm_perm_str(perm), (ull_t)vfn, index);
 
       if UNLIKELY(*(u64*)pte) {
-        dlog("trying to map already-mapped page at vaddr 0x%llx", VM_VFN_VADDR(vfn));
+        dlog("trying to map already-mapped page at vaddr 0x%llx",
+          (ull_t)VM_VFN_VADDR(vfn));
         err = rerr_exists;
         goto end;
       }
@@ -363,15 +372,17 @@ void vm_cache_invalidate(vm_cache_t* cache, u64 vaddr, usize npages) {
 
 // returns vm_cache_ent_t.haddr_diff
 static u64 vm_cache_add(vm_cache_t* cache, u64 vpaddr, uintptr hpaddr) {
-  assertf(IS_ALIGN2(vpaddr, PAGE_SIZE), "vpaddr not a page address 0x%llx", vpaddr);
-  assertf(IS_ALIGN2(hpaddr, PAGE_SIZE), "hpaddr not a page address %p", (void*)hpaddr);
+  assertf(IS_ALIGN2(vpaddr, PAGE_SIZE),
+    "vpaddr not a page address 0x%llx", (ull_t)vpaddr);
+  assertf(IS_ALIGN2(hpaddr, PAGE_SIZE),
+    "hpaddr not a page address %p", (void*)hpaddr);
 
   vm_cache_ent_t* entry = VM_CACHE_ENTRY(cache, vpaddr);
   entry->haddr_diff = (u64)hpaddr - vpaddr;
   entry->tag = vpaddr;
 
   trace("%s 0x%llx => {.haddr_diff=0x%llx, .tag=0x%llx}",
-    __FUNCTION__, vpaddr, entry->haddr_diff, entry->tag);
+    __FUNCTION__, (ull_t)vpaddr, (ull_t)entry->haddr_diff, (ull_t)entry->tag);
 
   return entry->haddr_diff;
 }
@@ -379,18 +390,18 @@ static u64 vm_cache_add(vm_cache_t* cache, u64 vpaddr, uintptr hpaddr) {
 
 // returns vm_cache_ent_t.haddr_diff
 u64 _vm_cache_miss(vm_cache_t* cache, vm_pagedir_t* pagedir, u64 vaddr, vm_op_t op) {
-  trace("%s 0x%llx op=0x%x", __FUNCTION__, vaddr, op);
+  trace("%s 0x%llx op=0x%x", __FUNCTION__, (ull_t)vaddr, op);
 
   // check validity
   if UNLIKELY(VM_ADDR_MIN > vaddr || vaddr > VM_ADDR_MAX) {
-    panic("invalid address 0x%llx (out of range)", vaddr); // FIXME
+    panic("invalid address 0x%llx (out of range)", (ull_t)vaddr); // FIXME
     return 0;
   }
 
   // check alignment
   if UNLIKELY(!IS_ALIGN2(vaddr, VM_OP_ALIGNMENT(op))) {
     const char* opname = VM_OP_TYPE(op) == VM_OP_LOAD ? "load from" : "store to";
-    panic("misaligned %uB %s 0x%llx", VM_OP_ALIGNMENT(op), opname, vaddr); // FIXME
+    panic("misaligned %uB %s 0x%llx", VM_OP_ALIGNMENT(op), opname, (ull_t)vaddr);// FIXME
   }
 
   // get page table entry for the virtual page address (lookup via VFN)
@@ -398,7 +409,7 @@ u64 _vm_cache_miss(vm_cache_t* cache, vm_pagedir_t* pagedir, u64 vaddr, vm_op_t 
 
   // check if the lookup failed
   if UNLIKELY(!pte) {
-    panic("invalid address 0x%llx (not mapped)", vaddr);
+    panic("invalid address 0x%llx (not mapped)", (ull_t)vaddr);
     return 0;
   }
 
@@ -410,8 +421,8 @@ u64 _vm_cache_miss(vm_cache_t* cache, vm_pagedir_t* pagedir, u64 vaddr, vm_op_t 
   if UNLIKELY(!VM_PERM_CHECK(hasperm, wantperm)) {
     trace("wantperm %s not in hasperm %s", vm_perm_str(wantperm), vm_perm_str(hasperm));
     if (VM_OP_TYPE(op) == VM_PERM_R)
-      panic("store to read-protected address 0x%llx", vaddr);
-    panic("store to read-only address 0x%llx", vaddr);
+      panic("store to read-protected address 0x%llx", (ull_t)vaddr);
+    panic("store to read-only address 0x%llx", (ull_t)vaddr);
     return 0;
   }
 
@@ -422,7 +433,7 @@ u64 _vm_cache_miss(vm_cache_t* cache, vm_pagedir_t* pagedir, u64 vaddr, vm_op_t 
   uintptr hpaddr = (uintptr)(pte->outaddr << PAGE_SIZE_BITS);
   u64 vpaddr = VM_PAGE_ADDR(vaddr);
 
-  trace("%s 0x%llx -> %p", __FUNCTION__, vaddr, (void*)hpaddr);
+  trace("%s 0x%llx -> %p", __FUNCTION__, (ull_t)vaddr, (void*)hpaddr);
 
   if (pte->uncacheable)
     return (u64)hpaddr - vpaddr; // vm_cache_ent_t.haddr_diff
@@ -438,8 +449,8 @@ static void test_vm() {
   dlog("PAGE_SIZE:         %5u", PAGE_SIZE);
   dlog("PAGE_SIZE_BITS:    %5u", PAGE_SIZE_BITS);
   dlog("VM_ADDR_BITS:      %5u", VM_ADDR_BITS);
-  dlog("VM_ADDR_MIN…MAX:   0x%llx … 0x%llx", VM_ADDR_MIN, VM_ADDR_MAX);
-  dlog("VFN_BITS:       %5u", VFN_BITS);
+  dlog("VM_ADDR_MIN…MAX:   0x%llx … 0x%llx", (ull_t)VM_ADDR_MIN, (ull_t)VM_ADDR_MAX);
+  dlog("VFN_BITS:          %5u", VFN_BITS);
   dlog("VM_PTAB_LEVELS:    %5u", VM_PTAB_LEVELS);
   dlog("VM_PTAB_BITS:      %5u", VM_PTAB_BITS);
 
@@ -516,12 +527,12 @@ static void test_vm() {
     rerr_t err = vm_map(pagedir, (uintptr)haddr, vaddr, npages, perm);
     assertf(err == 0, "%s", rerr_str(err));
 
-    dlog("VM_STORE(u32, 0x%llx, %u)", vaddr, value);
+    dlog("VM_STORE(u32, 0x%llx, %u)", (ull_t)vaddr, value);
     VM_STORE(u32, cache_rw, pagedir, vaddr, value);
     value = VM_LOAD(u32, cache_rw, pagedir, vaddr);
-    dlog("VM_LOAD(u32, 0x%llx) => %u", vaddr, value);
+    dlog("VM_LOAD(u32, 0x%llx) => %u", (ull_t)vaddr, value);
     value = VM_LOAD(u32, cache_rw, pagedir, vaddr);
-    dlog("VM_LOAD(u32, 0x%llx) => %u", vaddr, value);
+    dlog("VM_LOAD(u32, 0x%llx) => %u", (ull_t)vaddr, value);
 
     // loading an invalid address
     //VM_LOAD(u64, cache_rw, pagedir, 0xffffffffffffffffllu); // error
@@ -538,7 +549,7 @@ static void test_vm() {
     // writing to a read-only page fails
     err = vm_map(pagedir, 0lu, vaddr, npages, VM_PERM_R);
     assertf(err == 0, "%s", rerr_str(err));
-    VM_LOAD(u32, cache_r, pagedir, vaddr); // ok
+    value = VM_LOAD(u32, cache_r, pagedir, vaddr); // ok
     //VM_STORE(u32, cache_rw, pagedir, vaddr, value); // error
 
     rmm_freepages(mm, haddr);

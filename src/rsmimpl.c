@@ -8,10 +8,16 @@
   #include <errno.h>
   #include <unistd.h>
   #include <stdlib.h> // free
-  #include <execinfo.h> // backtrace* (for _panic)
   #include <sys/stat.h>
   #include <sys/mman.h> // mmap
   #include <string.h> // strerror
+
+  // backtrace* (for _panic) is not a libc standard
+  // macOS has it, glibc has it (but we can't check at compile time)
+  #if (defined(__MACH__) && defined(__APPLE__))
+    #define RSM_HAS_BACKTRACE
+    #include <execinfo.h>
+  #endif
 
   #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -354,10 +360,10 @@ static char* strrevn(char* s, usize len) {
   return s;
 }
 
-usize stru64(char buf[64], u64 v, u32 base) {
+usize stru64(char* buf, u64 v, u32 base) {
   static const char* chars =
     "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-  base = MAX(2, MIN(base, 62));
+  base = MIN(MAX(base, 2u), 62u);
   char* p = buf;
   do {
     *p++ = chars[v % base];
@@ -451,21 +457,25 @@ noreturn void _panic(const char* file, int line, const char* fun, const char* fm
     vfprintf(fp, fmt, ap);
     va_end(ap);
     fprintf(fp, " in %s at %s:%d\n", fun, file, line);
-    void* buf[32];
-    int framecount = backtrace(buf, countof(buf));
-    if (framecount > 1) {
-      char** strs = backtrace_symbols(buf, framecount);
-      if (strs != NULL) {
-        for (int i = 1; i < framecount; ++i) {
-          fwrite(strs[i], strlen(strs[i]), 1, fp);
-          fputc('\n', fp);
+
+    #ifdef RSM_HAS_BACKTRACE
+      void* buf[32];
+      int framecount = backtrace(buf, countof(buf));
+      if (framecount > 1) {
+        char** strs = backtrace_symbols(buf, framecount);
+        if (strs != NULL) {
+          for (int i = 1; i < framecount; ++i) {
+            fwrite(strs[i], strlen(strs[i]), 1, fp);
+            fputc('\n', fp);
+          }
+          free(strs);
+        } else {
+          fflush(fp);
+          backtrace_symbols_fd(buf, framecount, fileno(fp));
         }
-        free(strs);
-      } else {
-        fflush(fp);
-        backtrace_symbols_fd(buf, framecount, fileno(fp));
       }
-    }
+    #endif
+
     funlockfile(fp);
     fflush(fp);
     fsync(STDERR_FILENO);
@@ -493,7 +503,7 @@ void* nullable osvmem_alloc(usize nbytes) {
 
     void* ptr = mmap(0, nbytes, protection, flags, -1, 0);
 
-    if UNLIKELY(ptr == MAP_FAILED | ptr == NULL) {
+    if UNLIKELY((ptr == MAP_FAILED) | (ptr == NULL)) {
       dlog("mmap failed with errno %d %s", errno, strerror(errno));
       return NULL;
     }
@@ -512,30 +522,29 @@ bool osvmem_free(void* ptr, usize nbytes) {
 }
 
 
+#if RSM_NO_CC_BUILTINS
+  /* --- BEGIN musl code, licensed as followed (MIT) ---
+  Copyright © 2005-2020 Rich Felker, et al.
 
-/* --- BEGIN musl code, licensed as followed (MIT) ---
-Copyright © 2005-2020 Rich Felker, et al.
+  Permission is hereby granted, free of charge, to any person obtaining
+  a copy of this software and associated documentation files (the
+  "Software"), to deal in the Software without restriction, including
+  without limitation the rights to use, copy, modify, merge, publish,
+  distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so, subject to
+  the following conditions:
 
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-"Software"), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
+  The above copyright notice and this permission notice shall be
+  included in all copies or substantial portions of the Software.
 
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+  CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+  TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
-
-#if !HAS_LIBC_BUILTIN(__builtin_memset)
   void* memset(void* dst, int c, usize n) {
     u8* s = dst;
     usize k;
@@ -567,9 +576,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
       *s = c;
     return dst;
   }
-#endif
 
-#if !HAS_LIBC_BUILTIN(__builtin_memcpy)
   void* memcpy(void* restrict dst, const void* restrict src, usize n) {
     u8* d = dst;
     const u8* s = src;
@@ -577,67 +584,65 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
       *d++ = *s++;
     return dst;
   }
-#endif
 
-#if !HAS_LIBC_BUILTIN(__builtin_memmove)
-#if __has_attribute(__may_alias__)
-typedef __attribute__((__may_alias__)) usize WT;
-#define WS (sizeof(WT))
-#endif
-void* memmove(void *dest, const void *src, usize n) {
-  char *d = dest;
-  const char *s = src;
-  if (d==s) return d;
-  if ((uintptr)s-(uintptr)d-n <= -2*n) return memcpy(d, s, n);
-  if (d<s) {
-    #if __has_attribute(__may_alias__)
-      if ((uintptr)s % WS == (uintptr)d % WS) {
-        while ((uintptr)d % WS) {
-          if (!n--) return dest;
-          *d++ = *s++;
+
+  #if __has_attribute(__may_alias__)
+    typedef __attribute__((__may_alias__)) usize WT;
+    #define WS (sizeof(WT))
+  #endif
+
+  void* memmove(void *dest, const void *src, usize n) {
+    char *d = dest;
+    const char *s = src;
+    if (d==s) return d;
+    if ((uintptr)s-(uintptr)d-n <= -2*n) return memcpy(d, s, n);
+    if (d<s) {
+      #if __has_attribute(__may_alias__)
+        if ((uintptr)s % WS == (uintptr)d % WS) {
+          while ((uintptr)d % WS) {
+            if (!n--) return dest;
+            *d++ = *s++;
+          }
+          for (; n>=WS; n-=WS, d+=WS, s+=WS) *(WT*)d = *(WT*)s;
         }
-        for (; n>=WS; n-=WS, d+=WS, s+=WS) *(WT*)d = *(WT*)s;
-      }
-    #endif
-    for (; n; n--) *d++ = *s++;
-  } else {
-    #if __has_attribute(__may_alias__)
-      if ((uintptr)s % WS == (uintptr)d % WS) {
-        while ((uintptr)(d+n) % WS) {
-          if (!n--) return dest;
-          d[n] = s[n];
+      #endif
+      for (; n; n--) *d++ = *s++;
+    } else {
+      #if __has_attribute(__may_alias__)
+        if ((uintptr)s % WS == (uintptr)d % WS) {
+          while ((uintptr)(d+n) % WS) {
+            if (!n--) return dest;
+            d[n] = s[n];
+          }
+          while (n>=WS) n-=WS, *(WT*)(d+n) = *(WT*)(s+n);
         }
-        while (n>=WS) n-=WS, *(WT*)(d+n) = *(WT*)(s+n);
-      }
-    #endif
-    while (n) n--, d[n] = s[n];
+      #endif
+      while (n) n--, d[n] = s[n];
+    }
+    return dest;
   }
-  return dest;
-}
-#endif
 
-#if !HAS_LIBC_BUILTIN(__builtin_memcmp)
+
   int memcmp(const void* a, const void* b, usize n) {
     const u8* l = a, *r = b;
     for (; n && *l == *r; n--, l++, r++) {}
     return n ? *l - *r : 0;
   }
-#endif
 
-#if !HAS_LIBC_BUILTIN(__builtin_strcmp)
+
   int strcmp(const char* l, const char* r) {
     for (; *l==*r && *l; l++, r++);
     return *(unsigned char *)l - *(unsigned char *)r;
   }
-#endif
 
-#if !HAS_LIBC_BUILTIN(__builtin_strlen)
+
   usize strlen(const char* s) {
     const char* p = s;
     for (; *s; s++);
     return (usize)(uintptr)(s - p);
   }
-#endif
+
+#endif // RSM_NO_CC_BUILTINS
 
 
 // --- END musl code ---

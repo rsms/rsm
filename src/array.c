@@ -16,7 +16,7 @@ void _rarray_remove(rarray* a, u32 elemsize, u32 start, u32 len) {
 }
 
 bool rarray_grow(rarray* a, rmemalloc_t* ma, u32 elemsize, u32 addl) {
-  u32 newcap = a->cap ? (u32)MIN((u64)a->cap * 2, U32_MAX) : MAX(addl, 4);
+  u32 newcap = a->cap ? (u32)MIN((u64)a->cap * 2, U32_MAX) : MAX(addl, 4u);
   usize newsize;
   if (check_mul_overflow((usize)newcap, (usize)elemsize, &newsize))
     return false;

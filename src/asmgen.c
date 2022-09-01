@@ -414,7 +414,7 @@ static bool patch_imm(gstate* g, rnode_t* patcher, u32 inindex, u64 value, i32* 
 largeval:
   // Does not fit in immediate value for the instruction.
   // Synthesize instructions to compute the value in a register.
-  trace("op %s; large value 0x%llx", rop_name(RSM_GET_OP(*in)), value);
+  trace("op %s; large value 0x%llx", rop_name(RSM_GET_OP(*in)), (ull_t)value);
 
   if (scratchreg >= RSM_NREGS) {
     // >RSM_NREGS: no scratch register; instruction does not produce a register result.
@@ -551,7 +551,7 @@ static void resolve_undefined_names(gstate* g) {
     d->nrefs++;
 
     dlog_datalayout("patching data reference %.*s (gdata %p, addr 0x%llx)",
-      (int)namelen, name, d, d->addr);
+      (int)namelen, name, d, (ull_t)d->addr);
 
     i32 ignore;
     patch_imm(g, ref->n, ref->i, d->addr, &ignore);
@@ -626,7 +626,7 @@ static bool refnamed(gstate* g, rnode_t* refn, u32 refi, u32 argc, i32* argp) {
 
       // get the constant's value (e.g. 0xBEEF for "const x = 0xBEEF").
       u64 value = *(const u64*)assertnotnull( ((gdata*)target)->initp );
-      trace("constant value: 0x%llx", value);
+      trace("constant value: 0x%llx", (ull_t)value);
 
       // patch_imm sets last argument of the rin_t at g->iv[refi] to value
       return patch_imm(g, refn, refi, value, argp);
@@ -653,13 +653,14 @@ static u8 nregno(gstate* g, rnode_t* n) {
 }
 
 static void errintsize(
-  rasm_t* c, rposrange_t pr, rop_t op, i64 minval, i64 maxval, u64 val, bool issigned)
+  rasm_t* c, rposrange_t pr, rop_t op, i64 minval, u64 maxval, u64 val, bool issigned)
 {
   if (minval != 0 || issigned) {
-    errf(c, pr, "value %lld out of range %lld...%lld for %s",
-      (i64)val, minval, maxval, rop_name(op));
+    errf(c, pr, "value %lld out of range %lld...%llu for %s",
+      (ill_t)val, (ill_t)minval, (ull_t)maxval, rop_name(op));
   } else {
-    errf(c, pr, "value %llu out of range 0...%lld for %s", val, maxval, rop_name(op));
+    errf(c, pr, "value %llu out of range 0...%llu for %s",
+      (ull_t)val, (ull_t)maxval, rop_name(op));
   }
 }
 
@@ -679,7 +680,7 @@ static bool getiargs(
   rop_t op = (rop_t)n->ival;
 
   trace("[%s] wantargc %u, minval %lld, maxval 0x%llx",
-    rop_name(op), wantargc, minval, maxval);
+    rop_name(op), wantargc, (ill_t)minval, (ull_t)maxval);
 
   // first argc-1 args are registers
   rnode_t* arg = n->children.head;
@@ -890,17 +891,17 @@ static void genop(gstate* g, rnode_t* n) {
     return;
   make_A:     NOIMM(1, A          ,                         arg[0])
   make_Au:    RoIMM(1, A, Au      , 0,          RSM_MAX_Au, arg[0])
-  make_As:    RoIMM(1, A, As      , RSM_MIN_As, RSM_MAX_As, arg[0])
-  make_AB:    NOIMM(2, AB         ,                         arg[0], arg[1])
+  //make_As:    RoIMM(1, A, As      , RSM_MIN_As, RSM_MAX_As, arg[0])
+  //make_AB:    NOIMM(2, AB         ,                         arg[0], arg[1])
   make_ABv:   RvIMM(2, ABv        , 0,          U64_MAX,    arg[0], arg[1])
   make_ABu:   RoIMM(2, AB, ABu    , 0,          RSM_MAX_Bu, arg[0], arg[1])
   make_ABs:   RoIMM(2, AB, ABs    , RSM_MIN_Bs, RSM_MAX_Bs, arg[0], arg[1])
-  make_ABC:   NOIMM(3, ABC        ,                         arg[0], arg[1], arg[2])
+  //make_ABC:   NOIMM(3, ABC        ,                         arg[0], arg[1], arg[2])
   make_ABCu:  RoIMM(3, ABC, ABCu  , 0,          RSM_MAX_Cu, arg[0], arg[1], arg[2])
   make_ABCs:  RoIMM(3, ABC, ABCs  , RSM_MIN_Cs, RSM_MAX_Cs, arg[0], arg[1], arg[2])
-  make_ABCD:  NOIMM(4, ABCD       ,                         arg[0], arg[1], arg[2], arg[3])
+  //make_ABCD:  NOIMM(4, ABCD       ,                         arg[0], arg[1], arg[2], arg[3])
   make_ABCDu: RoIMM(4, ABCD, ABCDu, 0,          RSM_MAX_Du, arg[0], arg[1], arg[2], arg[3])
-  make_ABCDs: RoIMM(4, ABCD, ABCDs, RSM_MIN_Ds, RSM_MAX_Ds, arg[0], arg[1], arg[2], arg[3])
+  //make_ABCDs: RoIMM(4, ABCD, ABCDs, RSM_MIN_Ds, RSM_MAX_Ds, arg[0], arg[1], arg[2], arg[3])
   DIAGNOSTIC_IGNORE_POP()
   #undef RoIMM
   #undef NOIMM
@@ -1175,7 +1176,7 @@ static void dlog_gdata(gdata* nullable d) {
   if (namelen > namemax) { namemax--; namelen = namemax; nametail = "…"; }
   if (datalen > datamax) { datamax--; datalen = datamax; datatail = "…"; }
   log("0x%016llx %-*.*s%s %10zu     %2u  %.*s%s",
-    d->addr,
+    (ull_t)d->addr,
     namemax, namelen, d->name, nametail,
     d->size, d->align,
     datalen, reprbuf, datatail);

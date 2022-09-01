@@ -86,9 +86,7 @@ static vm_ptab_t nullable vm_ptab_create(rmm_t* mm) {
   vm_ptab_t ptab = rmm_allocpages(mm, VM_PTAB_SIZE / PAGE_SIZE);
   if UNLIKELY(ptab == NULL)
     return NULL;
-  #ifndef VM_ZERO_PAGES
   memset(ptab, 0, VM_PTAB_SIZE);
-  #endif
   return ptab;
 }
 
@@ -275,9 +273,6 @@ rerr_t vm_map(
 
     pte = &ptab[index];
 
-    if (ptab == NULL) panic("NULL ptab");
-    if (pte == NULL) panic("NULL pte at index %zu", index);
-
     if (level < VM_PTAB_LEVELS) {
       // page table branch
       bits += VM_PTAB_BITS;
@@ -293,7 +288,6 @@ rerr_t vm_map(
         // traverse existing table
         assert(pte->outaddr != 0);
         ptab = (vm_ptab_t)(uintptr)(pte->outaddr << PAGE_SIZE_BITS);
-        if (ptab == NULL) panic("NULL ptab (2)");
       }
       goto visit_next_ptab;
     }

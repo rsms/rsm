@@ -4,11 +4,6 @@
 #include "thread.h"
 RSM_ASSUME_NONNULL_BEGIN
 
-// VM_ZERO_PAGES: define to zero memory pages before use
-#if RSM_SAFE && !defined(VM_ZERO_PAGES)
-  #define VM_ZERO_PAGES
-#endif
-
 // virtual memory address space configuration
 // VM_ADDR_BITS: addressable space (effectively: (1<<VM_ADDR_BITS)-VM_ADDR_MIN)
 // Note that the bits needed for address in-page offset is PAGE_SIZE_BITS.

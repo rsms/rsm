@@ -69,7 +69,6 @@ struct T {
   usize        pc;     // program counter; next instruction = iv[pc]
   usize        instrc; // instruction count
   const rin_t* instrv; // instruction array
-  const void*  rodata; // global read-only data (from ROM)
 
   u64 sp;       // saved SP register value used by m_switchtask
   u64 stack_lo; // top of stack (lowest valid stack address)

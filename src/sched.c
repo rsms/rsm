@@ -1658,17 +1658,16 @@ void task_exit(T* t) {
   assert(t->m->currt == t);
 
   t_setstatus(t, T_DEAD);
+  t->waitsince = 0;
+  if (t->parent) {
+    dlog("TODO: [SC] wake up waiting parent");
+    t->parent = NULL;
+  }
 
   M* m = t->m;
   P* p = m->p;
 
   m_droptask(m);  // disassociate T from M
-  p_release_m(p); // disassociate P from M
-
-  mutex_lock(&m->s->lock);
-  idlep_put(p); // put P on idlep list
-  idlem_put(m); // put M on idlem list
-  mutex_unlock(&m->s->lock);
 
   // put T on P's freet list
   p_freet_add(p, t);

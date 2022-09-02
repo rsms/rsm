@@ -5,7 +5,9 @@
 RSM_ASSUME_NONNULL_BEGIN
 
 // SCHED_TRACE: when defined, verbose log tracing on stderr is enabled.
-#define SCHED_TRACE 3
+#if !defined(SCHED_TRACE) && DEBUG
+  #define SCHED_TRACE 3
+#endif
 // The value decides granularity of logging:
 // 0 (or undefined) - tracing disabled
 // 1  - key aspects of scheduling

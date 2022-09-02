@@ -29,7 +29,7 @@ Work in progress, TODO:
 - Finish the scheduler
 - Framebuffer for drawing graphics (maybe even webgpu?)
 - Audio
-- Lots of little small pieces here and there [marked with "TODO" in the code](https://github.com/rsms/rsm/search?q=TODO&type=code)
+- Lots of little small pieces here and there [marked with "TODO" in the code](https://github.com/rsms/rsm/search?l=C&o=desc&q=TODO&s=indexed&type=code)
 
 
 ## Building & running

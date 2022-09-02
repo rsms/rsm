@@ -1,37 +1,42 @@
 # RSM
 
-Virtual computer
+RSM is a virtual computer, a form of virtual machine.
+
+- [simple RISC instruction set](#isa) with plenty of general-purpose registers.
+- [virtual memory](etc/vmem.txt) means programs have no access to host memory addresses and all memory accesses are checked. It also means all RSM programs have the same address space (currently 48 bits; 256 TiB) and could even be migrated across hosts at runtime.
+- embraces the linear memory model -- addressing memory is a simple and easy to-understand way to deal with data. Prefer memory-mapped I/O over custom system calls.
+- [multi-threaded Go-style task scheduler](src/sched.h)
+- portable and embeddable, without dependencies. (RSM can even build without libc.)
+  - entire API in one header: [src/rsm.h](src/rsm.h)
+- simple explicit [assembly language](#assembly-language)
+  - compiles to very compact, self-contained ["ROM" files](etc/rom-layout.txt)
+  - RSM comes with an integrated assembler, making it possible to compile & run code at runtime. (It can be disabled with a macro if desired in embedding scenarios.)
+  - includes an AST API for code generation without an intermediate assembly step, useful if you want to make a compiler that targets RSM.
 
 Project goals:
 1. learn, have fun -- simplicity
 2. substrate, a thing to make other thing on
 3. longevity -- I want to be able to run a (multimedia) program in 10+ years
 
-Constraints
-- embraces the linear memory model
-- simple semantics:
-  - global constants
-  - vm uses registers
-  - assembly language offers named (automatic regalloc) locals
-    - mutable locals, parameters and variables are all treated the same
-    - simple syntax where white-space is ignored
-
 "RSM" initially stands for "rsms's smol machine" but can also be interpreted as
 "Really smol machine", or "Raggedy-ass special mumbojumbo", or
 the recursive acronym "RSM smol machine" (in case you miss the golden days of PHP), or
 anything you'd like it to mean! Your imagination is really the limit here my friend.
 
-TODO
-- syscalls..? Some way to interface with peripherals/devices, time, file system etc
-- display framebuffer
-- audio
+> **Status of this project:** This is a passion project and thus is not "production grade" stuff. The instruction set and semantics are changing. I'd be thrilled and happy if you play with RSM and build stuff on it, but please do keep in mind that stuff will change. Contributions are welcome after [an initial discussion](https://twitter.com/rsms)
+
+Work in progress, TODO:
+- Finish the scheduler
+- Framebuffer for drawing graphics (maybe even webgpu?)
+- Audio
+- Lots of little small pieces here and there [marked with "TODO" in the code](https://github.com/rsms/rsm/search?q=TODO&type=code)
 
 
 ## Building & running
 
 ```sh
 ./build.sh -debug
-./out/rsm -d -R0=15 examples/factorial.rsm
+./out/debug/rsm -d -R0=15 examples/factorial.rsm
 # R0 will contain the result 1307674368000
 ```
 
@@ -43,15 +48,15 @@ You'll need the following things to build rsm:
 You can use `rsm` as a really awkward calculator:
 
 ```sh
-$ echo 'fun x() { R0 = R0 * 2; ret; }' | out/rsm -d -R0=123
+$ echo 'fun x() { R0 = R0 * 2; ret; }' | out/debug/rsm -d -R0=123
 # R0 will contain the result 246
 ```
 
 RSM assembly can be compiled into a ROM file which can later be executed:
 
 ```sh
-$ echo 'fun x() { R0 = R0 * 2; ret; }' | out/rsm -o multiply.rom
-$ out/rsm -d -R0=123 multiply.rom
+$ echo 'fun x() { R0 = R0 * 2; ret; }' | out/debug/rsm -o multiply.rom
+$ out/debug/rsm -d -R0=123 multiply.rom
 # R0 will contain the result 246
 ```
 
@@ -71,8 +76,8 @@ fun factorial(i32) i32 {
     ret            // RES is at R0
 }
 EXAMPLE
-$ out/rsm -d -R0=15 example.rsm
-# R0 will contain the result1307674368000
+$ out/debug/rsm -d -R0=15 example.rsm
+# R0 will contain the result 1307674368000
 ```
 
 See the `examples/` directory for more.

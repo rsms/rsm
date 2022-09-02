@@ -31,19 +31,23 @@ static_assert(STK_MIN % STK_ALIGN == 0, "STK_MIN not aligned to STK_ALIGN");
 #if defined(DEBUG) && !defined(RSM_NO_LIBC)
   #include <stdio.h>
   static void exec_logstate_header() {
+    flockfile(stderr);
     fprintf(stderr, "\e[2m");
     for (int i = 0; i < 6; i++)
       fprintf(stderr, "   " REG_FMTNAME_PAT, REG_FMTNAME(i));
     fprintf(stderr, "    \e[9%cmSP\e[39m  │  PC  INSTRUCTION\e[22m\n",
       REG_FMTCOLORC(RSM_MAX_REG));
+    funlockfile(stderr);
   }
   static void exec_logstate(EXEC_PARAMS) {
+    flockfile(stderr);
     for (int i = 0; i < 6; i++)
       fprintf(stderr, REG_FMTVAL_PAT("%5llx"), REG_FMTVAL(i, iregs[i]));
     char buf[128];
     rsm_fmtinstr(buf, sizeof(buf), inv[pc], NULL, RSM_FMT_COLOR);
     fprintf(stderr, REG_FMTVAL_PAT("%6llx") "  │ %3ld  %s\n",
       REG_FMTVAL(RSM_MAX_REG, iregs[RSM_MAX_REG]), pc, buf);
+    funlockfile(stderr);
   }
   #ifdef TRACE_MEMORY
     #if defined(SCHED_TRACE)

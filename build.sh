@@ -3,7 +3,8 @@ set -e
 cd "$(dirname "$0")"
 _err() { echo -e "$0:" "$@" >&2 ; exit 1; }
 
-OUTDIR=out
+OUTDIR=
+OUTDIR_DEFAULT=out
 BUILD_MODE=safe  # debug | safe | fast
 WATCH=
 WATCH_ADDL_FILES=()
@@ -44,7 +45,7 @@ options:
   -w         Rebuild as sources change
   -wf=<file> Watch <file> for changes (can be provided multiple times)
   -run=<cmd> Run <cmd> after successful build
-  -out=<dir> Build in <dir> instead of "$OUTDIR".
+  -out=<dir> Build in <dir> instead of "$OUTDIR_DEFAULT/<mode>".
   -help      Show help on stdout and exit
 _END
     exit ;;
@@ -149,6 +150,9 @@ fi
 
 DEBUG=false; [ "$BUILD_MODE" = "debug" ] && DEBUG=true
 
+# set OUTDIR unless set with -out=<dir>
+[ -z "$OUTDIR" ] && OUTDIR=$OUTDIR_DEFAULT/$BUILD_MODE
+
 # check compiler and clear $OUTDIR if compiler changed
 CCONFIG_FILE=$OUTDIR/cconfig.txt
 CCONFIG="$CC_PATH: $(sha256sum "$CC_PATH" | cut -d' ' -f1)"
@@ -242,10 +246,13 @@ if $DEBUG && $CC_IS_CLANG; then
   )
 fi
 
-cat << _END > build.ninja
+NINJAFILE=$OUTDIR/build.ninja
+
+mkdir -p "$(dirname "$OUTDIR")"
+cat << _END > "$NINJAFILE"
 ninja_required_version = 1.3
 builddir = $OUTDIR
-objdir = \$builddir/$BUILD_MODE
+objdir = \$builddir/obj
 
 cflags = $
   -std=c11 $
@@ -305,9 +312,9 @@ _gen_obj_build_rules() {
     OBJECT=$(_objfile "$FLAVOR-$SOURCE")
     case "$SOURCE" in
       *.c|*.m)
-        echo "build $OBJECT: $CC_RULE $SOURCE" >> build.ninja
+        echo "build $OBJECT: $CC_RULE $SOURCE" >> "$NINJAFILE"
         [ -n "$CC_EXTRAS" ] &&
-        echo "  $CC_EXTRAS" >> build.ninja
+        echo "  $CC_EXTRAS" >> "$NINJAFILE"
         ;;
       *) _err "don't know how to compile this file type ($SOURCE)"
     esac
@@ -324,25 +331,25 @@ fi
 HOST_OBJECTS=( $(_gen_obj_build_rules "host" "" "${SOURCES[@]}") )
 WASM_OBJECTS=( $(_gen_obj_build_rules "wasm" "" "${SOURCES[@]}") )
 WASMRT_OBJECTS=( $(_gen_obj_build_rules "wasm-rt" "-DRSM_NO_ASM=1" "${SOURCES[@]}") )
-echo >> build.ninja
+echo >> "$NINJAFILE"
 
-echo "build rsm: phony \$builddir/rsm" >> build.ninja
-echo "build \$builddir/rsm: link ${HOST_OBJECTS[@]}" >> build.ninja
-echo >> build.ninja
+echo "build rsm: phony \$builddir/rsm" >> "$NINJAFILE"
+echo "build \$builddir/rsm: link ${HOST_OBJECTS[@]}" >> "$NINJAFILE"
+echo >> "$NINJAFILE"
 
-echo "build rsm.wasm: phony \$builddir/rsm.wasm" >> build.ninja
-echo "build \$builddir/rsm.wasm: link_wasm ${WASM_OBJECTS[@]}" >> build.ninja
-echo >> build.ninja
+echo "build rsm.wasm: phony \$builddir/rsm.wasm" >> "$NINJAFILE"
+echo "build \$builddir/rsm.wasm: link_wasm ${WASM_OBJECTS[@]}" >> "$NINJAFILE"
+echo >> "$NINJAFILE"
 
-echo "build rsm-rt.wasm: phony \$builddir/rsm-rt.wasm" >> build.ninja
-echo "build \$builddir/rsm-rt.wasm: link_wasm ${WASMRT_OBJECTS[@]}" >> build.ninja
-echo >> build.ninja
+echo "build rsm-rt.wasm: phony \$builddir/rsm-rt.wasm" >> "$NINJAFILE"
+echo "build \$builddir/rsm-rt.wasm: link_wasm ${WASMRT_OBJECTS[@]}" >> "$NINJAFILE"
+echo >> "$NINJAFILE"
 
-echo "default rsm" >> build.ninja
+echo "default rsm" >> "$NINJAFILE"
 
 if [ -n "$RUN" ]; then
-  ninja "${NINJA_ARGS[@]}" "$@"
+  ninja -f "$NINJAFILE" "${NINJA_ARGS[@]}" "$@"
   echo $RUN
   exec $SHELL -c "$RUN"
 fi
-exec ninja "${NINJA_ARGS[@]}" "$@"
+exec ninja -f "$NINJAFILE" "${NINJA_ARGS[@]}" "$@"

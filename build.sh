@@ -12,6 +12,7 @@ _WATCHED=
 RUN=
 NINJA_ARGS=()
 NON_WATCH_ARGS=()
+EXTRA_CFLAGS=()
 TESTING_ENABLED=
 STRIP=false
 STATIC=false
@@ -34,19 +35,21 @@ while [[ $# -gt 0 ]]; do
   -out=*)  OUTDIR=${1:5}; shift; continue ;;
   -g)      DEBUGGABLE=true; shift ;;
   -v)      NINJA_ARGS+=(-v); shift ;;
+  -D*)     [ ${#1} -gt 2 ] || _err "Missing NAME after -D";EXTRA_CFLAGS+=( "$1" ); shift ;;
   -h|-help|--help) cat << _END
 usage: $0 [options] [--] [<target> ...]
 options:
-  -safe      Build optimized product with some assertions enabled (default)
-  -fast      Build optimized product without any assertions
-  -debug     Build debug product
-  -strip     Do not include debug data
-  -g         Make the build debuggable (debug symbols + basic opt only)
-  -w         Rebuild as sources change
-  -wf=<file> Watch <file> for changes (can be provided multiple times)
-  -run=<cmd> Run <cmd> after successful build
-  -out=<dir> Build in <dir> instead of "$OUTDIR_DEFAULT/<mode>".
-  -help      Show help on stdout and exit
+  -safe          Build optimized product with some assertions enabled (default)
+  -fast          Build optimized product without any assertions
+  -debug         Build debug product
+  -strip         Do not include debug data
+  -g             Make the build debuggable (debug symbols + basic opt only)
+  -w             Rebuild as sources change
+  -wf=<file>     Watch <file> for changes (can be provided multiple times)
+  -run=<cmd>     Run <cmd> after successful build
+  -out=<dir>     Build in <dir> instead of "$OUTDIR_DEFAULT/<mode>".
+  -DNAME[=value] Define CPP variable NAME with value
+  -help          Show help on stdout and exit
 _END
     exit ;;
   --) break ;;
@@ -164,7 +167,7 @@ if [ "$(cat "$CCONFIG_FILE" 2>/dev/null)" != "$CCONFIG" ]; then
 fi
 
 # flags for all targets (in addition to unconditional flags in ninja template)
-CFLAGS=( $CFLAGS )
+CFLAGS=( $CFLAGS $EXTRA_CFLAGS )
 [ "$BUILD_MODE" = "safe" ] && CFLAGS+=( -DRSM_SAFE )
 [ -n "$TESTING_ENABLED" ]  && CFLAGS+=( -DRSM_TESTING_ENABLED )
 

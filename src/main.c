@@ -244,7 +244,7 @@ static bool diaghandler(const rdiag_t* d, void* userdata) {
     fwrite(d->srclines, strlen(d->srclines), 1, stderr);
     putc('\n', stderr);
   }
-  return true; // keep going (show all errors)
+  return d->code == 0; // continue on warning, stop on error
 }
 
 static bool compile(

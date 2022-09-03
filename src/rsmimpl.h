@@ -342,6 +342,9 @@ typedef double f64;
   const __typeof__(x) atmp__ = (__typeof__(x))(a); \
   ((x) / atmp__) * atmp__; \
 })
+#define ALIGN_FLOOR_X(x, a) ( \
+  ((x) / (__typeof__(x))(a)) * (__typeof__(x))(a) \
+)
 
 // T COND_FLAG(T flags, T flag, bool on)
 // branchless ( on ? (flags | flag) : (flags & ~flag) )

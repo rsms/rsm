@@ -244,7 +244,7 @@ static vm_ptab_t nullable new_ptab(vm_pagedir_t* pagedir, vm_ptab_t parent, usiz
 
 
 rerr_t vm_map(
-  vm_pagedir_t* pagedir, uintptr haddr, u64 vaddr, usize npages, vm_perm_t perm)
+  vm_pagedir_t* pagedir, u64 vaddr, uintptr haddr, usize npages, vm_perm_t perm)
 {
   assertf(IS_ALIGN2((uintptr)haddr, PAGE_SIZE), "haddr 0x%lx not page aligned", haddr);
   assertf(vaddr >= VM_ADDR_MIN && VM_ADDR_MAX >= vaddr,
@@ -518,7 +518,7 @@ static void test_vm() {
     vm_perm_t perm = VM_PERM_R | VM_PERM_W;
 
     void* haddr = assertnotnull( rmm_allocpages(mm, npages) );
-    rerr_t err = vm_map(pagedir, (uintptr)haddr, vaddr, npages, perm);
+    rerr_t err = vm_map(pagedir, vaddr, (uintptr)haddr, npages, perm);
     assertf(err == 0, "%s", rerr_str(err));
 
     dlog("VM_STORE(u32, 0x%llx, %u)", vaddr, value);
@@ -541,7 +541,7 @@ static void test_vm() {
     //VM_LOAD(u32, cache_rw, pagedir, vaddr); // error
 
     // writing to a read-only page fails
-    err = vm_map(pagedir, 0lu, vaddr, npages, VM_PERM_R);
+    err = vm_map(pagedir, vaddr, 0lu, npages, VM_PERM_R);
     assertf(err == 0, "%s", rerr_str(err));
     value = VM_LOAD(u32, cache_r, pagedir, vaddr); // ok
     //VM_STORE(u32, cache_rw, pagedir, vaddr, value); // error

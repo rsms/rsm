@@ -294,7 +294,7 @@ void vm_pagedir_dispose(vm_pagedir_t*);
 // If haddr is 0, backing pages are allocated as needed on first access.
 // haddr's address must be aligned to PAGE_SIZE.
 // vaddr does not need to be page aligned; its top PAGE_SIZE_BITS bits are ignored.
-rerr_t vm_map(vm_pagedir_t*, uintptr haddr, u64 vaddr, usize npages, vm_perm_t);
+rerr_t vm_map(vm_pagedir_t*, u64 vaddr, uintptr haddr, usize npages, vm_perm_t);
 
 // vm_unmap deallocates a range of virtual pages
 // Caller using a cache should call vm_cache_invalidate

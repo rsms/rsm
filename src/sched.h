@@ -14,10 +14,6 @@ RSM_ASSUME_NONNULL_BEGIN
 // 2  - detailed aspects of scheduling
 // >2 - very detailed trace
 
-// EXE_TOP_ADDR is the end of the virtual memory-address space,
-// where exeinfo_t ends.
-#define EXE_TOP_ADDR  ALIGN2_FLOOR_X(VM_ADDR_MAX, 8)
-
 // INTERPRET_USE_JUMPTABLE: define to enable use of jump table in the interpreter.
 // Requires that the compiler supports taking the address of labels, ie. "&&label".
 #define INTERPRET_USE_JUMPTABLE
@@ -39,7 +35,7 @@ static_assert(IS_POW2_X(P_RUNQSIZE), "");
 // a M can be blocked or in a syscall without an associated P.
 typedef struct rsched_ rsched_t;
 typedef struct T T; // Task, a coroutine task
-typedef struct M M; // Machine, an OS thread (TODO: rename. C; CPU or Core)
+typedef struct M M; // Machine, an OS thread
 typedef struct P P; // Processor, an execution resource required to execute a T
 typedef u8 tstatus_t; // Task status
 typedef u8 pstatus_t; // Processor status
@@ -217,14 +213,6 @@ struct rsched_ {
   M m0; // main M (bound to the OS thread which rvm_main is called on)
   P p0; // first P
 };
-
-
-// exeinfo_t is mapped at the end of the virtual memory-address space,
-// at the bottom of the stack. It describes the host system.
-// Thus, in a program's main function, exeinfo_t is at SP.
-typedef struct {
-  u64 heap_vaddr; // start of heap, end of data (SP+0)
-} exeinfo_t;
 
 
 // tctx_t: task execution context used for task switching, stored on stack

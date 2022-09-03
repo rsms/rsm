@@ -1,4 +1,5 @@
 // lab program for developing the new scheduler
+//data s i8[4097] = "hello" // for testing vm layout
 const SC_SLEEP = 1
 
 fun main() {

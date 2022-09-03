@@ -725,8 +725,10 @@ static void eat(pstate* p, rtok_t t) {
 
 // expect reports a syntax error if p->tok != t
 static void expecttok(pstate* p, rtok_t t) {
-  if UNLIKELY(p->tok != t)
+  if UNLIKELY(p->tok != t) {
     perrunexpected(p, NULL, tokname(t), tokname(p->tok));
+    sfastforward_semi(p);
+  }
 }
 
 static bool expecttype(pstate* p, rnode_t* n) {
@@ -967,6 +969,7 @@ static rnode_t* parraytype(PPARAMS, rnode_t* elemtype) {
 static rnode_t* infix_bracket(PPARAMS, rnode_t* lhs) {
   if UNLIKELY(!tokistype(lhs->t)) {
     perr(p, NULL, "unexpected [ after %s", tokname(lhs->t));
+    sfastforward_semi(p);
     return lhs;
   }
   return parraytype(PARGS, lhs);

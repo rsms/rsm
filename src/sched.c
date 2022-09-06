@@ -30,9 +30,6 @@
 #define TCTX_VADDR(sp)  ALIGN2_FLOOR((u64)(sp) - (u64)sizeof(tctx_t), TCTX_ALIGN)
 
 // stack constants
-#define STK_ALIGN    8lu                // stack alignment
-#define STK_MIN      ((usize)PAGE_SIZE) // min backing memory allocated for stack
-#define STK_DEFAULT  1lu * MiB          // default stack size (virtual)
 static_assert(STK_MIN >= ALIGN2_X(sizeof(tctx_t), TCTX_ALIGN), "STK_MIN too small");
 static_assert(STK_MIN % STK_ALIGN == 0, "STK_MIN not aligned to STK_ALIGN");
 static_assert(STK_DEFAULT % STK_ALIGN == 0, "STK_DEFAULT not aligned to STK_ALIGN");

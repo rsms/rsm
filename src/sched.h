@@ -14,6 +14,11 @@ RSM_ASSUME_NONNULL_BEGIN
 // 2  - detailed aspects of scheduling
 // >2 - very detailed trace
 
+// stack constants
+#define STK_ALIGN    8lu                // stack alignment
+#define STK_MIN      ((usize)PAGE_SIZE) // min backing memory allocated for stack
+#define STK_DEFAULT  1lu * MiB          // default stack size (virtual)
+
 // INTERPRET_USE_JUMPTABLE: define to enable use of jump table in the interpreter.
 // Requires that the compiler supports taking the address of labels, ie. "&&label".
 #define INTERPRET_USE_JUMPTABLE

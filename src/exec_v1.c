@@ -534,7 +534,7 @@ rerr_t rsm_vmexec(rvm_t* vm, rrom_t* rom, rmemalloc_t* malloc) {
 
   // calculate stackbase and check if we have enough memory
   usize stackbase; {
-    usize stacksize = MAX(STK_MIN, MIN(STK_MAX, (vm->ramsize - rom->datasize)/2));
+    usize stacksize = MAX(STK_MIN, (vm->ramsize - rom->datasize)/2);
     usize stacktop = ALIGN2(rom->datasize, STK_ALIGN);
     stackbase = stacktop + ALIGN2_FLOOR(stacksize, STK_ALIGN);
     // note: At this point stacksize is no longer logically correct.

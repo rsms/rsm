@@ -8,12 +8,6 @@
 
 #define TRACE_MEMORY // define to dlog LOAD and STORE operations
 
-// stack constants
-#define STK_ALIGN    8           // stack alignment (== sizeof(u64))
-#define STK_MIN      2048        // minium stack size (TODO: consider making part of ROM)
-#define STK_MAX      (1024*1024) // maximum stack size
-static_assert(STK_MIN % STK_ALIGN == 0, "STK_MIN not aligned to STK_ALIGN");
-
 // MAIN_RET_PC: special PC value representing the main return address
 #define MAIN_RET_PC  USIZE_MAX
 

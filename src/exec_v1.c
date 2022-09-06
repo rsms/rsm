@@ -434,6 +434,7 @@ static void vmexec(VMPARAMS) {
     #define do_READ(D)    RA = _read(VMARGS, D, RB, RC) // addr=RB size=RC fd=D
     #define do_MCOPY(C)   mcopy(VMARGS, RA, RB, C)
     #define do_MCMP(D)    RA = (u64)mcmp(VMARGS, RB, RC, D)
+    #define do_STKMEM(A)  goto not_supported;
 
     #define do_RET() { \
       pc = (usize)pop(VMARGS, 8); /* load return address from stack */ \

@@ -48,7 +48,7 @@ static_assert(IS_ALIGN2(HEAP_INITSIZE, PAGE_SIZE), "");
 #define MAIN_RET_PC  USIZE_MAX
 
 // STACK_VADDR is the virtual address of the base of the main stack
-#define STACK_VADDR  ALIGN_FLOOR_X(VM_ADDR_MAX, STK_ALIGN)
+#define STACK_VADDR  ALIGN_FLOOR_X(VM_ADDR_MAX+1, STK_ALIGN)
 
 // DATA_VADDR is the virtual address of the data section
 #define DATA_VADDR  VM_ADDR_MIN
@@ -490,7 +490,7 @@ static tctx_t* nullable m_get_tctx(M* m, T* t) {
   assertf(ctx_vaddr >= t->stack_lo, "%llx, %llx", ctx_vaddr, t->stack_lo);
 
   // get backing memory
-  vm_cache_t* vm_cache = &m->vm_cache[VM_PERM_RW];
+  vm_cache_t* vm_cache = m_vm_cache(m, VM_PERM_RW);
   uintptr haddr = VM_TRANSLATE(vm_cache, &m->s->vm_pagedir, ctx_vaddr, TCTX_ALIGN);
 
   //dlog("load ctx from stack at vaddr 0x%llx (haddr %p)", ctx_vaddr, (void*)haddr);
@@ -583,12 +583,16 @@ static T* nullable task_create(M* m, u64 stack_vaddr, usize stacksize, usize ins
   //               ├─────────────┼─ stack_hi (CTX and initial SP)
   //               │  T struct   │
   //  stack_vaddr ─┴─────────────┘
-  //
+
+  // get backing memory
+  // note that we subtract STK_ALIGN from stack_vaddr since stack_vaddr is the address
+  // of the page just beyond our stack.
   assert(IS_ALIGN2(stack_vaddr, STK_ALIGN));
-  vm_cache_t* vm_cache = &m->vm_cache[VM_PERM_RW];
+  vm_cache_t* vm_cache = m_vm_cache(m, VM_PERM_RW);
   void* stackptr =
-    (void*)VM_TRANSLATE(vm_cache, &m->s->vm_pagedir, stack_vaddr, STK_ALIGN);
+    (void*)VM_TRANSLATE(vm_cache, &m->s->vm_pagedir, stack_vaddr-STK_ALIGN, STK_ALIGN);
   assertf(stackptr != NULL, "stack memory not mapped for 0x%llx", stack_vaddr);
+  stackptr += STK_ALIGN; // readjust host address
 
   //dlog("stack 0x%llx => haddr %p ... %p",
   //  stack_vaddr, stackptr - stacksize, stackptr);
@@ -1101,8 +1105,8 @@ static rerr_t m_init(M* m, rsched_t* s, u64 id) {
   safecheckx(sema_init(&m->parksema, 0) == 0);
 
   // virtual memory caches
-  for (usize i = 0; i < countof(m->vm_cache); i++)
-    vm_cache_init(&m->vm_cache[i]);
+  for (usize i = 0; i < countof(m->vmcache); i++)
+    vm_cache_init(&m->vmcache[i]);
 
   return 0;
 }

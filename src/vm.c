@@ -68,15 +68,11 @@ inline static u64 getbits(u64 x, u32 p, u32 n) {
 
   UNUSED static const char* vm_perm_str(vm_perm_t perm) {
     switch (perm) {
-      case VM_PERM_R:           return "r--";
-      case VM_PERM_W:           return "-w-";
-      case VM_PERM_X:           return "--x";
-      case VM_PERM_RW:          return "rw-";
-      case VM_PERM_RX:          return "r-x";
-      case VM_PERM_W|VM_PERM_X: return "-wx";
-      case VM_PERM_RWX:         return "rwx";
+      case VM_PERM_R:  return "r-";
+      case VM_PERM_W:  return "-w";
+      case VM_PERM_RW: return "rw";
     }
-    return "---";
+    return "--";
   }
 #endif
 

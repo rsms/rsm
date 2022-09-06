@@ -891,7 +891,7 @@ static void genop(gstate* g, rnode_t* n) {
     return;
   make_A:     NOIMM(1, A          ,                         arg[0])
   make_Au:    RoIMM(1, A, Au      , 0,          RSM_MAX_Au, arg[0])
-  //make_As:    RoIMM(1, A, As      , RSM_MIN_As, RSM_MAX_As, arg[0])
+  make_As:    RoIMM(1, A, As      , RSM_MIN_As, RSM_MAX_As, arg[0])
   //make_AB:    NOIMM(2, AB         ,                         arg[0], arg[1])
   make_ABv:   RvIMM(2, ABv        , 0,          U64_MAX,    arg[0], arg[1])
   make_ABu:   RoIMM(2, AB, ABu    , 0,          RSM_MAX_Bu, arg[0], arg[1])

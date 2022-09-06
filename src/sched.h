@@ -6,7 +6,7 @@ RSM_ASSUME_NONNULL_BEGIN
 
 // SCHED_TRACE: when defined, verbose log tracing on stderr is enabled.
 #if !defined(SCHED_TRACE) && DEBUG
-  #define SCHED_TRACE 3
+  #define SCHED_TRACE 1
 #endif
 // The value decides granularity of logging:
 // 0 (or undefined) - tracing disabled
@@ -74,6 +74,7 @@ struct T {
 
   u64                waitsince; // approx time when the T became blocked
   _Atomic(tstatus_t) status;
+  u32                nsplitstack; // number of stack splits
 };
 
 struct M {
@@ -94,8 +95,9 @@ struct M {
   u64    iregs[RSM_NREGS];
   double fregs[RSM_NREGS];
 
-  // virtual memory cache for read-only and read-write pages
-  vm_cache_t vm_cache[3]; // 0=r, 1=w, 2=wr
+  // virtual memory cache for read-only and read-write pages.
+  // index is offset by 1, since "no permissions" is never cached.
+  vm_cache_t vmcache[VM_PERM_MAX]; // 0=r, 1=w, 2=rw
 };
 
 struct P {
@@ -286,6 +288,12 @@ bool exit_syscall(T*, int priority);
 // m_spawn_osthread creates & starts an OS thread, calling mainf on the new thread.
 // Returns the OS-specific thread ID, or 0 on failure.
 uintptr m_spawn_osthread(M* m, rerr_t(*mainf)(M*));
+
+// m_vm_cache accesses the vm cache for perm on M
+inline static vm_cache_t* m_vm_cache(M* m, vm_perm_t perm) {
+  assertf(perm > 0 && (perm-1) < countof(m->vmcache), "%u", (u32)perm);
+  return &m->vmcache[perm-1];
+}
 
 
 // schedtrace1(const char* fmt, ...) -- debug tracing level 1

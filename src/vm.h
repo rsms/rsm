@@ -178,10 +178,12 @@ RSM_ASSUME_NONNULL_BEGIN
 // accesses the cache entry for a virtual address's page.
 // vaddr can be either a page address or a canonical address (offset is ignored.)
 // #define VM_CACHE_INDEX_MASK
-#define VM_CACHE_ENTRY(cache, vaddr)  ( &(cache)->entries[VM_CACHE_INDEX(vaddr)] )
+#define VM_CACHE_ENTRY(cache, vaddr)  ( \
+  assert(VM_CACHE_INDEX(vaddr) < VM_CACHE_LEN), \
+  &(cache)->entries[VM_CACHE_INDEX(vaddr)] )
 
 // vm_perm_t VM_PTE_PERM(vm_pte_t) returns vm_perm_t of a PTE
-#define VM_PTE_PERM(pte)  ( (*(vm_perm_t*)(pte)) & ((vm_perm_t)VM_PERM_ALL) )
+#define VM_PTE_PERM(pte)  ( (*(vm_perm_t*)(pte)) & ((vm_perm_t)VM_PERM_MAX) )
 
 // bool VM_PERM_CHECK(vm_perm_t, vm_perm_t) returns true if hasperm contains all
 // permissions of wantperm.
@@ -196,14 +198,9 @@ enum vm_perm {
   VM_PERM_NONE = 0,
   VM_PERM_R    = 1 << 0, // can read from this page
   VM_PERM_W    = 1 << 1, // can write to this page
-  VM_PERM_X    = 1 << 2, // can execute RSM code in this page
 
-  // convenience values
   VM_PERM_RW  = VM_PERM_R | VM_PERM_W,
-  VM_PERM_RX  = VM_PERM_R | VM_PERM_X,
-  VM_PERM_RWX = VM_PERM_R | VM_PERM_W | VM_PERM_X,
-
-  VM_PERM_ALL = VM_PERM_RWX,
+  VM_PERM_MAX = VM_PERM_RW, // all bits set
 };
 
 // vm_pte_t - page table entry
@@ -212,12 +209,11 @@ typedef struct {
   // note: permission bit positions should match vm_perm_t
   bool  read        : 1; // can read from this page
   bool  write       : 1; // can write to this page
-  bool  execute     : 1; // can execute code in this page
   bool  uncacheable : 1; // can not be cached
   bool  accessed    : 1; // has been accessed
   bool  written     : 1; // has been written to
   u64   type        : 3; // type of page
-  u64   _reserved   : 3;
+  u64   _reserved   : 4;
 
   // usize nuse      : VM_PTAB_BITS; // number of sub-entries in use
   // usize _reserved : 3;

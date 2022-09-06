@@ -3,14 +3,16 @@
 const SC_SLEEP = 1
 
 fun main() {
-  // SP = sub SP 64 // reserve 64B of stack memory
+  stkmem 4194296 // allocate 64B of stack memory
 
-  // spawn new task
-  tspawn foo
+  // // spawn new task
+  // tspawn foo
 
-  // sleep os thread for 500ms
-  R0 = 500000000
-  syscall SC_SLEEP
+  // // sleep os thread for 500ms
+  // R0 = 500000000
+  // syscall SC_SLEEP
+
+  stkmem -4194296 // deallocate 64B of stack memory
 }
 
 fun foo() {

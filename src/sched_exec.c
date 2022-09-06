@@ -91,7 +91,7 @@ enum execerr_t {
       _(EX_E_UNALIGNED_STORE, "unaligned memory store %llx (align %llu B)", a1, a2)
       _(EX_E_UNALIGNED_ACCESS,"unaligned memory access %llx (align %llu B)", a1, a2)
       _(EX_E_UNALIGNED_STACK, "unaligned stack pointer SP=%llx (align %d B)", a1, STK_ALIGN)
-      _(EX_E_STACK_OVERFLOW,  "stack overflow %llx (align %llu B)", a1, a2)
+      _(EX_E_STACK_OVERFLOW,  "stack overflow %llx (%llu)", a1, a2)
       _(EX_E_OOB_LOAD,        "memory load out of bounds %llx (align %llu B)", a1, a2)
       _(EX_E_OOB_STORE,       "memory store out of bounds %llx (align %llu B)", a1, a2)
       _(EX_E_OOB_PC,          "PC out of bounds %llx", a1)
@@ -176,9 +176,11 @@ enum execerr_t {
 #define MLOAD(TYPE, vaddr) ({ \
   u64 vaddr__ = (vaddr); \
   u64 value__ = VM_LOAD( \
-    TYPE, &(t)->m->vm_cache[VM_PERM_RW], &(t)->m->s->vm_pagedir, vaddr__); \
-  tracemem("LOAD %s 0x%llx (align %lu) => 0x%llx", \
-    #TYPE, vaddr__, _Alignof(TYPE), value__); \
+    TYPE, m_vm_cache((t)->m, VM_PERM_RW), &(t)->m->s->vm_pagedir, vaddr__); \
+  tracemem("LOAD %s 0x%llx (align %lu) => 0x%llx (host 0x%lx)", \
+    #TYPE, vaddr__, _Alignof(TYPE), value__, \
+    VM_TRANSLATE(m_vm_cache((t)->m, VM_PERM_RW), &(t)->m->s->vm_pagedir, \
+      vaddr__, _Alignof(TYPE))); \
   value__; \
 })
 
@@ -186,10 +188,12 @@ enum execerr_t {
 #define MSTORE(TYPE, vaddr, value) { \
   u64 vaddr__ = (vaddr); \
   u64 value__ = (value); \
-  tracemem("STORE %s 0x%llx (align %lu) => 0x%llx", \
-    #TYPE, vaddr__, _Alignof(TYPE), value__); \
+  tracemem("STORE %s 0x%llx (align %lu) => 0x%llx (host 0x%lx)", \
+    #TYPE, value__, _Alignof(TYPE), vaddr__, \
+    VM_TRANSLATE(m_vm_cache((t)->m, VM_PERM_RW), &(t)->m->s->vm_pagedir, \
+      vaddr__, _Alignof(TYPE))); \
   VM_STORE( \
-    TYPE, &(t)->m->vm_cache[VM_PERM_RW], &(t)->m->s->vm_pagedir, vaddr__, value__); \
+    TYPE, m_vm_cache((t)->m, VM_PERM_RW), &(t)->m->s->vm_pagedir, vaddr__, value__); \
 }
 
 static void mcopy(EXEC_PARAMS, u64 dstaddr, u64 srcaddr, u64 size) {
@@ -229,6 +233,125 @@ static void push_PC(EXEC_PARAMS) {
   // save PC on stack
   check(IS_ALIGN2(SP, STK_ALIGN), EX_E_UNALIGNED_STACK, SP, STK_ALIGN);
   push(EXEC_ARGS, 8, (u64)pc);
+}
+
+
+#define STK_SPLIT_LINK_SIZE  32u
+static_assert(IS_ALIGN2(STK_SPLIT_LINK_SIZE, STK_ALIGN), "");
+
+
+static i64 stkmem_grow(EXEC_PARAMS, i64 delta) {
+  u64 sp = SP;
+  u64 newsp = sp - (u64)delta;
+
+  check(IS_ALIGN2(sp, STK_ALIGN), EX_E_UNALIGNED_STACK, sp, STK_ALIGN);
+  check(IS_ALIGN2(delta, STK_ALIGN), EX_E_UNALIGNED_STORE, delta, STK_ALIGN);
+
+  // First try to grow the current stack (unless delta overflowed sp)
+  if (newsp < t->stack_lo) {
+    // note: if !(newsp < t->stack_lo) then newsp overflowed and is invalid
+    u64 stack_lo = ALIGN2_FLOOR(newsp, PAGE_SIZE);
+    usize npages = t->stack_lo - stack_lo;
+    dlog("  try grow current stack %llx -> %llx (%zu pages)", t->stack_lo, stack_lo, npages);
+    rerr_t err = vm_map(&t->m->s->vm_pagedir, stack_lo, 0, npages, VM_PERM_RW);
+    if (err == 0) {
+      // succeeded in extending the stack
+      t->stack_lo = stack_lo;
+      return sp;
+    }
+    // if we get here, vm_map should have rejected the mapping
+    safecheckf(err == rerr_exists, "vm_map %s", rerr_str(err));
+  }
+
+  // Allocate new stack and split the stack
+  //
+  // TODO allocator functionality of vm_map,
+  //      where an empty vaddr means "find me a free range"
+  //
+  u64 stack_lo = 0x000100000000;
+  usize newsize = ALIGN2(delta, PAGE_SIZE)*2;
+  rerr_t err = vm_map(&t->m->s->vm_pagedir, stack_lo, 0, newsize/PAGE_SIZE, VM_PERM_RW);
+  safecheckf(err==0, "vm_map %s", rerr_str(err));
+
+  // new stack pointer
+  // - reserve space on new stack for saving link to previous stack
+  newsp = (stack_lo + newsize) - STK_SPLIT_LINK_SIZE;
+
+  // save previous stack range
+  vm_cache_t* vm_cache = m_vm_cache(t->m, VM_PERM_RW);
+  u64* newstack = (void*)VM_TRANSLATE(vm_cache, &t->m->s->vm_pagedir, newsp, STK_ALIGN);
+  newstack[0] = sp;          // newsp
+  newstack[1] = t->stack_hi; // newsp+8
+  newstack[2] = t->stack_lo; // newsp+16
+
+  // update task with current stack limits (always inside page boundary)
+  t->stack_lo = stack_lo;
+  t->stack_hi = newsp;
+  t->nsplitstack++;
+
+  tracemem("splitstack add %012llx-%012llx (%zu KiB)",
+    stack_lo, newsp+STK_SPLIT_LINK_SIZE, newsize/KiB);
+
+  // return new stack pointer, offset by storage of previous stack range
+  assert(newsp - delta >= stack_lo); // or our calculations above are incorrect
+  return newsp - delta;
+}
+
+static i64 stkmem_shrink(EXEC_PARAMS, i64 delta) {
+  // end of a split stack -- unmap it & unlink
+  u64 sp = SP + (u64)-delta;
+
+  // unmap current stack being retired
+  usize stacksize = (t->stack_hi + STK_SPLIT_LINK_SIZE) - t->stack_lo;
+  assert(IS_ALIGN2(stacksize, PAGE_SIZE));
+  UNUSED rerr_t err = vm_unmap(&t->m->s->vm_pagedir, t->stack_lo, stacksize/PAGE_SIZE);
+  safecheckf(err==0, "splitstack vm_unmap %llx: %s", t->stack_lo, rerr_str(err));
+
+  tracemem("splitstack del %012llx-%012llx (%zu KiB)",
+    t->stack_lo, t->stack_hi + STK_SPLIT_LINK_SIZE, stacksize/KiB);
+
+  // load range of parent stack (always inside page boundary)
+  vm_cache_t* vm_cache = m_vm_cache(t->m, VM_PERM_RW);
+  u64* stack = (void*)VM_TRANSLATE(vm_cache, &t->m->s->vm_pagedir, sp, STK_ALIGN);
+  u64 newsp = stack[0];   // newsp
+  t->stack_hi = stack[1]; // newsp+8
+  t->stack_lo = stack[2]; // newsp+16
+
+  t->nsplitstack--;
+
+  return newsp;
+}
+
+static i64 stkmem_alloc(EXEC_PARAMS, i64 delta) {
+  u64 sp = SP;
+  u64 newsp;
+  if (check_sub_overflow(sp, (u64)delta, &newsp) || UNLIKELY(newsp < t->stack_lo)) {
+    // Not enough space in current stack
+    return stkmem_grow(EXEC_ARGS, delta);
+  }
+  return newsp;
+}
+
+static i64 stkmem_free(EXEC_PARAMS, i64 delta) {
+  u64 sp = SP;
+  u64 newsp;
+  if (check_add_overflow(sp, (u64)-delta, &newsp) || UNLIKELY(newsp > t->stack_hi)) {
+    dlog("unbalanced stkmem calls (overflow from stkmem %lld)", delta);
+    execerr(EX_E_STACK_OVERFLOW, sp, (u64)-delta);
+    return sp;
+  }
+  if UNLIKELY(newsp == t->stack_hi && t->nsplitstack > 0) {
+    // end of a split stack -- unmap it & unlink
+    return stkmem_shrink(EXEC_ARGS, delta);
+  }
+  return newsp;
+}
+
+// stkmem returns new SP with delta added
+static i64 stkmem(EXEC_PARAMS, i64 delta) {
+  if (delta < 0)
+    return stkmem_free(EXEC_ARGS, delta);
+  return stkmem_alloc(EXEC_ARGS, delta);
 }
 
 // —————————— I/O
@@ -499,6 +622,7 @@ usize rsched_eval(EXEC_PARAMS) {
     #define do_READ(D)    RA = _read(EXEC_ARGS, D, RB, RC) // addr=RB size=RC fd=D
     #define do_MCOPY(C)   mcopy(EXEC_ARGS, RA, RB, C)
     #define do_MCMP(D)    RA = (u64)mcmp(EXEC_ARGS, RB, RC, D)
+    #define do_STKMEM(A)  SP = stkmem(EXEC_ARGS, A);
 
     #define do_RET() pc = (usize)pop(EXEC_ARGS, 8) // load return address from stack
 

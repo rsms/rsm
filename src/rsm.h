@@ -185,6 +185,7 @@ _( WRITE   , ABCDu , reg , "write"   /* RA = write dstaddr=RB size=RC fd=Du */)\
 _( READ    , ABCDu , reg , "read"    /* RA = read  srcaddr=RB size=RC fd=Du */)\
 _( MCOPY   , ABCu  , mem , "mcopy"   /* mem[RA:Cu] = mem[RB:Cu] */)\
 _( MCMP    , ABCDu , reg , "mcmp"    /* RA = mem[RB:Du] <> mem[RC:Du] */)\
+_( STKMEM  , As    , nil , "stkmem"  /* SP = maybe_split_or_join_stack(); SP += As */)\
 \
 // end RSM_FOREACH_OP
 

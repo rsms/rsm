@@ -153,7 +153,7 @@ struct rsched_ {
   rmachine_t*  machine;      // host machine
   _Atomic(u64) tidgen;       // T.id generator
   mutex_t      lock;         // protects access to idlem, idlep, allp, runq
-  vm_pagedir_t vm_pagedir;   // virtual memory page directory
+  vm_map_t     vm_map;       // virtual memory page directory
   bool         main_started; // true when main task has started
 
   // M's

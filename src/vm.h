@@ -232,12 +232,13 @@ typedef struct {
 // vm_ptab_t - virtual memory page table
 typedef vm_pte_t* vm_ptab_t;
 
-// vm_pagedir_t is a page directory, managing mapping between virtual and host pages
+// vm_map_t is one map, a page directory managing mappings between
+// virtual page addresses and host page addresses.
 typedef struct {
   rmm_t*    mm;
   mutex_t   lock;
   vm_ptab_t root; // L0
-} vm_pagedir_t;
+} vm_map_t;
 
 // vm_cache_ent_t is the type of vm_cache_t entries
 typedef struct {
@@ -278,23 +279,28 @@ enum vm_op {
 #define VM_OP_TYPE(op)      ( (op) & (~0u << 8) ) /* e.g. VM_OP_LOAD, VM_OP_STORE */
 
 
-// vm_pagedir_init initializes a new vm_pagedir_t, sourcing backing memory from mm.
+// vm_map_init initializes a new vm_map_t, sourcing backing memory from mm.
 // Returns false if allocating the root table in mm failed.
-rerr_t vm_pagedir_init(vm_pagedir_t*, rmm_t* mm);
+rerr_t vm_map_init(vm_map_t*, rmm_t* mm);
 
-// vm_pagedir_dispose frees up resources of a page directory,
+// vm_map_dispose frees up resources of a page directory,
 // which becomes invalid after this call.
-void vm_pagedir_dispose(vm_pagedir_t*);
+void vm_map_dispose(vm_map_t*);
 
-// vm_map maps a range of host pages, starting at haddr, to a range of virtual pages.
+// vm_map_add maps a range of host pages starting at haddr to a range of virtual pages.
 // If haddr is 0, backing pages are allocated as needed on first access.
 // haddr's address must be aligned to PAGE_SIZE.
 // vaddr does not need to be page aligned; its top PAGE_SIZE_BITS bits are ignored.
-rerr_t vm_map(vm_pagedir_t*, u64 vaddr, uintptr haddr, usize npages, vm_perm_t);
+rerr_t vm_map_add(vm_map_t*, u64* vaddr, uintptr haddr, usize npages, vm_perm_t);
 
-// vm_unmap deallocates a range of virtual pages
-// Caller using a cache should call vm_cache_invalidate
-rerr_t vm_unmap(vm_pagedir_t*, u64 vaddr, usize npages);
+// vm_map_del deallocates a range of virtual pages starting at vaddr.
+// Callers using caches should call vm_cache_invalidate.
+rerr_t vm_map_del(vm_map_t*, u64 vaddr, usize npages);
+
+// vm_map_findspace attempts to find a region with sufficient space for npages,
+// with minimum address *vaddr. On success, *vaddr contains the first virtual
+// address in the found region.
+rerr_t vm_map_findspace(vm_map_t*, u64* vaddr, usize npages);
 
 
 // vm_cache_init initializes a vm_cache_t
@@ -316,7 +322,7 @@ ALWAYS_INLINE void vm_cache_invalidate_one(vm_cache_t* cache, u64 vaddr) {
 // The address is checked for alignment according to vm_op_t.
 // Finally, the entry is added to to the cache.
 // Returns vm_cache_ent_t.haddr_diff
-u64 _vm_cache_miss(vm_cache_t*, vm_pagedir_t*, u64 vaddr, vm_op_t);
+u64 _vm_cache_miss(vm_cache_t*, vm_map_t*, u64 vaddr, vm_op_t);
 
 // void vmtrace(const char* fmt, ...)
 #ifndef vmtrace
@@ -324,39 +330,39 @@ u64 _vm_cache_miss(vm_cache_t*, vm_pagedir_t*, u64 vaddr, vm_op_t);
 #endif
 
 // VM_STORE performs a store to host memory using a virtual address.
-// E.g. VM_STORE(u32, vm_cache, vm_pagedir, 0xdeadbee0, 1234)
+// E.g. VM_STORE(u32, vm_cache, vm_map, 0xdeadbee0, 1234)
 // This becomes 10 x86_64 instructions, or 10 arm64/armv8-1 instructions (clang-14 -O3).
 // See https://godbolt.org/z/esT98Y9Yd
-#define VM_STORE(type, vm_cache, pagedir, vaddr, value) { \
+#define VM_STORE(type, vm_cache, map, vaddr, value) { \
   vmtrace("VM_STORE %s (align %lu) 0x%llx", #type, _Alignof(type), vaddr); \
   *(type*)vm_translate( \
-    (vm_cache), (pagedir), (vaddr), _Alignof(type), VM_OP_STORE + _Alignof(type) \
+    (vm_cache), (map), (vaddr), _Alignof(type), VM_OP_STORE + _Alignof(type) \
   ) = (value); \
 }
 
 // VM_LOAD performs a load from host memory using a virtual address.
-// E.g. u32 value = VM_LOAD(u32, vm_cache, vm_pagedir, 0xdeadbee0);
-#define VM_LOAD(type, vm_cache, pagedir, vaddr) ( \
+// E.g. u32 value = VM_LOAD(u32, vm_cache, vm_map, 0xdeadbee0);
+#define VM_LOAD(type, vm_cache, map, vaddr) ( \
   vmtrace("VM_LOAD %s (align %lu) 0x%llx", #type, _Alignof(type), vaddr), \
   *(type*)vm_translate( \
-    (vm_cache), (pagedir), (vaddr), _Alignof(type), VM_OP_LOAD + _Alignof(type) \
+    (vm_cache), (map), (vaddr), _Alignof(type), VM_OP_LOAD + _Alignof(type) \
   ) \
 )
 
 // uintptr VM_TRANSLATE() translates a virtual address to a host address
-#define VM_TRANSLATE(vm_cache, pagedir, vaddr, align) \
-  vm_translate((vm_cache), (pagedir), (vaddr), (align), VM_OP_LOAD + (u32)(align))
+#define VM_TRANSLATE(vm_cache, map, vaddr, align) \
+  vm_translate((vm_cache), (map), (vaddr), (align), VM_OP_LOAD + (u32)(align))
 
 // vm_translate converts a virtual address to its corresponding host address
 ALWAYS_INLINE static uintptr vm_translate(
-  vm_cache_t* cache, vm_pagedir_t* pagedir, u64 vaddr, u64 align, vm_op_t op)
+  vm_cache_t* cache, vm_map_t* map, u64 vaddr, u64 align, vm_op_t op)
 {
   assert(vaddr >= VM_ADDR_MIN);
   u64 index = VM_CACHE_INDEX(vaddr);
   u64 actual_tag = cache->entries[index].tag;
   u64 expected_tag = vaddr & (VM_ADDR_PAGE_MASK ^ (align - 1llu));
   u64 haddr_diff = UNLIKELY( actual_tag != expected_tag ) ?
-    _vm_cache_miss(cache, pagedir, vaddr, op) :
+    _vm_cache_miss(cache, map, vaddr, op) :
     cache->entries[index].haddr_diff;
   return (uintptr)(haddr_diff + vaddr);
 }

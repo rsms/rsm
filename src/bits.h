@@ -30,15 +30,15 @@ inline static void bitset_init(bitset_t* bset, u8* data, usize len) {
   bset->len = len;
 }
 
-inline static bool bitset_get(const bitset_t* bset, usize index) {
-  assert(index < bset->len);
-  return bit_get(bset->data, index);
+inline static bool bitset_get(const bitset_t bset, usize index) {
+  assert(index < bset.len);
+  return bit_get(bset.data, index);
 }
 
-inline static void bitset_set_range(bitset_t* bset, usize start, usize len, bool on) {
-  assertf(start + len <= bset->len,
-    "%zu + %zu = %zu, bset->len = %zu", start, len, start + len, bset->len);
-  bits_set_range(bset->data, start, len, on);
+inline static void bitset_set_range(bitset_t bset, usize start, usize len, bool on) {
+  assertf(start + len <= bset.len,
+    "%zu + %zu = %zu, bset->len = %zu", start, len, start + len, bset.len);
+  bits_set_range(bset.data, start, len, on);
 }
 
 // bitset_find_unset_range searches for a contiguous region of unset bits.
@@ -49,14 +49,14 @@ inline static void bitset_set_range(bitset_t* bset, usize start, usize len, bool
 // Returns >=minlen if a range was found (and updates startp.)
 // Returns 0 if no range large enough was found (may still update startp.)
 usize bitset_find_unset_range(
-  bitset_t* bset, usize* startp, usize minlen, usize maxlen, usize stride);
+  bitset_t bset, usize* startp, usize minlen, usize maxlen, usize stride);
 
 // bitset_find_best_fit searches for the smallest hole that is >=minlen large
-usize bitset_find_best_fit(bitset_t* bset, usize* startp, usize minlen, usize stride);
+usize bitset_find_best_fit(bitset_t bset, usize* startp, usize minlen, usize stride);
 
 // bitset_find_first_fit searches for the first hole that is >=minlen large
 inline static usize bitset_find_first_fit(
-  bitset_t* bset, usize* startp, usize minlen, usize stride)
+  bitset_t bset, usize* startp, usize minlen, usize stride)
 {
   return bitset_find_unset_range(bset, startp, minlen, minlen, stride);
 }

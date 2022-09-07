@@ -34,13 +34,6 @@ static_assert(STK_MIN >= ALIGN2_X(sizeof(tctx_t), TCTX_ALIGN), "STK_MIN too smal
 static_assert(STK_MIN % STK_ALIGN == 0, "STK_MIN not aligned to STK_ALIGN");
 static_assert(STK_DEFAULT % STK_ALIGN == 0, "STK_DEFAULT not aligned to STK_ALIGN");
 
-// HEAP_ALIGN: alignment of heap memory address
-#define HEAP_ALIGN   8
-
-// HEAP_INITSIZE: minimum initial heap size. Must be multiple of PAGE_SIZE.
-#define HEAP_INITSIZE  (1lu * MiB)
-static_assert(IS_ALIGN2(HEAP_INITSIZE, PAGE_SIZE), "");
-
 // MAIN_RET_PC: special PC value representing the main return address
 #define MAIN_RET_PC  USIZE_MAX
 
@@ -488,7 +481,7 @@ static tctx_t* nullable m_get_tctx(M* m, T* t) {
 
   // get backing memory
   vm_cache_t* vm_cache = m_vm_cache(m, VM_PERM_RW);
-  uintptr haddr = VM_TRANSLATE(vm_cache, &m->s->vm_pagedir, ctx_vaddr, TCTX_ALIGN);
+  uintptr haddr = VM_TRANSLATE(vm_cache, &m->s->vm_map, ctx_vaddr, TCTX_ALIGN);
 
   //dlog("load ctx from stack at vaddr 0x%llx (haddr %p)", ctx_vaddr, (void*)haddr);
   return (tctx_t*)haddr;
@@ -587,7 +580,7 @@ static T* nullable task_create(M* m, u64 stack_vaddr, usize stacksize, usize ins
   assert(IS_ALIGN2(stack_vaddr, STK_ALIGN));
   vm_cache_t* vm_cache = m_vm_cache(m, VM_PERM_RW);
   void* stackptr =
-    (void*)VM_TRANSLATE(vm_cache, &m->s->vm_pagedir, stack_vaddr-STK_ALIGN, STK_ALIGN);
+    (void*)VM_TRANSLATE(vm_cache, &m->s->vm_map, stack_vaddr-STK_ALIGN, STK_ALIGN);
   assertf(stackptr != NULL, "stack memory not mapped for 0x%llx", stack_vaddr);
   stackptr += STK_ALIGN; // readjust host address
 
@@ -1722,7 +1715,7 @@ rerr_t rsched_init(rsched_t* s, rmachine_t* machine) {
   if ((err = mutex_init(&s->freet_lock))) return err;
 
   // virtual memory page directory
-  if ((err = vm_pagedir_init(&s->vm_pagedir, machine->mm)))
+  if ((err = vm_map_init(&s->vm_map, machine->mm)))
     return err;
 
   // initialize main M (id=0) on current OS thread
@@ -1768,7 +1761,7 @@ rerr_t rsched_init(rsched_t* s, rmachine_t* machine) {
 
   return 0;
 error:
-  vm_pagedir_dispose(&s->vm_pagedir);
+  vm_map_dispose(&s->vm_map);
   return err;
 }
 
@@ -1779,7 +1772,7 @@ void rsched_dispose(rsched_t* s) {
   rwmutex_dispose(&s->allocm_lock);
   rwmutex_dispose(&s->allt.lock);
   mutex_dispose(&s->freet_lock);
-  vm_pagedir_dispose(&s->vm_pagedir);
+  vm_map_dispose(&s->vm_map);
 }
 
 
@@ -1811,21 +1804,21 @@ static void dlog_memory_map(
   uintptr stack_haddr, usize stack_hsize, u64 stack_vaddr, u64 stack_vaddr_hi)
 {
   dlog("memory map:");
-  log("  %-9s  %-25s %8s  %-25s %8s",
+  log("  %-7s  %-25s %8s  %-25s %8s",
     "SEGMENT","VADDR","VSIZE","HADDR","HSIZE");
 
   #define SEG(name, haddr, hsize, vaddr, vaddr_hi) { \
-    log("  %-9s  %012llx-%012llx %8llu  %012lx-%012lx %8zu", \
+    log("  %-7s  %012llx-%012llx %8llu  %012lx-%012lx %8zu", \
       (name), \
       (vaddr), (vaddr_hi)-1, ((vaddr_hi) - (vaddr)), \
       (haddr), ((haddr) + (hsize))-1, (hsize)); \
   }
 
-  log("  %-9s  (not mapped)                     -  %012lx-%012lx %8zu",
+  log("  %-7s  (not mapped)                     -  %012lx-%012lx %8zu",
     "code", code_haddr, (code_haddr + code_hsize)-1, code_hsize);
 
-  SEG("data+heap", data_haddr,  data_hsize,  data_vaddr,  data_vaddr_hi);
-  SEG("stack",     stack_haddr, stack_hsize, stack_vaddr, stack_vaddr_hi);
+  SEG("data",  data_haddr,  data_hsize,  data_vaddr,  data_vaddr_hi);
+  SEG("stack", stack_haddr, stack_hsize, stack_vaddr, stack_vaddr_hi);
   #undef SEG
 }
 #else
@@ -1894,85 +1887,49 @@ static rerr_t rsched_loadrom(
   void* dataend = data + rom->datasize;
   memmove(data, rom->data, rom->datasize);
 
-  // virtual memory layout
-  //   ┌────────────┬─────────┬─────────── ··· ────────────┐
-  //   │ code       │ data    │ heap →             ← stack │
-  //   ├────────────┼─────────┴─────────── ··· ────────────┤
-  //   not mapped   0x1000                                 0xfffffffffff8
-  //                VM_ADDR_MIN                            STACK_VADDR
-
-  // stack backing pages & size
+  // stack backing memory is at the end of basemem
   void* stack = basemem.p + basemem.size;
-  usize stacksize = ALIGN2(STK_MIN, PAGE_SIZE); // backing size
-  assert(basemem.size > stacksize);
 
-  // remaining data space is used for backing memory of the heap
-  void* heap = (void*)ALIGN2((uintptr)dataend, HEAP_ALIGN);
-  void* heapend = basemem.p + (basemem.size - stacksize);
-  usize heapsize;
-  if (heap >= heapend) {
-    // no space left in basemem; no initial backing pages for heap
-    heapsize = 0;
-  } else {
-    heapsize = (usize)(uintptr)(heapend - heap);
-    if (heapsize > PAGE_SIZE) {
-      // we have extra backing pages; map them to initial stack instead of heap
-      // by adjusting the end of the heap backing memory (heapend)
-      heapend = (void*)ALIGN2((uintptr)heap, PAGE_SIZE);
-      stacksize = (usize)(uintptr)(stack - heapend);
-      heapsize = (usize)(uintptr)(heapend - heap);
-    }
-  }
-  assert(IS_ALIGN2((uintptr)heapend, PAGE_SIZE));
+  // virtual memory layout
+  //   ┌────────────┬─────────┬─────────────── ··· ──────────┐
+  //   │ code       │ data    │ vm_map-able →        ← stack │
+  //   ├────────────┼─────────┴─────────────── ··· ──────────┤
+  //   not mapped   0x1000                                   0xfffffffffff8
+  //                VM_ADDR_MIN                              STACK_VADDR
 
   // calculate page mappings for data
-  usize data_nhpages = (u64)(uintptr)(heapend - data) / PAGE_SIZE;
-  usize data_npages = MAX(HEAP_INITSIZE/PAGE_SIZE, data_nhpages);
+  uintptr data_haddr = (uintptr)data;
+  usize data_npages = IDIV_CEIL(rom->datasize, PAGE_SIZE);
   u64 data_vaddr_lo = DATA_VADDR;
   UNUSED u64 data_vaddr_hi = DATA_VADDR + data_npages*PAGE_SIZE;
-  uintptr data_haddr = (uintptr)data;
-  u64 heap_vaddr_lo = VM_ADDR_MIN + (u64)(uintptr)(heap - data);
 
   // calculate page mappings for stack
-  usize stack_nhpages = (u64)(uintptr)(stack - heapend) / PAGE_SIZE;
-  usize stack_npages = MAX(HEAP_INITSIZE/PAGE_SIZE, stack_nhpages);
+  uintptr stack_haddr = ALIGN2((uintptr)dataend, PAGE_SIZE);
+  usize stack_nhpages = (u64)(uintptr)(stack - dataend) / PAGE_SIZE;
+  usize stack_npages = MAX(STK_DEFAULT/PAGE_SIZE, stack_nhpages);
   u64 stack_vaddr_lo = ALIGN2(STACK_VADDR - stack_npages*PAGE_SIZE, PAGE_SIZE);
   UNUSED u64 stack_vaddr_hi = STACK_VADDR;
-  uintptr stack_haddr = (uintptr)heapend;
 
   dlog_memory_map(
     (uintptr)basemem.p, codesize,
-    data_haddr,  data_nhpages*PAGE_SIZE, data_vaddr_lo, data_vaddr_hi,
+    data_haddr,  data_npages*PAGE_SIZE, data_vaddr_lo, data_vaddr_hi,
     stack_haddr, stack_nhpages*PAGE_SIZE, stack_vaddr_lo, stack_vaddr_hi);
 
-  // map data & heap pages with backing pages
-  trace_vm_map("data",         data_vaddr_lo, data_haddr, data_nhpages);
-  err = vm_map(&s->vm_pagedir, data_vaddr_lo, data_haddr, data_nhpages, VM_PERM_RW);
+  // map data pages with backing pages
+  trace_vm_map("data", data_vaddr_lo, data_haddr, data_npages);
+  err = vm_map_add(&s->vm_map, &data_vaddr_lo, data_haddr, data_npages, VM_PERM_RW);
   if UNLIKELY(err) {
     dlog("vm_map failed: %s", rerr_str(err));
     return rerr_mfault;
   }
 
-  // map remaining heap pages WITHOUT backing pages
-  if (data_npages > data_nhpages) {
-    u64 vaddr = data_vaddr_lo + data_nhpages*PAGE_SIZE;
-    usize npages = data_npages - data_nhpages;
-    trace_vm_map("data",         vaddr, 0, npages);
-    err = vm_map(&s->vm_pagedir, vaddr, 0, npages, VM_PERM_RW);
-    if UNLIKELY(err) {
-      dlog("vm_map failed: %s", rerr_str(err));
-      vm_unmap(&s->vm_pagedir, data_vaddr_lo, data_npages);
-      return rerr_mfault;
-    }
-  }
-
   // map stack pages WITHOUT backing pages
   usize stack_nvpages = stack_npages - stack_nhpages;
-  trace_vm_map("stack",        stack_vaddr_lo, 0, stack_nvpages);
-  err = vm_map(&s->vm_pagedir, stack_vaddr_lo, 0, stack_nvpages, VM_PERM_RW);
+  trace_vm_map("stack", stack_vaddr_lo, 0, stack_nvpages);
+  err = vm_map_add(&s->vm_map, &stack_vaddr_lo, 0, stack_nvpages, VM_PERM_RW);
   if UNLIKELY(err) {
     dlog("vm_map failed: %s", rerr_str(err));
-    vm_unmap(&s->vm_pagedir, data_vaddr_lo, data_npages);
+    vm_map_del(&s->vm_map, data_vaddr_lo, data_npages);
     return rerr_mfault;
   }
 
@@ -1980,23 +1937,20 @@ static rerr_t rsched_loadrom(
   if (stack_npages > stack_nhpages) {
     u64 vaddr = stack_vaddr_lo + stack_nvpages*PAGE_SIZE;
     usize npages = stack_npages - stack_nvpages;
-    trace_vm_map("stack",        vaddr, stack_haddr, npages);
-    err = vm_map(&s->vm_pagedir, vaddr, stack_haddr, npages, VM_PERM_RW);
+    trace_vm_map("stack", vaddr, stack_haddr, npages);
+    err = vm_map_add(&s->vm_map, &vaddr, stack_haddr, npages, VM_PERM_RW);
     if UNLIKELY(err) {
       dlog("vm_map failed: %s", rerr_str(err));
-      vm_unmap(&s->vm_pagedir, data_vaddr_lo, data_npages);
-      vm_unmap(&s->vm_pagedir, stack_vaddr_lo, stack_nvpages);
+      vm_map_del(&s->vm_map, data_vaddr_lo, data_npages);
+      vm_map_del(&s->vm_map, stack_vaddr_lo, stack_nvpages);
       return rerr_mfault;
     }
   }
 
   // setup main function arguments
-  // main(argc u32, argv u64, heap_lo u64, heap_hi u64)
+  // main(argc u32, argv u64)
   s->m0.iregs[0] = 0;
   s->m0.iregs[1] = 0;
-  s->m0.iregs[2] = heap_vaddr_lo;
-  s->m0.iregs[3] = data_vaddr_hi;
-  trace3("heap %012llx-%012llx", heap_vaddr_lo, data_vaddr_hi-1);
 
   *stacksizep = stack_npages*PAGE_SIZE;
 
@@ -2005,7 +1959,7 @@ static rerr_t rsched_loadrom(
 
 
 static rerr_t rsched_unloadrom(rsched_t* s, rrom_t* rom) {
-  dlog("TODO %s: vm_unmap", __FUNCTION__);
+  dlog("TODO %s: vm_map_del", __FUNCTION__);
   return 0;
 }
 

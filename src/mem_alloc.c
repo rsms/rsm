@@ -277,9 +277,9 @@ static_assert(sizeof(subheap_t) <= PAGE_SIZE, "");
       }
       uintptr addr = (uintptr)h->chunks + (chunk_idx * CHUNK_SIZE);
       if (highlight_start_addr <= addr && addr < highlight_end_addr) {
-        fputs(bitset_get(&h->chunk_use, chunk_idx) ? "▓" : "_", stderr);
+        fputs(bitset_get(h->chunk_use, chunk_idx) ? "▓" : "_", stderr);
       } else {
-        fputs(bitset_get(&h->chunk_use, chunk_idx) ? "░" : "_", stderr);
+        fputs(bitset_get(h->chunk_use, chunk_idx) ? "░" : "_", stderr);
       }
     }
     fprintf(stderr,
@@ -400,9 +400,9 @@ static void* nullable heap_alloc(
   // Now we will search for a free range in the "chunks in use" bitset h->chunk_use
   //heap_debug_dump_state(h, NULL, 0);
   if (nchunks < BEST_FIT_THRESHOLD) {
-    chunk_len = bitset_find_first_fit(&h->chunk_use, &chunk_index, nchunks, chunks_align);
+    chunk_len = bitset_find_first_fit(h->chunk_use, &chunk_index, nchunks, chunks_align);
   } else {
-    chunk_len = bitset_find_best_fit(&h->chunk_use, &chunk_index, nchunks, chunks_align);
+    chunk_len = bitset_find_best_fit(h->chunk_use, &chunk_index, nchunks, chunks_align);
   }
 
   // Give up if we didn't find a range of chunks large enough
@@ -429,7 +429,7 @@ static void* nullable heap_alloc(
   RMEM_PEDANTIC_SAFECHECK_FREE(a, ptr, *sizep);
 
   // Update the bitset to mark the chunks as "in use"
-  bitset_set_range(&h->chunk_use, chunk_index, chunk_len, true);
+  bitset_set_range(h->chunk_use, chunk_index, chunk_len, true);
 
   // fill allocated memory with scrub bytes (if enabled)
   if (RMEM_ALLOC_SCRUB_BYTE)
@@ -454,11 +454,11 @@ static void heap_free(heap_t* h, void* ptr, usize size) {
     h->debug_id, RMEM_FMT_ARGS(RMEM(ptr, size)),
     chunk_len, chunk_index, chunk_index + chunk_len);
 
-  assertf(bitset_get(&h->chunk_use, chunk_index),
+  assertf(bitset_get(h->chunk_use, chunk_index),
     "trying to free already-free region starting at chunk %zu (ptr=%p)",
     chunk_index, ptr);
 
-  bitset_set_range(&h->chunk_use, chunk_index, chunk_len, 0);
+  bitset_set_range(h->chunk_use, chunk_index, chunk_len, 0);
 
   assert(h->chunk_len >= chunk_len);
   h->chunk_len -= chunk_len;
@@ -806,7 +806,7 @@ static int subheap_debug_is_allocated(rmemalloc_t* a, subheap_t* sh, rmem_t regi
   usize chunk_end = chunk_index + (region.size / CHUNK_SIZE);
 
   while (chunk_index < chunk_end) {
-    if (bitset_get(&h->chunk_use, chunk_index))
+    if (bitset_get(h->chunk_use, chunk_index))
       return 1; // allocated
     chunk_index++;
   }

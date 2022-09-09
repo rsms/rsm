@@ -264,7 +264,7 @@ static i64 stkmem_grow(EXEC_PARAMS, i64 delta) {
   usize newsize = ALIGN2(delta, PAGE_SIZE)*2;
   rerr_t err;
   vm_map_lock(vm_map);
-  #if 0
+  #if 1
     u64 stack_lo = 0x000100000000;
   #else
     u64 stack_lo = 0;

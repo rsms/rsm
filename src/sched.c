@@ -1808,15 +1808,23 @@ static void dlog_memory_map(
     "SEGMENT","VADDR","VSIZE","HADDR","HSIZE");
 
   #define SEG(name, haddr, hsize, vaddr, vaddr_hi) { \
-    log("  %-7s  %012llx-%012llx %8llu  %012lx-%012lx %8zu", \
-      (name), \
-      (vaddr), (vaddr_hi)-1, ((vaddr_hi) - (vaddr)), \
-      (haddr), ((haddr) + (hsize))-1, (hsize)); \
+    if ((vaddr_hi) - (vaddr) == 0 && hsize > 0) { \
+      log("  %-7s  (not mapped)                     0  %012lx-%012lx %8zu", \
+        (name), \
+        (haddr), ((haddr) + (hsize))-1, (hsize)); \
+    } else if ((vaddr_hi) - (vaddr) == 0) { \
+      log("  %-7s  (empty)                          0  (empty)                   %8zu",\
+        (name), \
+        (hsize)); \
+    } else { \
+      log("  %-7s  %012llx-%012llx %8llu  %012lx-%012lx %8zu", \
+        (name), \
+        (vaddr), (vaddr_hi)-1, ((vaddr_hi) - (vaddr)), \
+        (haddr), ((haddr) + (hsize))-1, (hsize)); \
+    } \
   }
 
-  log("  %-7s  (not mapped)                     -  %012lx-%012lx %8zu",
-    "code", code_haddr, (code_haddr + code_hsize)-1, code_hsize);
-
+  SEG("code",  code_haddr,  code_hsize,  0llu, 0llu);
   SEG("data",  data_haddr,  data_hsize,  data_vaddr,  data_vaddr_hi);
   SEG("stack", stack_haddr, stack_hsize, stack_vaddr, stack_vaddr_hi);
   #undef SEG
@@ -1915,11 +1923,14 @@ static rerr_t rsched_loadrom(
     data_haddr,  data_npages*PAGE_SIZE, data_vaddr_lo, data_vaddr_hi,
     stack_haddr, stack_nhpages*PAGE_SIZE, stack_vaddr_lo, stack_vaddr_hi);
 
+  vm_map_lock(&s->vm_map);
+
   // map data pages with backing pages
   trace_vm_map("data", data_vaddr_lo, data_haddr, data_npages);
   err = vm_map_add(&s->vm_map, &data_vaddr_lo, data_haddr, data_npages, VM_PERM_RW);
   if UNLIKELY(err) {
     dlog("vm_map failed: %s", rerr_str(err));
+    vm_map_unlock(&s->vm_map);
     return rerr_mfault;
   }
 
@@ -1930,6 +1941,7 @@ static rerr_t rsched_loadrom(
   if UNLIKELY(err) {
     dlog("vm_map failed: %s", rerr_str(err));
     vm_map_del(&s->vm_map, data_vaddr_lo, data_npages);
+    vm_map_unlock(&s->vm_map);
     return rerr_mfault;
   }
 
@@ -1943,9 +1955,12 @@ static rerr_t rsched_loadrom(
       dlog("vm_map failed: %s", rerr_str(err));
       vm_map_del(&s->vm_map, data_vaddr_lo, data_npages);
       vm_map_del(&s->vm_map, stack_vaddr_lo, stack_nvpages);
+      vm_map_unlock(&s->vm_map);
       return rerr_mfault;
     }
   }
+
+  vm_map_unlock(&s->vm_map);
 
   // setup main function arguments
   // main(argc u32, argv u64)

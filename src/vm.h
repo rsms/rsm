@@ -236,8 +236,9 @@ typedef vm_pte_t* vm_ptab_t;
 // virtual page addresses and host page addresses.
 typedef struct {
   rmm_t*    mm;
-  mutex_t   lock;
-  vm_ptab_t root; // L0
+  rwmutex_t lock;
+  u64       min_free_vfn; // smallest free VFN (larger VFNs may be allocated)
+  vm_ptab_t root;
 } vm_map_t;
 
 // vm_cache_ent_t is the type of vm_cache_t entries
@@ -286,6 +287,13 @@ rerr_t vm_map_init(vm_map_t*, rmm_t* mm);
 // vm_map_dispose frees up resources of a page directory,
 // which becomes invalid after this call.
 void vm_map_dispose(vm_map_t*);
+
+// vm_map_{lock,unlock} locks the map for exclusive modification.
+// vm_map_r{lock,unlock} locks the map for shared reading.
+static void vm_map_lock(vm_map_t*);
+static void vm_map_unlock(vm_map_t*);
+static void vm_map_rlock(vm_map_t*);
+static void vm_map_runlock(vm_map_t*);
 
 // vm_map_add maps a range of host pages starting at haddr to a range of virtual pages.
 // If haddr is 0, backing pages are allocated as needed on first access.
@@ -366,6 +374,13 @@ ALWAYS_INLINE static uintptr vm_translate(
     cache->entries[index].haddr_diff;
   return (uintptr)(haddr_diff + vaddr);
 }
+
+
+// inline impl of vm_map lock functions
+inline static void vm_map_lock(vm_map_t* map) { rwmutex_lock(&map->lock); }
+inline static void vm_map_unlock(vm_map_t* map) { rwmutex_unlock(&map->lock); }
+inline static void vm_map_rlock(vm_map_t* map) { rwmutex_rlock(&map->lock); }
+inline static void vm_map_runlock(vm_map_t* map) { rwmutex_runlock(&map->lock); }
 
 
 RSM_ASSUME_NONNULL_END

@@ -92,8 +92,13 @@ static void vm_ptab_free(rmm_t* mm, vm_ptab_t ptab) {
 }
 
 
+// void vm_map_assert_locked(vm_map_t*)
+#define vm_map_assert_locked(m)  assertf(rwmutex_islocked(&(m)->lock), "map locked")
+#define vm_map_assert_rlocked(m) assertf(rwmutex_isrlocked(&(m)->lock), "map rlocked")
+
+
 rerr_t vm_map_init(vm_map_t* map, rmm_t* mm) {
-  rerr_t err = mutex_init(&map->lock);
+  rerr_t err = rwmutex_init(&map->lock);
   if UNLIKELY(err)
     return err;
   vm_ptab_t ptab = vm_ptab_create(mm); // root page table
@@ -104,12 +109,14 @@ rerr_t vm_map_init(vm_map_t* map, rmm_t* mm) {
   trace("allocated L%u page table %p +0x%lx", 1, ptab, VM_PTAB_SIZE);
   map->root = ptab;
   map->mm = mm;
+  map->min_free_vfn = 0;
   return 0;
 }
 
 
 void vm_map_dispose(vm_map_t* map) {
-  mutex_dispose(&map->lock);
+  assert(!rwmutex_isrlocked(&map->lock)); // map should not be locked
+  rwmutex_dispose(&map->lock);
   vm_ptab_free(map->mm, map->root);
   dlog("TODO: free all PTEs");
 }
@@ -149,24 +156,22 @@ static vm_pte_t* nullable alloc_backing_page(vm_map_t* map, vm_pte_t* pte) {
 
 
 // vm_map_access returns the page table entry of a Virtual Frame Number
-static vm_pte_t* nullable vm_map_access(
-  vm_map_t* map, u64 vfn, bool isaccess)
-{
+static vm_pte_t* nullable vm_map_access(vm_map_t* map, u64 vfn, bool isaccess) {
   assertf(vfn <= VM_VFN_MAX, "invalid VFN 0x%llx", vfn);
   u32 bits = 0;
   u64 masked_vfn = vfn;
   vm_ptab_t ptab = map->root;
   u8 level = 1;
-
   vm_pte_t* pte = NULL;
-  mutex_lock(&map->lock);
+
+  vm_map_assert_rlocked(map);
 
   for (;;) {
     usize index = (usize)getbits(masked_vfn, VFN_BITS - (1+bits), VM_PTAB_BITS);
     pte = &ptab[index];
 
     trace(
-      "lookup vfn 0x%llx L %u; index %zu = getbits(0x%llx, %u-(1+%u), %u)",
+      "lookup vfn 0x%llx L%u; index %zu = getbits(0x%llx, %u-(1+%u), %u)",
       vfn+1, level, index, masked_vfn, VFN_BITS, bits, VM_PTAB_BITS);
 
     if (level == VM_PTAB_LEVELS) {
@@ -193,7 +198,6 @@ static vm_pte_t* nullable vm_map_access(
     ptab = (vm_ptab_t)(uintptr)(pte->outaddr << PAGE_SIZE_BITS);
   }
 
-  mutex_unlock(&map->lock);
   return pte;
 }
 
@@ -201,18 +205,107 @@ static vm_pte_t* nullable vm_map_access(
 rerr_t vm_map_del(vm_map_t* map, u64 vaddr, usize npages) {
   // TODO: rewrite this function like vm_map (based on logic in vm_map_access)
   u64 vfn = VM_VFN(vaddr);
+  u64 vfn_end = vfn + npages;
 
   trace("unmap 0x%llx (vfn 0x%llx, %zu pages)",
     VM_PAGE_ADDR(vaddr), vfn, npages);
 
-  for (u64 vfn_end = vfn + npages; vfn < vfn_end; vfn++) {
+  vm_map_assert_locked(map);
+
+  for (; vfn < vfn_end; vfn++) {
     vm_pte_t* pte = vm_map_access(map, vfn, /*is_access*/false);
     if UNLIKELY(!pte)
       return rerr_not_found;
     *pte = (vm_pte_t){0};
   }
 
+  if (vfn < map->min_free_vfn)
+    map->min_free_vfn = vfn;
+
   return 0;
+}
+
+
+rerr_t vm_map_findspace(vm_map_t* map, u64* vaddrp, usize npages) {
+  dlog("————————————————— %s —————————————————", __FUNCTION__);
+  // *vaddrp holds the minimum desired address
+  u64 vaddr = *vaddrp;
+  if (vaddr < VM_ADDR_MIN)
+    vaddr = VM_ADDR_MIN;
+
+  // vaddr+npages beyond end of address range?
+  if (npages > VM_ADDR_MAX/PAGE_SIZE ||
+      vaddr/PAGE_SIZE > VM_ADDR_MAX/PAGE_SIZE - npages)
+  {
+    return rerr_nomem;
+  }
+
+  vm_map_assert_rlocked(map);
+
+  // TODO: find free range
+  // - Calculate max page table level. During search, don't go deeper.
+
+  // lookup vfn 0xfffffffff L 1; index 511 = getbits(0xffffffffe, 36-(1+0), 9)
+  // lookup vfn 0xfffffffff L 2; index 511 = getbits(0x7fffffe, 36-(1+9), 9)
+  // lookup vfn 0xfffffffff L 3; index 511 = getbits(0x3fffe, 36-(1+18), 9)
+  // lookup vfn 0xfffffffff L 4; index 510 = getbits(0x1fe, 36-(1+27), 9)
+
+  u64 vfn = VM_VFN(vaddr);
+  if (vfn > map->min_free_vfn)
+    vfn = map->min_free_vfn;
+
+  // capacity per level (number of pages)
+  u64 L1_size, L2_size, L3_size, L4_size;
+  L4_size = VM_PTAB_LEN;
+  L3_size = L4_size << VM_PTAB_BITS;
+  L2_size = L3_size << VM_PTAB_BITS;
+  L1_size = L2_size << VM_PTAB_BITS; // root
+
+  dlog("L1_size %11llu pages", L1_size);
+  dlog("L2_size %11llu pages", L2_size);
+  dlog("L3_size %11llu pages", L3_size);
+  dlog("L4_size %11llu pages", L4_size);
+
+  u32 bits = 0;
+  u64 masked_vfn = vfn;
+  vm_ptab_t ptab = map->root;
+  u8 level = 1;
+  vm_pte_t* pte = NULL;
+
+  for (;;) {
+    usize index = (usize)getbits(masked_vfn, VFN_BITS - (1+bits), VM_PTAB_BITS);
+    pte = &ptab[index];
+
+    dlog(
+      "lookup vfn 0x%llx L%u; index %zu = getbits(0x%llx, %u-(1+%u), %u)",
+      vfn+1, level, index, masked_vfn, VFN_BITS, bits, VM_PTAB_BITS);
+
+    if (level == VM_PTAB_LEVELS) {
+      dlog("found page table entry for vaddr %llx", VM_VFN_VADDR(vfn));
+      if UNLIKELY(*(u64*)pte == 0) {
+        dlog("  pte is unused");
+        // TODO: we can use this page; keep going
+      } else {
+        dlog("  pte is in use");
+        // TODO: we can NOT use this page; keep looking
+      }
+      break; // FIXME remove
+    }
+
+    bits += VM_PTAB_BITS;
+    masked_vfn = getbits(masked_vfn, VFN_BITS - (1+bits), VFN_BITS - bits);
+    level++;
+
+    if UNLIKELY(*(u64*)pte == 0) {
+      dlog("page table for vaddr %llx is unused", VM_VFN_VADDR(vfn));
+      pte = NULL;
+      break;
+    }
+
+    ptab = (vm_ptab_t)(uintptr)(pte->outaddr << PAGE_SIZE_BITS);
+  }
+
+  return rerr_not_supported;
 }
 
 
@@ -239,25 +332,6 @@ static vm_ptab_t nullable new_ptab(vm_map_t* map, vm_ptab_t parent, usize index)
 }
 
 
-rerr_t vm_map_findspace(vm_map_t* map, u64* vaddrp, usize npages) {
-  // *vaddrp is invalid at this point
-  u64 vaddr = 0;
-
-  // TODO: find free range
-  // ideas:
-  // A) Use an rmm_t that implements a buddy allocator.
-  //    It needs quite a bit of memory.
-  //    It can only allocate pages in powers of two.
-  // B) Use subheap_t of mem_alloc.c to track what ranges are allocated.
-  //    Change CHUNK_SIZE to PAGE_SIZE.
-  // C) Implement an allocator right here that traverses the ptab hierarchy.
-  // Ideally the allocator can bias toward allocating low addresses or
-  // high addresses (stacks.)
-
-  return rerr_not_supported;
-}
-
-
 rerr_t vm_map_add(
   vm_map_t* map, u64* vaddrp, uintptr haddr, usize npages, vm_perm_t perm)
 {
@@ -268,13 +342,13 @@ rerr_t vm_map_add(
 
   assertf(vaddr >= VM_ADDR_MIN && VM_ADDR_MAX >= vaddr, "invalid vaddr 0x%llx", vaddr);
   assertf(IS_ALIGN2((uintptr)haddr, PAGE_SIZE), "haddr 0x%lx not page aligned", haddr);
+  vm_map_assert_locked(map);
 
   rerr_t err = 0;
   u64 vfn = VM_VFN(vaddr);
-  u64 vfn_end = vfn + npages;
+  const u64 vfn_end = vfn + npages;
 
   vm_pte_t* pte = NULL;
-  mutex_lock(&map->lock);
 
   while (vfn < vfn_end) {
     u32 bits = 0;
@@ -297,7 +371,7 @@ rerr_t vm_map_add(
         // allocate new table
         if UNLIKELY( !(ptab = new_ptab(map, ptab, index)) ) {
           err = rerr_nomem;
-          goto end;
+          goto error;
         }
       } else {
         // traverse existing table
@@ -317,7 +391,7 @@ rerr_t vm_map_add(
         dlog("trying to map already-mapped page at vaddr 0x%llx",
           VM_VFN_VADDR(vfn));
         err = rerr_exists;
-        goto end;
+        goto error;
       }
 
       pte->outaddr = (u64)( (uintptr)haddr >> PAGE_SIZE_BITS );
@@ -335,11 +409,17 @@ rerr_t vm_map_add(
     // either we reached end of this table or we are done mapping all pages
 
   } // while (vfn < vfn_end)
-end:
-  if (err && vfn > VM_VFN(vaddr)) {
+
+  if (VM_VFN(vaddr) == map->min_free_vfn)
+    map->min_free_vfn = vfn_end;
+
+  return 0;
+
+error:
+  assert(err);
+  if (vfn > VM_VFN(vaddr)) {
     dlog("TODO unmap what was partially mapped");
   }
-  mutex_unlock(&map->lock);
   return err;
 }
 
@@ -414,7 +494,10 @@ u64 _vm_cache_miss(vm_cache_t* cache, vm_map_t* map, u64 vaddr, vm_op_t op) {
   }
 
   // get page table entry for the virtual page address (lookup via VFN)
+  assert(!rwmutex_islocked(&map->lock));
+  vm_map_rlock(map);
   vm_pte_t* pte = vm_map_access(map, VM_VFN(vaddr), /*is_access*/true);
+  vm_map_runlock(map);
 
   // check if the lookup failed
   if UNLIKELY(!pte) {
@@ -533,7 +616,9 @@ static void test_vm() {
     vm_perm_t perm = VM_PERM_R | VM_PERM_W;
 
     void* haddr = assertnotnull( rmm_allocpages(mm, npages) );
+    vm_map_lock(map);
     rerr_t err = vm_map_add(map, &vaddr, (uintptr)haddr, npages, perm);
+    vm_map_unlock(map);
     assertf(err == 0, "%s", rerr_str(err));
 
     dlog("VM_STORE(u32, 0x%llx, %u)", vaddr, value);
@@ -551,12 +636,16 @@ static void test_vm() {
     //value = (u64)VM_LOAD(u64, cache, map, vaddr); // error
 
     // reading from a page that is not mapped fails
+    vm_map_lock(map);
     vm_map_del(map, vaddr, npages);
+    vm_map_unlock(map);
     vm_cache_invalidate(cache_rw, vaddr, npages);
     //VM_LOAD(u32, cache_rw, map, vaddr); // error
 
     // writing to a read-only page fails
+    vm_map_lock(map);
     err = vm_map_add(map, &vaddr, 0lu, npages, VM_PERM_R);
+    vm_map_unlock(map);
     assertf(err == 0, "%s", rerr_str(err));
     value = VM_LOAD(u32, cache_r, map, vaddr); // ok
     //VM_STORE(u32, cache_rw, map, vaddr, value); // error
@@ -569,6 +658,8 @@ static void test_vm() {
   //   u64 vfn = vaddr_to_vfn(vaddr);
   //   vm_pte_t pte = vm_map_access(map, vfn);
   // }
+
+  vm_map_dispose(map);
 
   rmm_dispose(mm);
   dlog("—— end %s", __FUNCTION__);

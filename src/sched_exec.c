@@ -248,7 +248,9 @@ static i64 stkmem_grow(EXEC_PARAMS, i64 delta) {
     u64 stack_lo = ALIGN2_FLOOR(newsp, PAGE_SIZE);
     usize npages = t->stack_lo - stack_lo;
     dlog("  try grow current stack %llx -> %llx (%zu pages)", t->stack_lo, stack_lo, npages);
+    vm_map_lock(vm_map);
     rerr_t err = vm_map_add(vm_map, &stack_lo, 0, npages, VM_PERM_RW);
+    vm_map_unlock(vm_map);
     if (err == 0) {
       // succeeded in extending the stack
       t->stack_lo = stack_lo;
@@ -259,10 +261,26 @@ static i64 stkmem_grow(EXEC_PARAMS, i64 delta) {
   }
 
   // Allocate new stack and split the stack
-  u64 stack_lo = 0x000100000000;
   usize newsize = ALIGN2(delta, PAGE_SIZE)*2;
+  rerr_t err;
+  vm_map_lock(vm_map);
+  #if 1
+    u64 stack_lo = 0x000100000000;
+  #else
+    u64 stack_lo = 0;
 
-  rerr_t err = vm_map_add(vm_map, &stack_lo, 0, newsize/PAGE_SIZE, VM_PERM_RW);
+    // Find a free region of virtual memory
+    err = vm_map_findspace(vm_map, &stack_lo, newsize/PAGE_SIZE);
+    if UNLIKELY(err) {
+      if (err == rerr_nomem)
+        panic("out of memory white trying to grow stack");
+      safecheckf(err==0, "vm_map_findspace: %s", rerr_str(err));
+    }
+    dlog("vm_map found free space at %llx", stack_lo);
+  #endif
+
+  err = vm_map_add(vm_map, &stack_lo, 0, newsize/PAGE_SIZE, VM_PERM_RW);
+  vm_map_unlock(vm_map);
   safecheckf(err==0, "vm_map %s", rerr_str(err));
 
   // new stack pointer
@@ -297,7 +315,9 @@ static i64 stkmem_shrink(EXEC_PARAMS, i64 delta) {
   vm_map_t* vm_map = &t->m->s->vm_map;
   usize stacksize = (t->stack_hi + STK_SPLIT_LINK_SIZE) - t->stack_lo;
   assert(IS_ALIGN2(stacksize, PAGE_SIZE));
+  vm_map_lock(vm_map);
   UNUSED rerr_t err = vm_map_del(vm_map, t->stack_lo, stacksize/PAGE_SIZE);
+  vm_map_unlock(vm_map);
   safecheckf(err==0, "splitstack vm_unmap %llx: %s", t->stack_lo, rerr_str(err));
 
   tracemem("splitstack del %012llx-%012llx (%zu KiB)",

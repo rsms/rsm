@@ -1,5 +1,10 @@
 // virtual machine
 // SPDX-License-Identifier: Apache-2.0
+//
+// This is a legacy implementation.
+// No new features will be added here.
+// The new execution engine can be found in sched* source files.
+//
 #include "rsmimpl.h"
 #include "abuf.h"
 
@@ -69,7 +74,7 @@ static_assert(offsetof(vmstate,pub) == 0, "vmstate.pub is not first member");
 
 // constants
 #define STK_ALIGN    8u         // stack alignment (== sizeof(u64))
-#define STK_MIN      2048u      // minium stack size (TODO: consider making part of ROM)
+#define STK_MIN      2048u      // minium stack size
 #define STK_MAX      (1u*MiB)   // maximum stack size
 #define MAIN_RET_PC  USIZE_MAX  // special PC value representing the main return address
 
@@ -438,8 +443,6 @@ static void vmexec(VMPARAMS) {
 
     #define do_RET() { \
       pc = (usize)pop(VMARGS, 8); /* load return address from stack */ \
-      /* TODO: instead of MAIN_RET_PC, append coro(end) or yield(end) or exit instr */ \
-      /* to end of inv and setup main return to that address. */ \
       if (pc == MAIN_RET_PC) return; \
     }
 

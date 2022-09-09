@@ -225,7 +225,7 @@ typedef struct {
   // For leafs (PTEs) this is the mapped host page address.
   u64 outaddr : 52;
 #else
-  #error TODO
+  #error no big endian support
 #endif
 } vm_pte_t;
 

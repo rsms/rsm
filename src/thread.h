@@ -150,6 +150,8 @@ void rwmutex_runlock(rwmutex_t*);   // release read-only lock
 void rwmutex_lock(rwmutex_t*);      // acquire excludive lock (blocks until acquired)
 bool rwmutex_trylock(rwmutex_t*);   // attempt to acquire excludive lock (non-blocking)
 void rwmutex_unlock(rwmutex_t*);    // release excludive lock
+static bool rwmutex_islocked(rwmutex_t*);  // test if locked for reading and writing
+static bool rwmutex_isrlocked(rwmutex_t*); // test if locked for reading (not writing)
 
 
 // sema_t is a (thin layer over the OS's) semaphore implementation
@@ -196,6 +198,14 @@ inline static bool mutex_trylock(mutex_t* mu) {
 
 inline static bool mutex_islocked(mutex_t* mu) {
   return AtomicLoadAcq(&mu->w) > 0;
+}
+
+inline static bool rwmutex_isrlocked(rwmutex_t* mu) {
+  return AtomicLoadAcq(&mu->m.r) > 0;
+}
+
+inline static bool rwmutex_islocked(rwmutex_t* mu) {
+  return mutex_islocked(&mu->m);
 }
 
 //———————————————————————————————————————————————————————————————————————————————————————

@@ -261,7 +261,7 @@ static i64 stkmem_grow(EXEC_PARAMS, i64 delta) {
   }
 
   // Allocate new stack and split the stack
-  usize newsize = ALIGN2(delta, PAGE_SIZE)*2;
+  u64 newsize = ALIGN2((u64)delta, PAGE_SIZE)*2;
   rerr_t err;
   vm_map_lock(vm_map);
   #if 1
@@ -299,7 +299,7 @@ static i64 stkmem_grow(EXEC_PARAMS, i64 delta) {
   t->stack_hi = newsp;
   t->nsplitstack++;
 
-  tracemem("splitstack add %012llx-%012llx (%zu KiB)",
+  tracemem("splitstack add %012llx-%012llx (%llu KiB)",
     stack_lo, newsp+STK_SPLIT_LINK_SIZE, newsize/KiB);
 
   // return new stack pointer, offset by storage of previous stack range

@@ -30,6 +30,12 @@ RSM_ASSUME_NONNULL_BEGIN
 #define VM_PTAB_LEN     ((usize)(1lu << VM_PTAB_BITS)) /* number of PTEs in a table */
 #define VM_PTAB_SIZE    ((usize)PAGE_SIZE) /* byte size of one page table */
 
+// usize VM_PTAB_CAP(u32 level) returns the number of pages or page tables a
+// page table of the given level can hold.
+// When VM_PTAB_BITS==6: L1=68719476736, L2=134217728, L3=262144, L4=512
+#define VM_PTAB_CAP(level) \
+  ( VM_PTAB_LEN << (VM_PTAB_BITS * (VM_PTAB_LEVELS - (level))) )
+
 // cache constants
 // VM_CACHE_INDEX_BITS: number of bottom bits of a VFN to use for indexing
 // VM_CACHE_INDEX_VFN_MASK: AND with a VFN to get the corresponding cache index
@@ -204,29 +210,35 @@ enum vm_perm {
 };
 
 // vm_pte_t - page table entry
-typedef struct {
-#if RSM_LITTLE_ENDIAN
-  // note: permission bit positions should match vm_perm_t
-  bool  read        : 1; // can read from this page
-  bool  write       : 1; // can write to this page
-  bool  uncacheable : 1; // can not be cached
-  bool  accessed    : 1; // has been accessed
-  bool  written     : 1; // has been written to
-  u64   type        : 3; // type of page
-  u64   _reserved   : 4;
+typedef union {
+  // leaf
+  struct {
+  #if RSM_LITTLE_ENDIAN
+    // note: permission bit positions should match vm_perm_t
+    bool  read        : 1; // can read from this page
+    bool  write       : 1; // can write to this page
+    bool  uncacheable : 1; // can not be cached
+    bool  accessed    : 1; // has been accessed
+    bool  written     : 1; // has been written to
+    u64   type        : 3; // type of page
+    u64   _reserved   : 4;
 
-  // usize nuse      : VM_PTAB_BITS; // number of sub-entries in use
-  // usize _reserved : 3;
+    // usize _reserved : 12;
 
-  // usize _reserved : 12;
-
-  // outaddr is the host frame number (hfn=haddr>>PAGE_SIZE_BITS).
-  // For branches (page tables) this is the address of the next table or PTE.
-  // For leafs (PTEs) this is the mapped host page address.
-  u64 outaddr : 52;
-#else
-  #error no big endian support
-#endif
+    // outaddr is the host frame number (hfn=haddr>>PAGE_SIZE_BITS).
+    // For branches (page tables) this is the address of the next table or PTE.
+    // For leafs (PTEs) this is the mapped host page address.
+    u64 outaddr : 52;
+  #else
+    #error no big endian support
+  #endif
+  };
+  // branch
+  struct {
+    u32   nuse       : VM_PTAB_BITS; // number of mapped entries in this table
+    u32   _reserved2 : 3;
+    u64   ptaddr     : 52;
+  };
 } vm_pte_t;
 
 // vm_ptab_t - virtual memory page table
@@ -308,7 +320,7 @@ rerr_t vm_map_del(vm_map_t*, u64 vaddr, usize npages);
 // vm_map_findspace attempts to find a region with sufficient space for npages,
 // with minimum address *vaddr. On success, *vaddr contains the first virtual
 // address in the found region.
-rerr_t vm_map_findspace(vm_map_t*, u64* vaddr, usize npages);
+rerr_t vm_map_findspace(vm_map_t*, u64* vaddr, u64 npages);
 
 
 // vm_cache_init initializes a vm_cache_t

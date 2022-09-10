@@ -204,6 +204,7 @@ static vm_pte_t* nullable vm_map_access(vm_map_t* map, u64 vfn, bool isaccess) {
 
 rerr_t vm_map_del(vm_map_t* map, u64 vaddr, usize npages) {
   // TODO: rewrite this function like vm_map (based on logic in vm_map_access)
+  // TODO: decrement pte->nuse of branches
   u64 vfn = VM_VFN(vaddr);
   u64 vfn_end = vfn + npages;
 
@@ -226,50 +227,45 @@ rerr_t vm_map_del(vm_map_t* map, u64 vaddr, usize npages) {
 }
 
 
-rerr_t vm_map_findspace(vm_map_t* map, u64* vaddrp, usize npages) {
+rerr_t vm_map_findspace(vm_map_t* map, u64* vaddrp, u64 npages) {
   dlog("————————————————— %s —————————————————", __FUNCTION__);
+  vm_map_assert_rlocked(map);
+
   // *vaddrp holds the minimum desired address
   u64 vaddr = *vaddrp;
   if (vaddr < VM_ADDR_MIN)
     vaddr = VM_ADDR_MIN;
 
-  // vaddr+npages beyond end of address range?
+  // is vaddr+npages beyond end of address range?
   if (npages > VM_ADDR_MAX/PAGE_SIZE ||
       vaddr/PAGE_SIZE > VM_ADDR_MAX/PAGE_SIZE - npages)
   {
     return rerr_nomem;
   }
 
-  vm_map_assert_rlocked(map);
-
-  // TODO: find free range
-  // - Calculate max page table level. During search, don't go deeper.
-
-  // lookup vfn 0xfffffffff L 1; index 511 = getbits(0xffffffffe, 36-(1+0), 9)
-  // lookup vfn 0xfffffffff L 2; index 511 = getbits(0x7fffffe, 36-(1+9), 9)
-  // lookup vfn 0xfffffffff L 3; index 511 = getbits(0x3fffe, 36-(1+18), 9)
-  // lookup vfn 0xfffffffff L 4; index 510 = getbits(0x1fe, 36-(1+27), 9)
-
+  // from this point on we're using VFN space
   u64 vfn = VM_VFN(vaddr);
-  if (vfn > map->min_free_vfn)
+  if (vfn < map->min_free_vfn)
     vfn = map->min_free_vfn;
 
-  // capacity per level (number of pages)
-  u64 L1_size, L2_size, L3_size, L4_size;
-  L4_size = VM_PTAB_LEN;
-  L3_size = L4_size << VM_PTAB_BITS;
-  L2_size = L3_size << VM_PTAB_BITS;
-  L1_size = L2_size << VM_PTAB_BITS; // root
+  dlog("vaddr %012llx (VFN %llx)", VM_VFN_VADDR(vfn), vfn);
 
-  dlog("L1_size %11llu pages", L1_size);
-  dlog("L2_size %11llu pages", L2_size);
-  dlog("L3_size %11llu pages", L3_size);
-  dlog("L4_size %11llu pages", L4_size);
+  // maxlevel is the maximum page table level that we consider for
+  // partially full page tables.
+  // For example, if 800 pages are requested we know that a partially empty
+  // L4 page table won't contain enough pages (since it holds a total of 512 pages
+  // when VM_PTAB_BITS=6). So any L4 table that is not _completely empty_ can be skipped.
+  // Note: this algorithm is quite similar to bits_set_range & bitset_find_unset_range.
+  // Note: You can get the capacity of a given level with VM_PTAB_CAP(level).
+  int maxlevel = IDIV_CEIL( ((sizeof(npages)*8) - rsm_clz(npages+1)), VM_PTAB_BITS );
+  maxlevel = (VM_PTAB_LEVELS + 1) - maxlevel;
+  dlog("maxlevel %d", maxlevel);
 
   u32 bits = 0;
-  u64 masked_vfn = vfn;
-  vm_ptab_t ptab = map->root;
   u8 level = 1;
+  u64 masked_vfn = vfn;
+  u64 nfreepages = 0;
+  vm_ptab_t ptab = map->root;
   vm_pte_t* pte = NULL;
 
   for (;;) {
@@ -277,19 +273,35 @@ rerr_t vm_map_findspace(vm_map_t* map, u64* vaddrp, usize npages) {
     pte = &ptab[index];
 
     dlog(
-      "lookup vfn 0x%llx L%u; index %zu = getbits(0x%llx, %u-(1+%u), %u)",
-      vfn+1, level, index, masked_vfn, VFN_BITS, bits, VM_PTAB_BITS);
+      "lookup vfn 0x%llx L%u; index %zu = getbits(0x%llx, %u-(1+%u), %u, nuse %u)",
+      vfn+1, level, index, masked_vfn, VFN_BITS, bits, VM_PTAB_BITS,
+      level != VM_PTAB_LEVELS ? pte->nuse : 0);
 
     if (level == VM_PTAB_LEVELS) {
-      dlog("found page table entry for vaddr %llx", VM_VFN_VADDR(vfn));
-      if UNLIKELY(*(u64*)pte == 0) {
-        dlog("  pte is unused");
+      dlog("  found page table entry for vaddr %llx", VM_VFN_VADDR(vfn));
+      if (VM_PTAB_LEN - index < npages - nfreepages) {
+        // definitely not enough space
+        dlog("  not enough space");
+        nfreepages = 0;
+      } else if UNLIKELY(*(u64*)pte == 0) {
+        dlog("    pte is unused");
         // TODO: we can use this page; keep going
       } else {
         dlog("  pte is in use");
         // TODO: we can NOT use this page; keep looking
+        nfreepages = 0;
       }
       break; // FIXME remove
+    }
+
+    // when we pass maxlevel, skip tables which are not completely empty
+    while (level > maxlevel && pte->nuse) {
+      index++;
+      if (index == VM_PTAB_LEN) {
+        dlog("TODO reverse masked_vfn=getbits(masked_vfn) to 'go up' a level");
+        return rerr_nomem;
+      }
+      pte = &ptab[index];
     }
 
     bits += VM_PTAB_BITS;
@@ -378,6 +390,7 @@ rerr_t vm_map_add(
         assert(pte->outaddr != 0);
         ptab = (vm_ptab_t)(uintptr)(pte->outaddr << PAGE_SIZE_BITS);
       }
+      pte->nuse++;
       goto visit_next_ptab;
     }
 
@@ -406,7 +419,8 @@ rerr_t vm_map_add(
 
       pte = &ptab[index];
     }
-    // either we reached end of this table or we are done mapping all pages
+    // either we reached end of this table
+    // or we are done mapping all pages
 
   } // while (vfn < vfn_end)
 
@@ -419,6 +433,7 @@ error:
   assert(err);
   if (vfn > VM_VFN(vaddr)) {
     dlog("TODO unmap what was partially mapped");
+    // note: also decrement pte->nuse of branches
   }
   return err;
 }

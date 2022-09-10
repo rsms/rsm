@@ -1920,7 +1920,7 @@ static rerr_t rsched_loadrom(
 
   dlog_memory_map(
     (uintptr)basemem.p, codesize,
-    data_haddr,  data_npages*PAGE_SIZE, data_vaddr_lo, data_vaddr_hi,
+    data_haddr,  rom->datasize, data_vaddr_lo, data_vaddr_hi,
     stack_haddr, stack_nhpages*PAGE_SIZE, stack_vaddr_lo, stack_vaddr_hi);
 
   vm_map_lock(&s->vm_map);

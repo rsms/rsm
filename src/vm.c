@@ -458,11 +458,34 @@ typedef struct {
 #endif // FINDSPACE_SKIP_SMALL_HOLES_OPT
 
 
-static u32 vm_map_findspace_visitor_free(
-  vm_ptab_t ptab, u32 ptab_nuse, u32 level, u32 index, u64 vfn, findspace_t* ctx)
+static u32 vm_map_findspace_visitor(
+  vm_ptab_t ptab, u32 ptab_nuse, u32 level, u32 index, u64 vfn, uintptr data)
 {
-  // entry ptab[index] is free, unused
+  findspace_t* ctx = (findspace_t*)data;
+
   findspace_nuse_t* curr_nuse = &ctx->nuse[level];
+  if (curr_nuse->ptab != ptab) {
+    curr_nuse->ptab = ptab;
+    curr_nuse->nuse = 0;
+  }
+
+  // visitor for free entries lives in separate function
+  if (*(u64*)&ptab[index]) {
+    // entry ptab[index] is not free
+    ctx->start_vaddr = 0;
+    ctx->found_npages = 0;
+    // skip past immediate used entries (terminal level only)
+    u32 i = index + 1;
+    if (level == VM_PTAB_LEVELS-1) {
+      while (i < VM_PTAB_LEN && *(u64*)&ptab[i])
+        i++;
+    }
+    u32 advance = i - index;
+    curr_nuse->nuse += advance; // keep track of nuse for findspace_restfree
+    return advance;
+  }
+
+  // entry ptab[index] is free, unused
 
   #ifdef FINDSPACE_SKIP_SMALL_HOLES_OPT
     // Optimization: If the current terminal ptab has used entries which
@@ -503,42 +526,6 @@ static u32 vm_map_findspace_visitor_free(
 
   // return 0 if found_npages>=want_npages, else return advance
   return advance * (ctx->found_npages < ctx->want_npages);
-}
-
-
-static u32 vm_map_findspace_visitor(
-  vm_ptab_t ptab, u32 ptab_nuse, u32 level, u32 index, u64 vfn, uintptr data)
-{
-  findspace_t* ctx = (findspace_t*)data;
-
-  findspace_nuse_t* curr_nuse = &ctx->nuse[level];
-  if (curr_nuse->ptab != ptab) {
-    curr_nuse->ptab = ptab;
-    curr_nuse->nuse = 0;
-  }
-
-  // visitor for free entries lives in separate function
-  if (*(u64*)&ptab[index] == 0)
-    return vm_map_findspace_visitor_free(ptab, ptab_nuse, level, index, vfn, ctx);
-
-  // entry ptab[index] is not free
-
-  ctx->start_vaddr = 0;
-  ctx->found_npages = 0;
-
-  // skip past immediate used entries (terminal level only)
-  u32 i = index + 1;
-  if (level == VM_PTAB_LEVELS-1) {
-    while (i < VM_PTAB_LEN && *(u64*)&ptab[i])
-      i++;
-  }
-
-  u32 advance = i - index;
-
-  // keep track of nuse so we can skip past free block tail
-  curr_nuse->nuse += advance;
-
-  return advance;
 }
 
 

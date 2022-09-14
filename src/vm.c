@@ -412,58 +412,20 @@ typedef struct {
 } findspace_nuse_t;
 
 typedef struct {
-  u64 want_npages;  // npages passed to vm_map_findspace
-  u64 found_npages; // number of free consecutive pages found so far
-  u64 start_vaddr;  // address of first free page
-
-  // fields for tracking nuse
-  // vm_ptab_t curr_ptab;
-  // u32       curr_nuse;
-
+  u64              want_npages;  // npages passed to vm_map_findspace
+  u64              found_npages; // number of free consecutive pages found so far
+  u64              start_vaddr;  // address of first free page
   findspace_nuse_t nuse[VM_PTAB_LEVELS];
 } findspace_t;
-
-
-// FINDSPACE_SKIP_SMALL_HOLES_OPT: define to enable optimization.
-// I haven't verified that this is actually faster, but it seems like a good idea.
-//#define FINDSPACE_SKIP_SMALL_HOLES_OPT
-
-
-#ifdef FINDSPACE_SKIP_SMALL_HOLES_OPT
-  static u32 findspace_restfree(vm_ptab_t ptab, u32 index, u64 vfn, findspace_t* ctx) {
-    // find last used entry
-    u32 next_index = VM_PTAB_LEN - 1;
-    for (;;) {
-      if (*(u64*)&ptab[next_index]) {
-        if (next_index == VM_PTAB_LEN - 1) {
-          // last entry of ptab is used; skip entire ptab
-          ctx->start_vaddr = 0;
-          ctx->found_npages = 0;
-          return VM_PTAB_LEN;
-        }
-        next_index++;
-        break;
-      }
-      next_index--;
-      assertf(next_index > index, "invalid nuse count of ptab %p", ptab);
-    }
-    u32 skipped_npages = next_index - index;
-    u32 free_npages = VM_PTAB_LEN - next_index;
-    ctx->start_vaddr = VM_VFN_VADDR(vfn + skipped_npages);
-    ctx->found_npages = free_npages;
-    // dlog("skip past %u unusable pages (region too small)", skipped_npages);
-    // dlog("use free tail: %llx (%u)", VM_VFN_VADDR(vfn + skipped_npages), free_npages);
-    return VM_PTAB_LEN;
-  }
-#endif // FINDSPACE_SKIP_SMALL_HOLES_OPT
 
 
 static u32 vm_map_findspace_visitor(
   vm_ptab_t ptab, u32 ptab_nuse, u32 level, u32 index, u64 vfn, uintptr data)
 {
   findspace_t* ctx = (findspace_t*)data;
-
   findspace_nuse_t* curr_nuse = &ctx->nuse[level];
+  u32 advance;
+
   if (curr_nuse->ptab != ptab) {
     curr_nuse->ptab = ptab;
     curr_nuse->nuse = 0;
@@ -480,29 +442,12 @@ static u32 vm_map_findspace_visitor(
       while (i < VM_PTAB_LEN && *(u64*)&ptab[i])
         i++;
     }
-    u32 advance = i - index;
-    curr_nuse->nuse += advance; // keep track of nuse for findspace_restfree
+    advance = i - index;
+    curr_nuse->nuse += advance;
     return advance;
   }
 
   // entry ptab[index] is free, unused
-
-  #ifdef FINDSPACE_SKIP_SMALL_HOLES_OPT
-    // Optimization: If the current terminal ptab has used entries which
-    // we have not yet encountered, and the remaining free entries of ptab
-    // are less than what we need, skip to the last region of free entries.
-    if (level == VM_PTAB_LEVELS-1 && curr_nuse->nuse < ptab_nuse) {
-      u32 rem_free = (VM_PTAB_LEN - index) - (ptab_nuse - curr_nuse->nuse);
-      if (rem_free < ctx->want_npages - ctx->found_npages) {
-        // There are less free pages available than we need, which means that we know
-        // that this ptab will not contain a range large enough to satisfy
-        // ctx.want_npages.
-        return findspace_restfree(ptab, index, vfn, ctx);
-      }
-    }
-  #endif // FINDSPACE_SKIP_SMALL_HOLES_OPT
-
-  u32 advance = 1;
 
   if (curr_nuse->nuse == ptab_nuse) {
     // remainder of ptab entires are free (we have passed all used entries)
@@ -558,12 +503,12 @@ rerr_t vm_map_findspace(vm_map_t* map, u64* vaddrp, u64 npages) {
     return rerr_nomem;
   }
 
-  panic(
-    "LOLCAT found %10llu pages: %012llx…%012llx\n"
-    "                              expect: %012llx\n",
-    ctx.found_npages, ctx.start_vaddr,
-    ctx.start_vaddr + ((ctx.found_npages-1) * PAGE_SIZE),
-    VM_PAGE_ADDR(0xfacedeba4eef));
+  dlog("vm_map_findspace\n"
+    "  expected min %10llu pages at >=%012llx\n"
+    "  found        %10llu pages at   %012llx…%012llx\n",
+    npages, VM_PAGE_ADDR(0xfacedeba4eef),
+    ctx.found_npages,
+    ctx.start_vaddr, ctx.start_vaddr + ((ctx.found_npages-1) * PAGE_SIZE) );
 
   *vaddrp = ctx.start_vaddr;
   return 0;

@@ -242,23 +242,24 @@ static i64 stkmem_grow(EXEC_PARAMS, i64 delta) {
   check(IS_ALIGN2(delta, STK_ALIGN), EX_E_UNALIGNED_STORE, delta, STK_ALIGN);
   vm_map_t* vm_map = &t->m->s->vm_map;
 
-  // First try to grow the current stack (unless delta overflowed sp)
-  if (newsp < t->stack_lo) {
-    // note: if !(newsp < t->stack_lo) then newsp overflowed and is invalid
-    u64 stack_lo = ALIGN2_FLOOR(newsp, PAGE_SIZE);
-    usize npages = t->stack_lo - stack_lo;
-    dlog("  try grow current stack %llx -> %llx (%zu pages)", t->stack_lo, stack_lo, npages);
-    vm_map_lock(vm_map);
-    rerr_t err = vm_map_add(vm_map, &stack_lo, 0, npages, VM_PERM_RW);
-    vm_map_unlock(vm_map);
-    if (err == 0) {
-      // succeeded in extending the stack
-      t->stack_lo = stack_lo;
-      return sp;
-    }
-    // if we get here, vm_map should have rejected the mapping
-    safecheckf(err == rerr_exists, "vm_map %s", rerr_str(err));
-  }
+  // // First try to grow the current stack (unless delta overflowed sp)
+  // if (newsp < t->stack_lo) {
+  //   // note: if !(newsp < t->stack_lo) then newsp overflowed and is invalid
+  //   u64 stack_lo = ALIGN2_FLOOR(newsp, PAGE_SIZE);
+  //   usize npages = t->stack_lo - stack_lo;
+  //   dlog("  try grow current stack %llx -> %llx (%zu pages)", t->stack_lo, stack_lo, npages);
+  //   vm_map_lock(vm_map);
+  //   rerr_t err = vm_map_add(vm_map, &stack_lo, 0, npages, VM_PERM_RW);
+  //   vm_map_unlock(vm_map);
+  //   if (err == 0) {
+  //     // succeeded in extending the stack
+  //     t->stack_lo = stack_lo;
+  //     return sp;
+  //   }
+  //   // if we get here, vm_map should have rejected the mapping
+  //   safecheckf(err == rerr_exists, "vm_map %s", rerr_str(err));
+  // }
+
 
   // Allocate new stack and split the stack
   u64 newsize = ALIGN2((u64)delta, PAGE_SIZE)*2;
@@ -267,10 +268,26 @@ static i64 stkmem_grow(EXEC_PARAMS, i64 delta) {
   #if 1
     u64 stack_lo = 0x000100000000;
   #else
-    u64 stack_lo = 0;
+    { // XXX DEBUG
+      u64 stack_lo;
+      u64 npages = 1;
+      rerr_t err;
+
+      stack_lo = 0xfacedeadbeef;
+      dlog("XXX map %012llx…%012llx", stack_lo, stack_lo + (npages-1)*PAGE_SIZE);
+      assert(vm_map_add(vm_map, &stack_lo, 0, npages, VM_PERM_RW) == rerr_ok);
+
+      stack_lo = stack_lo + PAGE_SIZE*200;
+      dlog("XXX map %012llx…%012llx", stack_lo, stack_lo + (npages-1)*PAGE_SIZE);
+      assert(vm_map_add(vm_map, &stack_lo, 0, npages, VM_PERM_RW) == rerr_ok);
+    }
+    // u64 stack_lo = 0;
+    u64 npages = newsize/PAGE_SIZE;
+    u64 stack_lo = 0xfacedeadbeef;
+    npages = 398430;
 
     // Find a free region of virtual memory
-    err = vm_map_findspace(vm_map, &stack_lo, newsize/PAGE_SIZE);
+    err = vm_map_findspace(vm_map, &stack_lo, npages);
     if UNLIKELY(err) {
       if (err == rerr_nomem)
         panic("out of memory white trying to grow stack");

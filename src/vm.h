@@ -27,14 +27,26 @@ RSM_ASSUME_NONNULL_BEGIN
 //          (2^11=2048)*8 = 16384
 #define VM_PTAB_LEVELS  4u /* number of page-table levels */
 #define VM_PTAB_BITS    9u /* =ILOG2(PAGE_SIZE/sizeof(vm_pte_t)) */
-#define VM_PTAB_LEN     ((usize)(1lu << VM_PTAB_BITS)) /* number of PTEs in a table */
-#define VM_PTAB_SIZE    ((usize)PAGE_SIZE) /* byte size of one page table */
+#define VM_PTAB_LEN     ((1u << VM_PTAB_BITS)) /* number of PTEs in a table */
+#define VM_PTAB_SIZE    ((u32)PAGE_SIZE) /* byte size of one page table */
 
-// usize VM_PTAB_CAP(u32 level) returns the number of pages or page tables a
-// page table of the given level can hold.
+// u32 VM_PTAB_CAP(u32 level) returns the number of pages a page table
+// of the given level spans.
+// Note: For ptab capacity, use constant VM_PTAB_LEN.
 // When VM_PTAB_BITS==6: L1=68719476736, L2=134217728, L3=262144, L4=512
-#define VM_PTAB_CAP(level) \
-  ( VM_PTAB_LEN << (VM_PTAB_BITS * (VM_PTAB_LEVELS - (level))) )
+#define VM_PTAB_CAP(level) ( \
+  assert((u32)(level) > 0 && (u32)(level) <= VM_PTAB_LEVELS), \
+  VM_PTAB_LEN << (VM_PTAB_BITS * (VM_PTAB_LEVELS - (u32)(level))) \
+)
+
+// u64 VM_PTAB_NPAGES(u32 level) returns the number of pages covered
+// by a table of the given level.
+// i.e. with VM_PTAB_BITS=9 & VM_PTAB_LEVELS=4:
+// L1=0x8000000, L2=0x40000, L3=0x200, L4=1
+#define VM_PTAB_NPAGES(level) ( \
+  assert((u32)(level) > 0 && (u32)(level) <= VM_PTAB_LEVELS), \
+  1llu << ( (VM_PTAB_BITS*(VM_PTAB_LEVELS-1)) - (((u32)(level)-1u) * VM_PTAB_BITS) ) \
+)
 
 // cache constants
 // VM_CACHE_INDEX_BITS: number of bottom bits of a VFN to use for indexing
@@ -251,6 +263,7 @@ typedef struct {
   rwmutex_t lock;
   u64       min_free_vfn; // smallest free VFN (larger VFNs may be allocated)
   vm_ptab_t root;
+  u32       root_nuse; // number of page tables in use in root
 } vm_map_t;
 
 // vm_cache_ent_t is the type of vm_cache_t entries

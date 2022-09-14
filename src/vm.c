@@ -48,11 +48,15 @@ static_assert(sizeof(vm_pte_t) == sizeof(u64), "vm_pte_t too large");
 // positions 4, 3 and 2, right adjusted.
 // [from K&R, 2nd Ed., pg. 49: get n bits from position p]
 inline static u64 getbits(u64 x, u32 p, u32 n) {
-  return (x >> (p+1-n)) & ~(~0llu << n);
+  return (x >> (p + 1u - n)) & ~(~0llu << n);
 }
 
 
 #if DEBUG
+  #define fmtbitsval(value) ({ \
+    __typeof__(value) val__ = (value); \
+    fmtbits(&val__, sizeof(val__)*8); \
+  })
   UNUSED static const char* fmtbits(const void* bits, usize len) {
     static char bufs[2][128];
     static int nbuf = 0;
@@ -227,6 +231,317 @@ rerr_t vm_map_del(vm_map_t* map, u64 vaddr, usize npages) {
 }
 
 
+// vm_map_iter_f is the visitor callback type
+// - nuse is the vm_pte_t.nuse field for ptab
+// - level is the level of ptab (root is level 0)
+// - index is the index of the current pte in ptab
+// - vfn is the VFN of the current pte in ptab
+// - data is whatever value was provided to vm_map_iter
+// Return number of indices to advance. Return 0 to stop iteration.
+typedef u32(vm_map_iter_f)(
+  vm_ptab_t ptab, u32 nuse, u32 level, u32 index, u64 vfn, uintptr data);
+
+
+// vm_map_ffwd fast-forwards to page table containing start_vfn
+// static bool vm_map_ffwd ...
+
+
+// vm_map_iter0 iterates over all entries in ptab
+// returns true if caller should keep going
+static bool vm_map_iter0(
+  vm_map_iter_f callback,   // user callback
+  uintptr       userdata,   // user data for callback
+  vm_ptab_t     ptab,       // page table at level
+  u32           ptab_nuse,  // vm_pte_t.nuse field for ptab
+  u32           level)      // level of page table (root = 0)
+{
+  #undef dlogx
+  #define dlogx(fmt, args...) log("%*s" fmt, (int)level*2, "", ##args)
+
+  dlogx("*** vm_map_iter0");
+
+  u32 bits = (VM_PTAB_BITS*(VM_PTAB_LEVELS-1)) - (level * VM_PTAB_BITS);
+  u64 npages = 1llu << bits; // i.e. L1=0x8000000, L2=0x40000, L3=0x200, L4=1
+  u64 vfn_mask = ~0llu ^ ((1llu << bits)-1);
+
+  for (u32 index = 0; index < VM_PTAB_LEN;) {
+    vm_pte_t* pte = &ptab[index];
+    u64 vfn = ((u64)index * npages);
+
+    if (level == VM_PTAB_LEVELS-1) {
+      dlogx("iter_visit page 0x%09llx (parent[%u])", VM_VFN_VADDR(vfn), index);
+    } else {
+      u64 last_vfn = ((vfn + npages) & vfn_mask) - 1;
+      if (level == 0) {
+        dlogx("iter_visit block L1 0x%09llx…0x%09llx 0x%llx [%u] nuse=%u",
+          VM_VFN_VADDR(vfn), VM_VFN_VADDR(last_vfn),
+          npages, index, pte->nuse);
+      } else {
+        dlogx("iter_visit block L%u 0x%09llx…0x%09llx 0x%llx [%u] nuse=%u",
+          level+1, VM_VFN_VADDR(vfn), VM_VFN_VADDR(last_vfn),
+          npages, index, pte->nuse);
+      }
+    }
+
+    bool is_leaf_level = level == VM_PTAB_LEVELS-1;
+    if (is_leaf_level) { log("STOP"); abort(); } // XXX
+    if (is_leaf_level | (*(u64*)pte == 0)) {
+      // either we reached the last level or encountered an unused sub table
+      u32 index_incr = callback(ptab, ptab_nuse, level, index, vfn, userdata);
+      assert_no_add_overflow(index, index_incr);
+      index += index_incr;
+      if (index_incr == 0)
+        return false;
+      continue; // visit next table
+    }
+
+    // visit sub table
+    vm_ptab_t child_ptab = (vm_ptab_t)(uintptr)(pte->outaddr << PAGE_SIZE_BITS);
+    if (!vm_map_iter0(callback, userdata, child_ptab, pte->nuse, level + 1))
+      return false;
+    index++;
+    // visit next table
+  } // while (index < VM_PTAB_LEN)
+
+  return true;
+}
+
+
+// vm_map_iter1 iterates over pages in ptab, starting at start_vfn.
+// returns true if caller should keep going
+static bool vm_map_iter1(
+  vm_map_iter_f callback,   // user callback
+  uintptr       userdata,   // user data for callback
+  u64           start_vfn,  // minimum VFN to start calling the callback for
+  u64           index_vfn,
+  vm_ptab_t     ptab,       // page table at level
+  u32           ptab_nuse,  // vm_pte_t.nuse field for ptab
+  u32           level)      // level of page table (root = 0)
+{
+  #undef dlogx
+  #define dlogx(fmt, args...) log("%*s" fmt, (int)level*2, "", ##args)
+
+  u32 start_index = (u32)(index_vfn >> (64 - VM_PTAB_BITS));
+
+  // VFN 0xfacedeadbeef
+  //     0000000000000000000000000000 111110101 100111011 011110101 011011010
+  //                                  L1        L2        L3        L4
+  dlogx("start_vfn   0x%09llx (vaddr %012llx)", start_vfn, VM_VFN_VADDR(start_vfn));
+  dlogx("            %s", fmtbitsval(start_vfn));
+  dlogx("start_index %-3u%*s",
+    start_index,
+    64-(VFN_BITS - VM_PTAB_BITS - (level * VM_PTAB_BITS))-3,
+    fmtbits(&start_index, VM_PTAB_BITS));
+
+  // bits is the inverse count, i.e. L1=27, L2=18, L3=9, L4=0
+  u32 bits = (VM_PTAB_BITS*(VM_PTAB_LEVELS-1)) - (level * VM_PTAB_BITS);
+  u64 vfn_mask = ~0llu ^ ((1llu << bits)-1);
+  u64 npages = VM_PTAB_NPAGES(level+1); // i.e. L1=0x8000000, L2=0x40000, L3=0x200, L4=1
+
+  for (u32 index = start_index; index < VM_PTAB_LEN;) {
+    vm_pte_t* pte = &ptab[index];
+
+    u64 vfn = (start_vfn & vfn_mask) + ((u64)(index - start_index) * npages);
+
+    if (level == VM_PTAB_LEVELS-1) {
+      dlogx("iter_visit page 0x%09llx [%u] %s",
+        VM_VFN_VADDR(vfn), index, (*(u64*)pte ? "mapped" : "free"));
+    } else {
+      u64 last_vfn = ((vfn + npages) & vfn_mask) - 1;
+      if (level == 0) {
+        dlogx("iter_visit block L1 0x%09llx…0x%09llx 0x%llx [%u] nuse=%u",
+          VM_VFN_VADDR(vfn), VM_VFN_VADDR(last_vfn),
+          npages, index, pte->nuse);
+      } else {
+        dlogx("iter_visit block L%u 0x%09llx…0x%09llx 0x%llx [%u] nuse=%u",
+          level+1, VM_VFN_VADDR(vfn), VM_VFN_VADDR(last_vfn),
+          npages, index, pte->nuse);
+      }
+    }
+
+    bool end = (level == VM_PTAB_LEVELS-1) | (*(u64*)pte == 0);
+    if ((end & (vfn < start_vfn)) | ((!end) & (vfn + npages < start_vfn))) {
+      // vfn (or end of block's vfn) is less than start_vfn
+      index++;
+      continue;
+    }
+
+    u32 index_incr = callback(ptab, ptab_nuse, level, index, vfn, userdata);
+    assert_no_add_overflow(index, index_incr);
+    if (index_incr == 0)
+      return false;
+
+    if (!end) {
+      // visit sub table
+      vm_ptab_t child_ptab = (vm_ptab_t)(uintptr)(pte->outaddr << PAGE_SIZE_BITS);
+      bool cont;
+      if (index == start_index) {
+        u64 ivfn = index_vfn << VM_PTAB_BITS;
+        cont = vm_map_iter1(
+          callback, userdata, start_vfn, ivfn, child_ptab, pte->nuse, level+1);
+      } else {
+        cont = vm_map_iter0(callback, userdata, child_ptab, pte->nuse, level+1);
+      }
+      if (!cont)
+        return false;
+    }
+
+    index += index_incr;
+    // visit next table
+  } // while (index < VM_PTAB_LEN)
+
+  return npages;
+}
+
+
+void vm_map_iter(vm_map_t* map, u64 start_vaddr, vm_map_iter_f* fn, uintptr data) {
+  assertf(start_vaddr >= VM_ADDR_MIN && VM_ADDR_MAX >= start_vaddr,
+    "invalid vaddr 0x%llx", start_vaddr);
+  u64 vfn = VM_VFN(start_vaddr);
+  dlog("iter start 0x%llx (VFN 0x%llx)", start_vaddr, vfn);
+  if (vfn == 0)
+    vm_map_iter0(fn, data, map->root, map->root_nuse, 0);
+  u64 index_vfn = vfn << ((sizeof(vfn)*8) - VFN_BITS);
+  vm_map_iter1(fn, data, vfn, index_vfn, map->root, map->root_nuse, 0);
+}
+
+
+typedef struct {
+  vm_ptab_t ptab;
+  u32       nuse;
+} findspace_nuse_t;
+
+typedef struct {
+  u64 want_npages;  // npages passed to vm_map_findspace
+  u64 found_npages; // number of free consecutive pages found so far
+  u64 start_vaddr;  // address of first free page
+
+  // fields for tracking nuse
+  // vm_ptab_t curr_ptab;
+  // u32       curr_nuse;
+
+  findspace_nuse_t nuse[VM_PTAB_LEVELS];
+} findspace_t;
+
+
+// FINDSPACE_SKIP_SMALL_HOLES_OPT: define to enable optimization.
+// I haven't verified that this is actually faster, but it seems like a good idea.
+//#define FINDSPACE_SKIP_SMALL_HOLES_OPT
+
+
+#ifdef FINDSPACE_SKIP_SMALL_HOLES_OPT
+  static u32 findspace_restfree(vm_ptab_t ptab, u32 index, u64 vfn, findspace_t* ctx) {
+    // find last used entry
+    u32 next_index = VM_PTAB_LEN - 1;
+    for (;;) {
+      if (*(u64*)&ptab[next_index]) {
+        if (next_index == VM_PTAB_LEN - 1) {
+          // last entry of ptab is used; skip entire ptab
+          ctx->start_vaddr = 0;
+          ctx->found_npages = 0;
+          return VM_PTAB_LEN;
+        }
+        next_index++;
+        break;
+      }
+      next_index--;
+      assertf(next_index > index, "invalid nuse count of ptab %p", ptab);
+    }
+    u32 skipped_npages = next_index - index;
+    u32 free_npages = VM_PTAB_LEN - next_index;
+    ctx->start_vaddr = VM_VFN_VADDR(vfn + skipped_npages);
+    ctx->found_npages = free_npages;
+    // dlog("skip past %u unusable pages (region too small)", skipped_npages);
+    // dlog("use free tail: %llx (%u)", VM_VFN_VADDR(vfn + skipped_npages), free_npages);
+    return VM_PTAB_LEN;
+  }
+#endif // FINDSPACE_SKIP_SMALL_HOLES_OPT
+
+
+static u32 vm_map_findspace_visitor_free(
+  vm_ptab_t ptab, u32 ptab_nuse, u32 level, u32 index, u64 vfn, findspace_t* ctx)
+{
+  // entry ptab[index] is free, unused
+  findspace_nuse_t* curr_nuse = &ctx->nuse[level];
+
+  #ifdef FINDSPACE_SKIP_SMALL_HOLES_OPT
+    // Optimization: If the current terminal ptab has used entries which
+    // we have not yet encountered, and the remaining free entries of ptab
+    // are less than what we need, skip to the last region of free entries.
+    if (level == VM_PTAB_LEVELS-1 && curr_nuse->nuse < ptab_nuse) {
+      u32 rem_free = (VM_PTAB_LEN - index) - (ptab_nuse - curr_nuse->nuse);
+      if (rem_free < ctx->want_npages - ctx->found_npages) {
+        // There are less free pages available than we need, which means that we know
+        // that this ptab will not contain a range large enough to satisfy
+        // ctx.want_npages.
+        return findspace_restfree(ptab, index, vfn, ctx);
+      }
+    }
+  #endif // FINDSPACE_SKIP_SMALL_HOLES_OPT
+
+  u32 advance = 1;
+
+  if (curr_nuse->nuse == ptab_nuse) {
+    // remainder of ptab entires are free (we have passed all used entries)
+    advance = VM_PTAB_LEN - index;
+  } else {
+    // scan forward to the next used entry, or end of ptab
+    u64 need_npages = ctx->want_npages - ctx->found_npages;
+    const u32 end_index = (u32)MIN(
+      (u64)VM_PTAB_LEN,
+      (u64)index + IDIV_CEIL(need_npages, VM_PTAB_NPAGES(level+1)) );
+    u32 i = index;
+    while (i < end_index && *(u64*)&ptab[i] == 0)
+      i++;
+    advance = i - index;
+  }
+
+  if (ctx->start_vaddr == 0)
+    ctx->start_vaddr = VM_VFN_VADDR(vfn);
+
+  ctx->found_npages += VM_PTAB_NPAGES(level+1) * (u64)advance;
+
+  // return 0 if found_npages>=want_npages, else return advance
+  return advance * (ctx->found_npages < ctx->want_npages);
+}
+
+
+static u32 vm_map_findspace_visitor(
+  vm_ptab_t ptab, u32 ptab_nuse, u32 level, u32 index, u64 vfn, uintptr data)
+{
+  findspace_t* ctx = (findspace_t*)data;
+
+  findspace_nuse_t* curr_nuse = &ctx->nuse[level];
+  if (curr_nuse->ptab != ptab) {
+    curr_nuse->ptab = ptab;
+    curr_nuse->nuse = 0;
+  }
+
+  // visitor for free entries lives in separate function
+  if (*(u64*)&ptab[index] == 0)
+    return vm_map_findspace_visitor_free(ptab, ptab_nuse, level, index, vfn, ctx);
+
+  // entry ptab[index] is not free
+
+  ctx->start_vaddr = 0;
+  ctx->found_npages = 0;
+
+  // skip past immediate used entries (terminal level only)
+  u32 i = index + 1;
+  if (level == VM_PTAB_LEVELS-1) {
+    while (i < VM_PTAB_LEN && *(u64*)&ptab[i])
+      i++;
+  }
+
+  u32 advance = i - index;
+
+  // keep track of nuse so we can skip past free block tail
+  curr_nuse->nuse += advance;
+
+  return advance;
+}
+
+
 rerr_t vm_map_findspace(vm_map_t* map, u64* vaddrp, u64 npages) {
   dlog("————————————————— %s —————————————————", __FUNCTION__);
   vm_map_assert_rlocked(map);
@@ -243,81 +558,28 @@ rerr_t vm_map_findspace(vm_map_t* map, u64* vaddrp, u64 npages) {
     return rerr_nomem;
   }
 
-  // from this point on we're using VFN space
-  u64 vfn = VM_VFN(vaddr);
-  if (vfn < map->min_free_vfn)
-    vfn = map->min_free_vfn;
+  // adjust start to minimum free VFN
+  if (VM_VFN(vaddr) < map->min_free_vfn)
+    vaddr = VM_VFN_VADDR(map->min_free_vfn);
 
-  dlog("vaddr %012llx (VFN %llx)", VM_VFN_VADDR(vfn), vfn);
+  dlog("vm_map_iter(start_vaddr=%llx, want_npages=%llu)", vaddr, npages);
+  findspace_t ctx = { .want_npages = npages };
+  vm_map_iter(map, vaddr, &vm_map_findspace_visitor, (uintptr)&ctx);
 
-  // maxlevel is the maximum page table level that we consider for
-  // partially full page tables.
-  // For example, if 800 pages are requested we know that a partially empty
-  // L4 page table won't contain enough pages (since it holds a total of 512 pages
-  // when VM_PTAB_BITS=6). So any L4 table that is not _completely empty_ can be skipped.
-  // Note: this algorithm is quite similar to bits_set_range & bitset_find_unset_range.
-  // Note: You can get the capacity of a given level with VM_PTAB_CAP(level).
-  int maxlevel = IDIV_CEIL( ((sizeof(npages)*8) - rsm_clz(npages+1)), VM_PTAB_BITS );
-  maxlevel = (VM_PTAB_LEVELS + 1) - maxlevel;
-  dlog("maxlevel %d", maxlevel);
-
-  u32 bits = 0;
-  u8 level = 1;
-  u64 masked_vfn = vfn;
-  u64 nfreepages = 0;
-  vm_ptab_t ptab = map->root;
-  vm_pte_t* pte = NULL;
-
-  for (;;) {
-    usize index = (usize)getbits(masked_vfn, VFN_BITS - (1+bits), VM_PTAB_BITS);
-    pte = &ptab[index];
-
-    dlog(
-      "lookup vfn 0x%llx L%u; index %zu = getbits(0x%llx, %u-(1+%u), %u, nuse %u)",
-      vfn+1, level, index, masked_vfn, VFN_BITS, bits, VM_PTAB_BITS,
-      level != VM_PTAB_LEVELS ? pte->nuse : 0);
-
-    if (level == VM_PTAB_LEVELS) {
-      dlog("  found page table entry for vaddr %llx", VM_VFN_VADDR(vfn));
-      if (VM_PTAB_LEN - index < npages - nfreepages) {
-        // definitely not enough space
-        dlog("  not enough space");
-        nfreepages = 0;
-      } else if UNLIKELY(*(u64*)pte == 0) {
-        dlog("    pte is unused");
-        // TODO: we can use this page; keep going
-      } else {
-        dlog("  pte is in use");
-        // TODO: we can NOT use this page; keep looking
-        nfreepages = 0;
-      }
-      break; // FIXME remove
-    }
-
-    // when we pass maxlevel, skip tables which are not completely empty
-    while (level > maxlevel && pte->nuse) {
-      index++;
-      if (index == VM_PTAB_LEN) {
-        dlog("TODO reverse masked_vfn=getbits(masked_vfn) to 'go up' a level");
-        return rerr_nomem;
-      }
-      pte = &ptab[index];
-    }
-
-    bits += VM_PTAB_BITS;
-    masked_vfn = getbits(masked_vfn, VFN_BITS - (1+bits), VFN_BITS - bits);
-    level++;
-
-    if UNLIKELY(*(u64*)pte == 0) {
-      dlog("page table for vaddr %llx is unused", VM_VFN_VADDR(vfn));
-      pte = NULL;
-      break;
-    }
-
-    ptab = (vm_ptab_t)(uintptr)(pte->outaddr << PAGE_SIZE_BITS);
+  if (ctx.found_npages < npages) {
+    panic("LOLCAT did not find a large-enough region of pages");
+    return rerr_nomem;
   }
 
-  return rerr_not_supported;
+  panic(
+    "LOLCAT found %10llu pages: %012llx…%012llx\n"
+    "                              expect: %012llx\n",
+    ctx.found_npages, ctx.start_vaddr,
+    ctx.start_vaddr + ((ctx.found_npages-1) * PAGE_SIZE),
+    VM_PAGE_ADDR(0xfacedeba4eef));
+
+  *vaddrp = ctx.start_vaddr;
+  return 0;
 }
 
 
@@ -408,6 +670,7 @@ rerr_t vm_map_add(
       }
 
       pte->outaddr = (u64)( (uintptr)haddr >> PAGE_SIZE_BITS );
+      assert(perm != 0); // pte "is mapped" checks relies on pte not being zero
       *((u8*)pte) = *((u8*)pte) | perm;
 
       index++;

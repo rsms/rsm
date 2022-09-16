@@ -392,6 +392,8 @@ typedef struct rmm_ rmm_t;
 
 #define RMM_MIN_SIZE 4096
 
+// TODO: replace size_t with rsm_u64_t
+
 rmm_t* nullable rmm_create(void* memp, size_t memsize);
 rmm_t* nullable rmm_create_host_vmmap(size_t memsize);
 void rmm_dispose(rmm_t*);

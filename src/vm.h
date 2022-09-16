@@ -18,6 +18,11 @@ RSM_ASSUME_NONNULL_BEGIN
 #define VM_ADDR_OFFS_MASK  ((u64)( PAGE_SIZE - 1llu ))
 #define VM_ADDR_PAGE_MASK  ((u64)( ~0llu ^ ((u64)PAGE_SIZE - 1llu) ))
 
+// VM_VFN_MAX: largest valid VFN
+// VM_VFN_BITS: bits needed for VFN (VM_ADDR_BITS-PAGE_SIZE_BITS)
+#define VM_VFN_MAX   VM_VFN(VM_ADDR_MAX)
+#define VM_VFN_BITS  (VM_ADDR_BITS - PAGE_SIZE_BITS)
+
 // page table constants
 //   VM_PTAB_BITS: bits per page table; a divisor of VM_VFN_BITS.
 //   VM_PTAB_BITS should be a value that makes each pagetable be one host page in size:
@@ -30,21 +35,16 @@ RSM_ASSUME_NONNULL_BEGIN
 #define VM_PTAB_LEN     ((1u << VM_PTAB_BITS)) /* number of PTEs in a table */
 #define VM_PTAB_SIZE    ((u32)PAGE_SIZE) /* byte size of one page table */
 
-// u32 VM_PTAB_CAP(u32 level) returns the number of pages a page table
-// of the given level spans.
-// Note: For ptab capacity, use constant VM_PTAB_LEN.
-// When VM_PTAB_BITS==6: L1=68719476736, L2=134217728, L3=262144, L4=512
-#define VM_PTAB_CAP(level) ( \
-  assert((u32)(level) > 0 && (u32)(level) <= VM_PTAB_LEVELS), \
-  VM_PTAB_LEN << (VM_PTAB_BITS * (VM_PTAB_LEVELS - (u32)(level))) \
-)
-
 // u64 VM_PTAB_NPAGES(u32 level) returns the number of pages covered
-// by a table of the given level.
+// by a table of the given 0-based level (i.e. root=0).
 // i.e. with VM_PTAB_BITS=9 & VM_PTAB_LEVELS=4:
-// L1=0x8000000, L2=0x40000, L3=0x200, L4=1
+//   0 0x1000000000 68719476736
+//   1 0x8000000      134217728
+//   2 0x40000           262144
+//   3 0x200                512
+//   4 0x1                    1   (a page, not a table)
 #define VM_PTAB_NPAGES(level) ( \
-  assert((u32)(level) > 0 && (u32)(level) <= VM_PTAB_LEVELS), \
+  assert((u32)(level) >= 0 && (u32)(level) <= VM_PTAB_LEVELS), \
   1llu << ( (VM_PTAB_BITS*(VM_PTAB_LEVELS-1)) - (((u32)(level)-1u) * VM_PTAB_BITS) ) \
 )
 
@@ -55,7 +55,7 @@ RSM_ASSUME_NONNULL_BEGIN
 // VM_CACHE_DEL_TAG: value larger than any valid tag
 #define VM_CACHE_INDEX_BITS      8lu /* == ILOG2(VM_CACHE_LEN) */
 #define VM_CACHE_INDEX_VFN_MASK  ((1llu << VM_CACHE_INDEX_BITS) - 1llu)
-#define VM_CACHE_LEN             ((usize)(1lu << VM_CACHE_INDEX_BITS))
+#define VM_CACHE_LEN             (1lu << VM_CACHE_INDEX_BITS)
 #define VM_CACHE_DEL_TAG         (~0llu)
 
 // VM_CACHE_TAG_MASK is a neat trick we use to create a bitmask used for the
@@ -171,9 +171,6 @@ RSM_ASSUME_NONNULL_BEGIN
 //    = 0xdeadb    11011110101011011011
 #define VM_VFN(vaddr)  ( ((u64)(vaddr) >> PAGE_SIZE_BITS) - (VM_ADDR_MIN/PAGE_SIZE) )
 
-// VM_VFN_MAX is the largest valid VFN
-#define VM_VFN_MAX  VM_VFN(VM_ADDR_MAX)
-
 // u64 VM_VFN_VADDR(u64 vfn) calculates the virtual page address for vfn
 #define VM_VFN_VADDR(vfn)  ( ((u64)(vfn) + (VM_ADDR_MIN/PAGE_SIZE)) << PAGE_SIZE_BITS )
 
@@ -188,9 +185,9 @@ RSM_ASSUME_NONNULL_BEGIN
 //    = 0xeef                          111011101111
 #define VM_ADDR_OFFSET(vaddr)  ( (vaddr) & VM_ADDR_OFFS_MASK )
 
-// u64 VM_CACHE_INDEX(u64) returns the index in vm_cache_t.entries for vaddr.
+// u32 VM_CACHE_INDEX(u64) returns the index in vm_cache_t.entries for vaddr.
 // vaddr must be >= VM_ADDR_MIN or the result is undefined.
-#define VM_CACHE_INDEX(vaddr)  ( VM_VFN(vaddr) & VM_CACHE_INDEX_VFN_MASK )
+#define VM_CACHE_INDEX(vaddr)  ( (u32)(VM_VFN(vaddr) & VM_CACHE_INDEX_VFN_MASK) )
 
 // vm_cache_ent_t* VM_CACHE_ENTRY(vm_cache_t cache, u64 vaddr)
 // accesses the cache entry for a virtual address's page.
@@ -226,13 +223,14 @@ typedef union {
   // leaf
   struct {
   #if RSM_LITTLE_ENDIAN
-    // note: permission bit positions should match vm_perm_t
+    // note: permission bits should be 8 in total and match vm_perm_t
     bool  read        : 1; // can read from this page
     bool  write       : 1; // can write to this page
     bool  uncacheable : 1; // can not be cached
     bool  accessed    : 1; // has been accessed
     bool  written     : 1; // has been written to
     u64   type        : 3; // type of page
+
     u64   _reserved   : 4;
 
     // usize _reserved : 12;
@@ -253,7 +251,7 @@ typedef union {
   };
 } vm_pte_t;
 
-// vm_ptab_t - virtual memory page table
+// vm_ptab_t - virtual memory page table of size VM_PTAB_LEN
 typedef vm_pte_t* vm_ptab_t;
 
 // vm_map_t is one map, a page directory managing mappings between
@@ -324,24 +322,60 @@ static void vm_map_runlock(vm_map_t*);
 // If haddr is 0, backing pages are allocated as needed on first access.
 // haddr's address must be aligned to PAGE_SIZE.
 // vaddr does not need to be page aligned; its top PAGE_SIZE_BITS bits are ignored.
-rerr_t vm_map_add(vm_map_t*, u64* vaddr, uintptr haddr, usize npages, vm_perm_t);
+// map must be locked with vm_map_lock.
+rerr_t vm_map_add(vm_map_t*, u64* vaddr, uintptr haddr, u64 npages, vm_perm_t);
 
 // vm_map_del deallocates a range of virtual pages starting at vaddr.
 // Callers using caches should call vm_cache_invalidate.
-rerr_t vm_map_del(vm_map_t*, u64 vaddr, usize npages);
+// map must be locked with vm_map_lock.
+rerr_t vm_map_del(vm_map_t*, u64 vaddr, u64 npages);
 
 // vm_map_findspace attempts to find a region with sufficient space for npages,
 // with minimum address *vaddr. On success, *vaddr contains the first virtual
 // address in the found region.
+// map must be locked with at least vm_map_rlock.
 rerr_t vm_map_findspace(vm_map_t*, u64* vaddr, u64 npages);
+
+// vm_map_access returns the page table entry of a Virtual Frame Number.
+// map must be locked with at least vm_map_rlock.
+// If isaccess is true, all parent page tables of VFN will be marked as
+// "accessed" by setting vm_pte_t.accessed=true.
+vm_pte_t* nullable vm_map_access(vm_map_t*, u64 vfn, bool isaccess);
+
+// vm_map_iter_f is the visitor callback type.
+// - table: pointer to the vm_pte_t representing the current ptab (holds its nuse)
+// - level: level of ptab (root is level 0)
+// - ptab:  current ptab
+// - index: index of the current pte in ptab, i.e. curr_entry = &ptab[index]
+// - vfn:   VFN of the current pte in ptab
+// - data:  whatever value was provided to vm_map_iter
+// Return number of indices to advance. Return 0 to stop iteration.
+typedef u32(vm_map_iter_f)(
+  vm_pte_t* table, u32 level, vm_ptab_t ptab, u32 index, u64 vfn, uintptr data);
+
+// vm_map_iter iterates over a map, calling fn for each page mapping
+// or each unused (pte==0) page table.
+// start_vaddr is the address to start with.
+// data is a value passed along to fn.
+void vm_map_iter(vm_map_t*, u64 start_vaddr, vm_map_iter_f* fn, uintptr data);
+
+
+// vm_pte_outaddr accesses the vm_pte_t.outaddr pointer of a pte
+inline static void* nullable vm_pte_outaddr(const vm_pte_t* pte) {
+  return (void*)(uintptr)(pte->outaddr << PAGE_SIZE_BITS);
+}
+
+// vm_pte_set_outaddr sets vm_pte_t.outaddr
+inline static void vm_pte_set_outaddr(vm_pte_t* pte, void* nullable outaddr) {
+  pte->outaddr = (u64)(uintptr)outaddr >> PAGE_SIZE_BITS;
+}
 
 
 // vm_cache_init initializes a vm_cache_t
 void vm_cache_init(vm_cache_t*);
 
-// vm_cache_invalidate invalidates npages starting at vaddr.
-// To invalidate the entire cache, pass vaddr=VM_ADDR_MIN, npages=VM_CACHE_LEN.
-void vm_cache_invalidate(vm_cache_t*, u64 vaddr, usize npages);
+// vm_cache_invalidate_all invalidates all entries in the cache.
+void vm_cache_invalidate_all(vm_cache_t*);
 
 // vm_cache_invalidate_one invalidates the entry for the provided address's page.
 // Note that this does not verify if the VM_CACHE_ENTRY is for the correct page.
@@ -399,6 +433,11 @@ ALWAYS_INLINE static uintptr vm_translate(
     cache->entries[index].haddr_diff;
   return (uintptr)(haddr_diff + vaddr);
 }
+
+
+// void vm_map_assert_locked(vm_map_t*)
+#define vm_map_assert_locked(m)  assertf(rwmutex_islocked(&(m)->lock), "map locked")
+#define vm_map_assert_rlocked(m) assertf(rwmutex_isrlocked(&(m)->lock), "map rlocked")
 
 
 // inline impl of vm_map lock functions

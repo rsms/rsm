@@ -250,24 +250,6 @@ static i64 stkmem_grow(EXEC_PARAMS, i64 delta) {
   u64 stack_lo = 0;
   u64 npages = newsize/PAGE_SIZE;
 
-  #if 0
-  { // XXX DEBUG
-    u64 stack_lo;
-    u64 npages = 1;
-    rerr_t err;
-
-    stack_lo = 0xfacedeadbeef;
-    dlog("XXX map %012llx…%012llx", stack_lo, stack_lo + (npages-1)*PAGE_SIZE);
-    assert(vm_map_add(vm_map, &stack_lo, 0, npages, VM_PERM_RW) == rerr_ok);
-
-    stack_lo = stack_lo + PAGE_SIZE*200;
-    dlog("XXX map %012llx…%012llx", stack_lo, stack_lo + (npages-1)*PAGE_SIZE);
-    assert(vm_map_add(vm_map, &stack_lo, 0, npages, VM_PERM_RW) == rerr_ok);
-  }
-  stack_lo = 0xfacedeadbeef;
-  npages = 398430;
-  #endif
-
   // Note: we could attempt to allocate a new stack just before the current one.
   // In practice it will always fail for the main task.
   // stack_lo = ALIGN2_FLOOR(sp - newsize, PAGE_SIZE);

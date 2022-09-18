@@ -165,6 +165,7 @@ typedef struct rmemalloc_ {
 
   rmm_t* nullable mm;
   void* nullable  mm_origin; // address of mm pages, if allocator was allocated in mm
+  usize           mm_npages;
 
   #ifdef RMEM_SLABHEAP_ENABLE
   slabheap_t slabheaps[SLABHEAP_COUNT];
@@ -1073,7 +1074,7 @@ static bool rmem_expand(rmemalloc_t* a, usize minsize) {
     req_npages, ptr, ptr + (req_npages * PAGE_SIZE), req_npages * PAGE_SIZE);
 
   if UNLIKELY(!rmem_add_subheap(a, ptr, req_npages * PAGE_SIZE)) {
-    rmm_freepages(a->mm, ptr);
+    rmm_freepages(a->mm, ptr, req_npages);
     return false;
   }
 
@@ -1097,7 +1098,8 @@ static rmemalloc_t* nullable rmem_allocator_init(
   rmemalloc_t*    a,
   void*           heap0p, usize heap0size, // initial heap storage
   rmm_t* nullable mm,
-  void* nullable  mm_origin)
+  void* nullable  mm_origin,
+  usize           mm_npages)
 {
   assertf(((uintptr)a % (uintptr)_Alignof(rmemalloc_t)) == 0, "a %p misaligned", a);
   assertf(IS_ALIGN2((uintptr)heap0p, HEAP_ALIGN), "heap0p %p misaligned", heap0p);
@@ -1110,6 +1112,7 @@ static rmemalloc_t* nullable rmem_allocator_init(
 
   a->mm = mm;
   a->mm_origin = mm_origin;
+  a->mm_npages = mm_npages;
 
   DEBUG_ID_INIT(a, next_heap_debug_id, 0);
 
@@ -1172,8 +1175,9 @@ rmemalloc_t* nullable rmem_allocator_create(rmm_t* mm, usize req_heap0size) {
   void* heap0p = p;
   usize heap0size = nbyte - sizeof(rmemalloc_t);
   void* mm_origin = p;
+  usize mm_npages = npages;
 
-  return rmem_allocator_init(a, heap0p, heap0size, mm, mm_origin);
+  return rmem_allocator_init(a, heap0p, heap0size, mm, mm_origin, mm_npages);
 }
 
 
@@ -1241,7 +1245,7 @@ rmemalloc_t* nullable rmem_allocator_create_buf(
     }
   }
 
-  return rmem_allocator_init(a, heap0p, heap0size, mm, NULL);
+  return rmem_allocator_init(a, heap0p, heap0size, mm, NULL, 0);
 }
 
 
@@ -1250,7 +1254,7 @@ void rmem_allocator_free(rmemalloc_t* a) {
   // TODO: free additional subheaps
   mutex_dispose(&a->lock);
   if (a->mm_origin)
-    rmm_freepages(assertnotnull(a->mm), a->mm_origin);
+    rmm_freepages(assertnotnull(a->mm), a->mm_origin, a->mm_npages);
 }
 
 

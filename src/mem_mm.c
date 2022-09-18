@@ -71,8 +71,7 @@ typedef struct rmm_ {
   usize   free_size;  // number of free bytes (i.e. available to allocate)
   u8*     bitsets[MAX_ORDER + 1];
   ilist_t freelists[MAX_ORDER + 1];
-  //usize nalloc[MAX_ORDER + 1]; // number of allocations per order
-  bool owns_host_vmmap; // true if rmm_dispose should call osvmem_free
+  bool    owns_host_vmmap; // true if rmm_dispose should call osvmem_free
 } rmm_t;
 
 
@@ -114,31 +113,38 @@ usize rmm_avail_maxregion(rmm_t* mm) {
 }
 
 
-#if DEBUG
-  UNUSED static void dlog_freelist(const rmm_t* mm, int order) {
+#if RMM_TRACE
+  UNUSED static void trace_freelist(const rmm_t* mm, int order) {
     const ilist_t* head = &mm->freelists[order];
-    trace("freelists[%d] %p", order, head);
+    trace("  freelists[order=%d]", order);
     usize i = 0; // expect ents[0] first
     ilist_for_each(cur, head) {
+      uintptr addr = (uintptr)cur - mm->start_addr;
       if (cur->prev == head && cur->next == head) {
-        trace("  [%zu] %p (.prev HEAD, .next HEAD)", i, cur);
+        trace("    [%zu] 0x%lx (.prev HEAD, .next HEAD)", i, addr);
       } else if (cur->prev == head) {
-        trace("  [%zu] %p (.prev HEAD, .next %p)", i, cur, cur->next);
+        uintptr next = (uintptr)cur->next - mm->start_addr;
+        trace("    [%zu] 0x%lx (.prev HEAD, .next 0x%lx)", i, addr, next);
       } else if (cur->next == head) {
-        trace("  [%zu] %p (.prev %p, .next HEAD)", i, cur, cur->prev);
+        uintptr prev = (uintptr)cur->prev - mm->start_addr;
+        trace("    [%zu] 0x%lx (.prev 0x%lx, .next HEAD)", i, addr, prev);
       } else {
-        trace("  [%zu] %p (.prev %p, .next %p)", i, cur, cur->prev, cur->next);
+        uintptr next = (uintptr)cur->next - mm->start_addr;
+        uintptr prev = (uintptr)cur->prev - mm->start_addr;
+        trace("    [%zu] 0x%lx (.prev 0x%lx, .next 0x%lx)", i, addr, prev, next);
       }
       i++;
     }
+    if (i == 0)
+      trace("    (empty)");
   }
 #else
-  #define dlog_freelist(...) ((void)0)
+  #define trace_freelist(...) ((void)0)
 #endif
 
 
 static uintptr rmm_allocpages1(rmm_t* mm, int order) {
-  usize size = (usize)PAGE_SIZE << order;
+  usize blocksize = (usize)PAGE_SIZE << order;
 
   if (order > MAX_ORDER)
     return UINTPTR_MAX;
@@ -155,33 +161,31 @@ static uintptr rmm_allocpages1(rmm_t* mm, int order) {
     if UNLIKELY(addr == UINTPTR_MAX)
       return UINTPTR_MAX;
     ilist_t* buddy1 = (ilist_t*)(addr + mm->start_addr);
-    ilist_t* buddy2 = (void*)buddy1 + size;
-    trace("ilist_append %p", buddy2);
+    ilist_t* buddy2 = (void*)buddy1 + blocksize;
     ilist_append(&mm->freelists[order], buddy2);
-    dlog_freelist(mm, order);
+    trace_freelist(mm, order);
 
     #ifdef RMM_TRACE
     usize nextsize = (usize)PAGE_SIZE << (order + 1);
-    trace("split block %d:%p (%zu %s) -> blocks %d:%p, %d:%p",
-      order, (void*)addr,
+    trace("split block %d:0x%lx (%zu %s) -> blocks %d:%p, %d:%p",
+      order, addr,
       nextsize >= GiB ? nextsize/GiB : nextsize >= MiB ? nextsize/MiB : nextsize/KiB,
       nextsize >= GiB ? "GiB" : nextsize >= MiB ? "MiB" : "KiB",
       order + 1, (void*)addr,
-      order + 1, (void*)addr + size);
+      order + 1, (void*)addr + blocksize);
     #endif
   }
 
-  usize bit = addr / size;
+  usize n = addr >> (PAGE_SIZE_BITS + order);
 
-  trace("using block %d:%p (%zu %s, 0x%lx, bit %zu)",
-    order, (void*)addr,
-    size >= GiB ? size/GiB : size >= MiB ? size/MiB : size/KiB,
-    size >= GiB ? "GiB" : size >= MiB ? "MiB" : "KiB",
-    addr + mm->start_addr, bit);
+  trace("allocate block %d:0x%lx (%zu %s, 0x%lx, #%zu)",
+    order, addr,
+    blocksize >= GiB ? blocksize/GiB : blocksize >= MiB ? blocksize/MiB : blocksize/KiB,
+    blocksize >= GiB ? "GiB" : blocksize >= MiB ? "MiB" : "KiB",
+    addr + mm->start_addr, n);
 
-  assert(!bit_get(mm->bitsets[order], bit));
-  bit_set(mm->bitsets[order], bit);
-  //mm->nalloc[order]++;
+  assert(!bit_get(mm->bitsets[order], n));
+  bit_set(mm->bitsets[order], n);
 
   return addr;
 }
@@ -230,49 +234,72 @@ void* nullable rmm_allocpages_min(rmm_t* mm, usize* req_npages, usize min_npages
 }
 
 
-static int rmm_freepages1(rmm_t* mm, uintptr addr, int order) {
+static int rmm_freepages1(rmm_t* mm, uintptr addr, int order, usize npages) {
   if (order > MAX_ORDER)
     return -1;
 
-  int bit = addr / ((uintptr)PAGE_SIZE << order);
-  trace("rmm_freepages1 block %d:%p, bit %d", order, (void*)addr, bit);
+  usize blocksize = (uintptr)PAGE_SIZE << order;
+  // Instead of "n = addr / blocksize" we can do this: (since blocksize is pow2)
+  usize n = addr >> (PAGE_SIZE_BITS + order);
 
-  if (!bit_get(mm->bitsets[order], bit))
-    return rmm_freepages1(mm, addr, order + 1);
+  trace("rmm_freepages1 block %d:0x%lx (%lu pages) #%zu", order, addr, 1lu << order, n);
 
-  uintptr buddy_addr = addr ^ ((uintptr)PAGE_SIZE << order);
-  int buddy_bit = buddy_addr / ((uintptr)PAGE_SIZE << order);
-  bit_clear(mm->bitsets[order], bit); // no longer in use
+  if (!bit_get(mm->bitsets[order], n)) {
+    // this block is not in use
 
-  trace("  bit %d=0, buddy_bit %d=%d, buddy %p",
-    bit, buddy_bit, bit_get(mm->bitsets[order], buddy_bit), (void*)buddy_addr);
+    // check for "under free", for example:
+    //   p = rmm_allocpages(mm, 4)  // allocates an order#2 block
+    //   rmm_freepages(mm, p,   2)  // frees an order#1 block (2 != 8)
+    assertf(npages > (usize)1lu << order,
+      "0x%lx points to an allocation larger than %zu pages",
+      addr + mm->start_addr, npages);
 
-  if (!bit_get(mm->bitsets[order], buddy_bit)) {
+    // switch to block of twice the size
+    return rmm_freepages1(mm, addr, order + 1, npages);
+  }
+
+  // check for "over free", for example:
+  //   p = rmm_allocpages(mm, 2)
+  //   rmm_freepages(mm, p,   4)  // 2 != 4
+  assertf(npages <= (usize)1lu << order,
+    "0x%lx (%zu pages) points to a smaller allocation (%zu pages)",
+    addr + mm->start_addr, npages, (usize)1lu << order);
+
+  // block is in use; mark it as unused by clearing its "in use" bit
+  bit_clear(mm->bitsets[order], n);
+
+  uintptr buddy_addr = addr ^ blocksize;
+  usize buddy_n = buddy_addr >> (PAGE_SIZE_BITS + order);
+
+  if (!bit_get(mm->bitsets[order], buddy_n)) {
     // buddy is not in use -- merge
-    trace("  merge buddies %p + %p", (void*)addr, (void*)buddy_addr);
+    trace("  merge buddies 0x%lx + 0x%lx", addr, buddy_addr);
     ilist_t* buddy = (void*)(buddy_addr + mm->start_addr);
     assertnotnull(buddy->next); assert(buddy->next != buddy);
     assertnotnull(buddy->prev); assert(buddy->prev != buddy);
     ilist_del(buddy);
-    dlog_freelist(mm, order);
-    rmm_freepages1(mm, buddy_addr > addr ? addr : buddy_addr, order + 1);
+    trace_freelist(mm, order);
+    rmm_freepages1(mm, buddy_addr > addr ? addr : buddy_addr, order + 1, npages);
   } else {
-    trace("  free block %p", (void*)addr);
+    trace("  free block %d:0x%lx", order, addr);
     ilist_t* block = (void*)(addr + mm->start_addr);
     ilist_append(&mm->freelists[order], block);
-    dlog_freelist(mm, order);
+    trace_freelist(mm, order);
   }
 
-  //mm->nalloc[order]--;
   return order;
 }
 
 
-void rmm_freepages(rmm_t* mm, void* ptr) {
+void rmm_freepages(rmm_t* mm, void* ptr, usize npages) {
+  if (npages == 0)
+    return;
   assert(IS_ALIGN2((uintptr)ptr, PAGE_SIZE));
-  trace("rmm_freepages %p", ptr);
+  assertf(IS_POW2(npages), "npages %zu is not pow2", npages);
+  uintptr addr = (uintptr)ptr - mm->start_addr;
+  trace("rmm_freepages %p %zu (reladdr 0x%lx)", ptr, npages, addr);
   mutex_lock(&mm->lock);
-  int order = rmm_freepages1(mm, (uintptr)ptr - mm->start_addr, 0);
+  int order = rmm_freepages1(mm, addr, 0, npages);
   if (order >= 0)
     mm->free_size += (usize)PAGE_SIZE << order;
   mutex_unlock(&mm->lock);
@@ -397,7 +424,7 @@ rmm_t* nullable rmm_create(void* memp, usize memsize) {
 
     // add the block to its order's freelist
     ilist_append(&mm->freelists[order], (ilist_t*)start);
-    //dlog_freelist(mm, order);
+    //trace_freelist(mm, order);
 
     // calculate bit for the block
     usize bit = (start - mm->start_addr) / block_size;
@@ -472,11 +499,11 @@ static void test_rmm() {
 
   void* p = assertnotnull( rmm_allocpages(mm, 4) );
   trace("rmm_allocpages(4) => %p", p);
-  rmm_freepages(mm, p);
+  rmm_freepages(mm, p, 4);
 
   p = assertnotnull( rmm_allocpages(mm, 4) );
   trace("rmm_allocpages(4) => %p", p);
-  rmm_freepages(mm, p);
+  rmm_freepages(mm, p, 4);
 
   void* ptrs[16];
   for (usize i = 0; i < countof(ptrs); i++) {
@@ -490,13 +517,18 @@ static void test_rmm() {
   // this tests the "scan forward or backwards" branches
   for (usize i = 0; i < countof(ptrs); i++) {
     if (i % 2) {
-      rmm_freepages(mm, ptrs[countof(ptrs) - i]);
+      rmm_freepages(mm, ptrs[countof(ptrs) - i], 4);
     } else {
-      rmm_freepages(mm, ptrs[i]);
+      rmm_freepages(mm, ptrs[i], 4);
     }
   }
 
-  rmm_freepages(mm, p2);
+  rmm_freepages(mm, p2, 1);
+
+  // test "under free" and "over free" (panics)
+  //p = assertnotnull( rmm_allocpages(mm, 8) );
+  //rmm_freepages(mm, p, 4);  // under free
+  //rmm_freepages(mm, p, 16); // over free
 
   trace("rmm_cap()             %10zu", rmm_cap(mm));
   trace("rmm_avail_total()     %10zu", rmm_avail_total(mm));

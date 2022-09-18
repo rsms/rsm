@@ -2009,7 +2009,7 @@ rerr_t rsched_execrom(rsched_t* s, rrom_t* rom) {
   rsched_unloadrom(s, rom);
 
 end:
-  rmm_freepages(s->machine->mm, basemem.p);
+  rmm_freepages(s->machine->mm, basemem.p, basemem.size/PAGE_SIZE);
   return err;
 }
 

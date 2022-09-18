@@ -398,7 +398,7 @@ rmm_t* nullable rmm_create(void* memp, size_t memsize);
 rmm_t* nullable rmm_create_host_vmmap(size_t memsize);
 void rmm_dispose(rmm_t*);
 void* nullable rmm_allocpages(rmm_t*, size_t npages);
-void rmm_freepages(rmm_t* restrict mm, void* restrict ptr);
+void rmm_freepages(rmm_t* restrict mm, void* restrict ptr, size_t npages);
 uintptr_t rmm_startaddr(const rmm_t*);
 size_t rmm_cap(const rmm_t* mm); // total capacity (number of pages)
 

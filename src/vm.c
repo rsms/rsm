@@ -172,7 +172,7 @@ static vm_map_t* nullable vm_map_create(rmm_t* mm) {
   if (!map)
     return NULL;
   if (vm_map_init(map, mm)) {
-    rmm_freepages(mm, map);
+    rmm_freepages(mm, map, 1);
     return NULL;
   }
   return map;
@@ -265,7 +265,7 @@ static void test_vm() {
     vm_map_lock(map);
     rerr_t err = vm_map_add(map, &vaddr, (uintptr)haddr, npages, perm);
     vm_map_unlock(map);
-    assertf(err == 0, "%s", rerr_str(err));
+    assertf(err == 0, "vm_map_add: %s", rerr_str(err));
 
     dlog("VM_STORE(u32, 0x%llx, %u)", vaddr, value);
     VM_STORE(u32, cache_rw, map, vaddr, value);
@@ -292,11 +292,11 @@ static void test_vm() {
     vm_map_lock(map);
     err = vm_map_add(map, &vaddr, 0lu, npages, VM_PERM_R);
     vm_map_unlock(map);
-    assertf(err == 0, "%s", rerr_str(err));
+    assertf(err == 0, "vm_map_add: %s", rerr_str(err));
     value = VM_LOAD(u32, cache_r, map, vaddr); // ok
     //VM_STORE(u32, cache_rw, map, vaddr, value); // error
 
-    rmm_freepages(mm, haddr);
+    rmm_freepages(mm, haddr, npages);
   }
 
   // // allocate all pages (should panic just shy of rmm_avail_total pages)

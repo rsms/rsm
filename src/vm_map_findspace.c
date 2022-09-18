@@ -93,7 +93,6 @@ static u32 vm_map_findspace_visitor(
 
 
 rerr_t vm_map_findspace(vm_map_t* map, u64* vaddrp, u64 npages) {
-  dlog("————————————————— %s —————————————————", __FUNCTION__);
   vm_map_assert_rlocked(map);
 
   // *vaddrp holds the minimum desired address
@@ -113,14 +112,14 @@ rerr_t vm_map_findspace(vm_map_t* map, u64* vaddrp, u64 npages) {
   if (VM_VFN(vaddr) < map->min_free_vfn)
     vaddr = VM_VFN_VADDR(map->min_free_vfn);
 
-  dlog("vm_map_iter(start_vaddr=%llx, want_npages=%llu)", vaddr, npages);
+  trace("vm_map_iter(start_vaddr=%llx, want_npages=%llu)", vaddr, npages);
   findspace_t ctx = { .want_npages = npages };
   vm_map_iter(map, vaddr, &vm_map_findspace_visitor, (uintptr)&ctx);
 
   if (ctx.found_npages < npages)
     return rerr_nomem;
 
-  dlog("vm_map_findspace\n"
+  trace("vm_map_findspace\n"
     "  expected min %10llu pages at >=%012llx\n"
     "  found        %10llu pages at   %012llx…%012llx\n",
     npages, VM_PAGE_ADDR(0xfacedeba4eef),

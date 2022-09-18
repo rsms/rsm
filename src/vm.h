@@ -227,11 +227,12 @@ typedef union {
     bool  read        : 1; // can read from this page
     bool  write       : 1; // can write to this page
     bool  uncacheable : 1; // can not be cached
+    bool  purgeable   : 1; // backing can be purged (can be handed to rmm_freepages)
     bool  accessed    : 1; // has been accessed
     bool  written     : 1; // has been written to
     u64   type        : 3; // type of page
 
-    u64   _reserved   : 4;
+    u64   _reserved   : 3;
 
     // usize _reserved : 12;
 
@@ -245,9 +246,8 @@ typedef union {
   };
   // branch
   struct {
-    u32   nuse       : VM_PTAB_BITS; // number of mapped entries in this table
-    u32   _reserved2 : 3;
-    u64   ptaddr     : 52;
+    u32 nuse   : 12; // number of mapped entries in this table
+    u64 ptaddr : 52;
   };
 } vm_pte_t;
 
@@ -345,7 +345,7 @@ vm_pte_t* nullable vm_map_access(vm_map_t*, u64 vfn, bool isaccess);
 // vm_map_iter_f is the visitor callback type.
 // - table: pointer to the vm_pte_t representing the current ptab (holds its nuse)
 // - level: level of ptab (root is level 0)
-// - ptab:  current ptab
+// - ptab:  current page table
 // - index: index of the current pte in ptab, i.e. curr_entry = &ptab[index]
 // - vfn:   VFN of the current pte in ptab
 // - data:  whatever value was provided to vm_map_iter

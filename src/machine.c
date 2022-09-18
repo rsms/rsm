@@ -37,7 +37,7 @@ rmachine_t* nullable rmachine_create(rmm_t* mm) {
 error:
   rmem_allocator_free(malloc);
   if (m)
-    rmm_freepages(mm, m);
+    rmm_freepages(mm, m, npages);
   return NULL;
 }
 

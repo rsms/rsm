@@ -248,7 +248,7 @@ static u32 vm_map_add_visitor(
 
 error:
   { // unmap what was mapped so far
-    rerr_t err = vm_map_del(ctx->map, ctx->vaddr, ctx->nmapped);
+    UNUSED rerr_t err = vm_map_del(ctx->map, ctx->vaddr, ctx->nmapped);
     assertf(err == 0, "vm_map_del(%012llx, %llu) => %s",
       ctx->vaddr, ctx->nmapped, rerr_str(err));
   }

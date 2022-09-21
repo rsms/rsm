@@ -11,17 +11,40 @@
 
 
 #if (defined(VM_MAP_ITER_TRACE) || defined(VM_MAP_TRACE) || defined(VM_TRACE)) && \
-    defined(DEBUG)
+    defined(DEBUG) && !defined(RSM_NO_LIBC)
   #undef  VM_MAP_ITER_TRACE
   #define VM_MAP_ITER_TRACE
-  #define trace(fmt, args...) dlog("[vm_map] " fmt, ##args)
+  #define trace(fmt, args...) log("\e[1;33m▍[vm_map_iter]\e[0m " fmt, ##args)
+  #define tracex(fmt, args...) trace("%*s" fmt, (int)level*2, "", ##args)
+  #define trace_iter(args...) _trace_iter(args, __FUNCTION__)
+  static void _trace_iter(u64 vfn, u32 level, vm_ptab_t ptab, u32 index, const char* fn) {
+    u64 npages = VM_PTAB_NPAGES(level+1);
+    if (level == VM_PTAB_LEVELS-1) {
+      log("\e[1;33m▍%*s%s page\e[39m %012llx L%u[%u] %s\e[0m",
+        (int)level*2, "", fn,
+        VM_VFN_VADDR(vfn), level, index, (*(u64*)&ptab[index] ? "in use" : "free"));
+    } else {
+      u64 last_vaddr = VM_VFN_VADDR(vfn + npages - 1);
+      log("\e[1;33m▍%*s%s L%u\e[39m %012llx…%012llx 0x%llx L%u[%u] nuse=%u\e[0m",
+        (int)level*2, "", fn,
+        level+1, VM_VFN_VADDR(vfn), last_vaddr, npages, level, index,
+        ptab[index].table.nuse);
+    }
+  }
 #else
   #ifdef VM_MAP_ITER_TRACE
-    #warning VM_MAP_ITER_TRACE has no effect unless DEBUG is enabled
+    #if !defined(DEBUG)
+      #warning VM_MAP_ITER_TRACE has no effect unless DEBUG is enabled
+    #elif defined(RSM_NO_LIBC)
+      #warning VM_MAP_ITER_TRACE has no effect when RSM_NO_LIBC is defined
+    #endif
     #undef VM_MAP_ITER_TRACE
   #endif
   #define trace(...) ((void)0)
+  #define tracex(...) ((void)0)
+  #define trace_iter(...) ((void)0)
 #endif
+
 
 
 #if DEBUG
@@ -49,54 +72,46 @@
 static bool vm_map_iter0(
   vm_map_iter_f callback,   // user callback
   uintptr       userdata,   // user data for callback
-  vm_pte_t*     parent,
-  u64           parent_vfn,
+  vm_table_t*   parent,
+  u64           vfn,        // parent VFN
   u32           level)      // level of page table (root = 0)
 {
-  #undef tracex
-  #define tracex(fmt, args...) trace("%*s" fmt, (int)level*2, "", ##args)
-
   u64 npages = VM_PTAB_NPAGES(level+1);
-  vm_ptab_t ptab = vm_pte_outaddr(parent);
+  vm_ptab_t ptab = vm_table_ptab(parent);
 
-  for (u32 index = 0; index < VM_PTAB_LEN;) {
-    u64 vfn = parent_vfn + ((u64)index * npages);
+  u32 end_index = VM_PTAB_LEN;
 
-    #ifdef VM_MAP_ITER_TRACE
-      {
-        vm_pte_t* pte = &ptab[index];
-        if (level == VM_PTAB_LEVELS-1) {
-          tracex("iter_visit page %012llx [%u] %s",
-            VM_VFN_VADDR(vfn), index, (*(u64*)pte ? "mapped" : "free"));
-        } else {
-          u64 last_vaddr = VM_VFN_VADDR(vfn + npages) - 1;
-          if (level == 0) {
-            tracex("iter_visit L1 table %012llx…%012llx 0x%llx [%u] nuse=%u",
-              VM_VFN_VADDR(vfn), last_vaddr, npages, index, pte->nuse);
-          } else {
-            tracex("iter_visit L%u table %012llx…%012llx 0x%llx [%u] nuse=%u",
-              level+1, VM_VFN_VADDR(vfn), last_vaddr, npages, index, pte->nuse);
-          }
-        }
-      }
-    #endif
+  // when we are visiting the last table of pages, there is one too many pages at the
+  // end as a result from VFN being offset by (VM_ADDR_MIN/PAGE_SIZE).
+  if (VM_ADDR_MIN > 0) {
+    // branchless version of
+    //   u64 end_vfn = vfn + VM_PTAB_NPAGES(level) - 1;
+    //   if (level == VM_PTAB_LEVELS-1 && end_vfn == VM_VFN_MAX + 1)
+    //     end_index--;
+    end_index -= (
+      (level == VM_PTAB_LEVELS-1) &
+      (vfn + VM_PTAB_NPAGES(level) - 1 == VM_VFN_MAX + 1) );
+  }
+
+  for (u32 index = 0; index < end_index;) {
+    trace_iter(vfn, level, ptab, index);
 
     u32 index_incr = callback(parent, level, ptab, index, vfn, userdata);
-    assert_no_add_overflow(index, index_incr);
     if (index_incr == 0)
       return false;
 
-    vm_pte_t* pte = &ptab[index];
-    index += index_incr;
-
-    if ((level < VM_PTAB_LEVELS-1) & (*(u64*)pte != 0)) {
-      // visit sub table
-      if (!vm_map_iter0(callback, userdata, pte, vfn, level+1))
+    // visit sub table
+    vm_table_t* subtable = &ptab[index].table;
+    if ((level < VM_PTAB_LEVELS-1) & (*(u64*)subtable != 0)) {
+      if (!vm_map_iter0(callback, userdata, subtable, vfn, level+1))
         return false;
     }
 
+    assert_no_add_overflow(index, index_incr);
+    index += index_incr;
+    vfn += (u64)index_incr * npages;
     // visit next table
-  } // while (index < VM_PTAB_LEN)
+  }
 
   return true;
 }
@@ -109,87 +124,80 @@ static bool vm_map_iter1(
   uintptr       userdata,   // user data for callback
   u64           start_vfn,  // minimum VFN to start calling the callback for
   u64           index_vfn,
-  vm_pte_t*     parent,
+  vm_table_t*   parent,
   u32           level)      // level of page table (root = 0)
 {
-  #undef tracex
-  #define tracex(fmt, args...) trace("%*s" fmt, (int)level*2, "", ##args)
-
-  u32 start_index = (u32)(index_vfn >> (64 - VM_PTAB_BITS));
+  u32 index = (u32)(index_vfn >> (64 - VM_PTAB_BITS));
 
   // VFN 0xfacedeadbeef
   //     0000000000000000000000000000 111110101 100111011 011110101 011011010
   //                                  L1        L2        L3        L4
   // #ifdef VM_MAP_ITER_TRACE
-  //   tracex("start_vfn   0x%09llx (vaddr %012llx)",start_vfn,VM_VFN_VADDR(start_vfn));
-  //   tracex("            %s", fmtbitsval(start_vfn));
-  //   tracex("start_index %-3u%*s",
-  //     start_index,
+  //   tracex("start_vfn 0x%09llx (vaddr %012llx)",start_vfn,VM_VFN_VADDR(start_vfn));
+  //   tracex("          %s", fmtbitsval(start_vfn));
+  //   tracex("index     %-3u%*s",
+  //     index,
   //     64-(VM_VFN_BITS - VM_PTAB_BITS - (level * VM_PTAB_BITS))-3,
-  //     fmtbits(&start_index, VM_PTAB_BITS));
+  //     fmtbits(&index, VM_PTAB_BITS));
   // #endif
 
-  // bits is the inverse count, i.e. L1=27, L2=18, L3=9, L4=0
-  u32 bits = (VM_PTAB_BITS*(VM_PTAB_LEVELS-1)) - (level * VM_PTAB_BITS);
-  u64 vfn_mask = ~0llu ^ ((1llu << bits)-1);
   u64 npages = VM_PTAB_NPAGES(level+1); // i.e. L1=0x8000000, L2=0x40000, L3=0x200, L4=1
-  vm_ptab_t ptab = vm_pte_outaddr(parent);
+  u64 vfn = VM_BLOCK_VFN(start_vfn, level);
+  assertf(vfn + npages > start_vfn, "block ends before index (index_vfn bug)");
+  vm_ptab_t ptab = vm_table_ptab(parent);
 
-  for (u32 index = start_index; index < VM_PTAB_LEN;) {
-    vm_pte_t* pte = &ptab[index];
+  trace_iter(vfn, level, ptab, index);
 
-    u64 vfn = (start_vfn & vfn_mask) + ((u64)(index - start_index) * npages);
+  u32 index_incr = callback(parent, level, ptab, index, start_vfn, userdata);
+  if (index_incr == 0)
+    return false;
 
-    #ifdef VM_MAP_ITER_TRACE
-      if (level == VM_PTAB_LEVELS-1) {
-        tracex("iter_visit page %012llx [%u] %s",
-          VM_VFN_VADDR(vfn), index, (*(u64*)pte ? "mapped" : "free"));
-      } else {
-        u64 last_vaddr = VM_VFN_VADDR(((vfn + npages) & vfn_mask)) - 1;
-        if (level == 0) {
-          tracex("iter_visit L1 table %012llx…%012llx 0x%llx [%u] nuse=%u",
-            VM_VFN_VADDR(vfn), last_vaddr, npages, index, pte->nuse);
-        } else {
-          tracex("iter_visit L%u table %012llx…%012llx 0x%llx [%u] nuse=%u",
-            level+1, VM_VFN_VADDR(vfn), last_vaddr, npages, index, pte->nuse);
-        }
-      }
-    #endif
+  // visit sub table
+  vm_table_t* subtable = &ptab[index].table;
+  if ((level < VM_PTAB_LEVELS-1) & (*(u64*)subtable != 0)) {
+    index_vfn <<= VM_PTAB_BITS;
+    if (!vm_map_iter1(callback, userdata, start_vfn, index_vfn, subtable, level+1))
+      return false;
+  }
 
-    bool end = (level == VM_PTAB_LEVELS-1);
+  assert_no_add_overflow(index, index_incr);
+  index += index_incr;
+  vfn += (u64)index_incr * npages;
 
-    if ((end & (vfn < start_vfn)) | ((!end) & (vfn + npages < start_vfn))) {
-      // vfn (or end of table's vfn) is less than start_vfn
-      index++;
-      continue;
-    }
+  u32 end_index = VM_PTAB_LEN;
+
+  // when we are visiting the last table of pages, there is one too many pages at the
+  // end as a result from VFN being offset by (VM_ADDR_MIN/PAGE_SIZE).
+  if (VM_ADDR_MIN > 0) {
+    // branchless version of
+    //   u64 end_vfn = vfn + VM_PTAB_NPAGES(level) - 1;
+    //   if (level == VM_PTAB_LEVELS-1 && end_vfn == VM_VFN_MAX + 1)
+    //     end_index--;
+    end_index -= (
+      (level == VM_PTAB_LEVELS-1) &
+      (vfn + VM_PTAB_NPAGES(level) - 1 == VM_VFN_MAX + 1) );
+  }
+
+  while (index < end_index) {
+    trace_iter(vfn, level, ptab, index);
 
     u32 index_incr = callback(parent, level, ptab, index, vfn, userdata);
-    assert_no_add_overflow(index, index_incr);
     if (index_incr == 0)
       return false;
 
-    // reload pte in case callback created it
-    pte = &ptab[index];
-
-    if (!end & (*(u64*)pte != 0)) {
-      // visit sub table
-      bool cont;
-      if (index == start_index) {
-        u64 ivfn = index_vfn << VM_PTAB_BITS;
-        cont = vm_map_iter1(callback, userdata, start_vfn, ivfn, pte, level+1);
-      } else {
-        cont = vm_map_iter0(callback, userdata, pte, vfn, level+1);
-      }
-      if (!cont)
+    // visit sub table
+    vm_table_t* subtable = &ptab[index].table;
+    if ((level < VM_PTAB_LEVELS-1) & (*(u64*)subtable != 0)) {
+      if (!vm_map_iter0(callback, userdata, subtable, vfn, level+1))
         return false;
     }
 
+    assert_no_add_overflow(index, index_incr);
     index += index_incr;
-    // visit next table
-  } // while (index < VM_PTAB_LEN)
+    vfn += (u64)index_incr * npages;
+  }
 
-  return npages;
+  return true;
 }
 
 
@@ -197,13 +205,12 @@ void vm_map_iter(vm_map_t* map, u64 start_vaddr, vm_map_iter_f* fn, uintptr data
   assertf(start_vaddr >= VM_ADDR_MIN && VM_ADDR_MAX >= start_vaddr,
     "invalid vaddr 0x%llx", start_vaddr);
 
+  trace("iter start 0x%llx (VFN %09llx)", start_vaddr, VM_VFN(start_vaddr));
+
+  vm_table_t parent = { .nuse = map->root_nuse };
+  vm_table_set_ptab(&parent, map->root);
+
   u64 vfn = VM_VFN(start_vaddr);
-
-  trace("iter start 0x%llx (VFN 0x%llx)", start_vaddr, vfn);
-
-  vm_pte_t parent = { .nuse = map->root_nuse };
-  vm_pte_set_outaddr(&parent, map->root);
-
   if (vfn == 0) {
     vm_map_iter0(fn, data, &parent, 0, 0);
   } else {

@@ -1927,7 +1927,7 @@ static rerr_t rsched_loadrom(
 
   // map data pages with backing pages
   trace_vm_map("data", data_vaddr_lo, data_haddr, data_npages);
-  err = vm_map_add(&s->vm_map, &data_vaddr_lo, data_haddr, data_npages, VM_PERM_RW);
+  err = vm_map_add(&s->vm_map, data_vaddr_lo, data_haddr, data_npages, VM_PERM_RW);
   if UNLIKELY(err) {
     dlog("vm_map failed: %s", rerr_str(err));
     vm_map_unlock(&s->vm_map);
@@ -1937,7 +1937,7 @@ static rerr_t rsched_loadrom(
   // map stack pages WITHOUT backing pages
   usize stack_nvpages = stack_npages - stack_nhpages;
   trace_vm_map("stack", stack_vaddr_lo, 0, stack_nvpages);
-  err = vm_map_add(&s->vm_map, &stack_vaddr_lo, 0, stack_nvpages, VM_PERM_RW);
+  err = vm_map_add(&s->vm_map, stack_vaddr_lo, 0, stack_nvpages, VM_PERM_RW);
   if UNLIKELY(err) {
     dlog("vm_map failed: %s", rerr_str(err));
     vm_map_del(&s->vm_map, data_vaddr_lo, data_npages);
@@ -1950,7 +1950,7 @@ static rerr_t rsched_loadrom(
     u64 vaddr = stack_vaddr_lo + stack_nvpages*PAGE_SIZE;
     usize npages = stack_npages - stack_nvpages;
     trace_vm_map("stack", vaddr, stack_haddr, npages);
-    err = vm_map_add(&s->vm_map, &vaddr, stack_haddr, npages, VM_PERM_RW);
+    err = vm_map_add(&s->vm_map, vaddr, stack_haddr, npages, VM_PERM_RW);
     if UNLIKELY(err) {
       dlog("vm_map failed: %s", rerr_str(err));
       vm_map_del(&s->vm_map, data_vaddr_lo, data_npages);

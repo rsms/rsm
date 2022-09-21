@@ -174,10 +174,16 @@ RSM_ASSUME_NONNULL_BEGIN
 // u64 VM_VFN_VADDR(u64 vfn) calculates the virtual page address for vfn
 #define VM_VFN_VADDR(vfn)  ( ((u64)(vfn) + (VM_ADDR_MIN/PAGE_SIZE)) << PAGE_SIZE_BITS )
 
+// u64 VM_BLOCK_VFN(u64 vfn, u32 level) calculates the VFN of a block at level,
+// which includes vfn.
+#define VM_BLOCK_VFN(vfn, level)  ( (vfn) & VM_BLOCK_VFN_MASK(level) )
+#define VM_BLOCK_VFN_MASK(level) \
+  (~0llu ^ ((1llu << ((VM_PTAB_BITS*(VM_PTAB_LEVELS-1))-((level)*VM_PTAB_BITS)))-1))
+
 // u64 VM_PAGE_ADDR(u64 vaddr) calculates the page address of a virtual address
 // e.g. 0xdeadbeef 11011110101011011011111011101111 & (PAGE_SIZE(4096) - 1)
 //    = 0xdeadb000 11011110101011011011000000000000
-#define VM_PAGE_ADDR(vaddr) ((u64)(vaddr) & VM_ADDR_PAGE_MASK)
+#define VM_PAGE_ADDR(vaddr)  ((u64)(vaddr) & VM_ADDR_PAGE_MASK)
 
 // VM_ADDR_OFFSET(u64 vaddr) calculates the page offset of an address.
 // It's the upper PAGE_SIZE_BITS bits of a virtual address.
@@ -197,9 +203,6 @@ RSM_ASSUME_NONNULL_BEGIN
   assert(VM_CACHE_INDEX(vaddr) < VM_CACHE_LEN), \
   &(cache)->entries[VM_CACHE_INDEX(vaddr)] )
 
-// vm_perm_t VM_PTE_PERM(vm_pte_t) returns vm_perm_t of a PTE
-#define VM_PTE_PERM(pte)  ( (*(vm_perm_t*)(pte)) & ((vm_perm_t)VM_PERM_MAX) )
-
 // bool VM_PERM_CHECK(vm_perm_t, vm_perm_t) returns true if hasperm contains all
 // permissions of wantperm.
 #define VM_PERM_CHECK(hasperm, wantperm) \
@@ -218,10 +221,8 @@ enum vm_perm {
   VM_PERM_MAX = VM_PERM_RW, // all bits set
 };
 
-// vm_pte_t - page table entry
-typedef union {
-  // leaf
-  struct {
+// vm_page_t is vm_pte_t for a page
+typedef struct {
   #if RSM_LITTLE_ENDIAN
     // note: permission bits should be 8 in total and match vm_perm_t
     bool  read        : 1; // can read from this page
@@ -231,24 +232,29 @@ typedef union {
     bool  accessed    : 1; // has been accessed
     bool  written     : 1; // has been written to
     u64   type        : 3; // type of page
-
     u64   _reserved   : 3;
 
-    // usize _reserved : 12;
-
-    // outaddr is the host frame number (hfn=haddr>>PAGE_SIZE_BITS).
+    // hfn is the host frame number (hfn=haddr>>PAGE_SIZE_BITS).
     // For branches (page tables) this is the address of the next table or PTE.
     // For leafs (PTEs) this is the mapped host page address.
-    u64 outaddr : 52;
+    u64 hfn : 52;
   #else
     #error no big endian support
   #endif
-  };
-  // branch
-  struct {
-    u32 nuse   : 12; // number of mapped entries in this table
-    u64 ptaddr : 52;
-  };
+} vm_page_t;
+
+// vm_table_t is vm_pte_t for a table
+typedef struct {
+  bool accessed  : 1;  // has been accessed
+  bool _reserved : 1;
+  u32  nuse      : 10; // number of mapped entries in this table (must fit VM_PTAB_LEN)
+  u64  hfn       : 52; // [ptaddr]
+} vm_table_t;
+
+// vm_pte_t - page table entry
+typedef union {
+  vm_page_t page;
+  vm_table_t table;
 } vm_pte_t;
 
 // vm_ptab_t - virtual memory page table of size VM_PTAB_LEN
@@ -318,12 +324,15 @@ static void vm_map_unlock(vm_map_t*);
 static void vm_map_rlock(vm_map_t*);
 static void vm_map_runlock(vm_map_t*);
 
-// vm_map_add maps a range of host pages starting at haddr to a range of virtual pages.
-// If haddr is 0, backing pages are allocated as needed on first access.
-// haddr's address must be aligned to PAGE_SIZE.
-// vaddr does not need to be page aligned; its top PAGE_SIZE_BITS bits are ignored.
+// vm_map_add maps npages pages starting at vaddr.
+// If haddr is not 0, the pages are mapped to the corresponding range of host pages.
+// (I.e. vaddr+N*PAGE_SIZE => haddr+N*PAGE_SIZE.)
+// When haddr is provided, vm_page_t.purgeable=false.
+// If haddr is 0, backing pages are allocated as needed on first access,
+// i.e. vm_page_t.purgeable=true.
+// The top PAGE_SIZE_BITS bits of vaddr and haddr are ignored.
 // map must be locked with vm_map_lock.
-rerr_t vm_map_add(vm_map_t*, u64* vaddr, uintptr haddr, u64 npages, vm_perm_t);
+rerr_t vm_map_add(vm_map_t*, u64 vaddr, uintptr haddr, u64 npages, vm_perm_t);
 
 // vm_map_del deallocates a range of virtual pages starting at vaddr.
 // Callers using caches should call vm_cache_invalidate.
@@ -339,11 +348,11 @@ rerr_t vm_map_findspace(vm_map_t*, u64* vaddr, u64 npages);
 // vm_map_access returns the page table entry of a Virtual Frame Number.
 // map must be locked with at least vm_map_rlock.
 // If isaccess is true, all parent page tables of VFN will be marked as
-// "accessed" by setting vm_pte_t.accessed=true.
-vm_pte_t* nullable vm_map_access(vm_map_t*, u64 vfn, bool isaccess);
+// "accessed" by setting vm_page_t.accessed=true.
+vm_page_t* nullable vm_map_access(vm_map_t*, u64 vfn, bool isaccess);
 
 // vm_map_iter_f is the visitor callback type.
-// - table: pointer to the vm_pte_t representing the current ptab (holds its nuse)
+// - table: pointer to the representing the current ptab (holds its nuse)
 // - level: level of ptab (root is level 0)
 // - ptab:  current page table
 // - index: index of the current pte in ptab, i.e. curr_entry = &ptab[index]
@@ -351,7 +360,7 @@ vm_pte_t* nullable vm_map_access(vm_map_t*, u64 vfn, bool isaccess);
 // - data:  whatever value was provided to vm_map_iter
 // Return number of indices to advance. Return 0 to stop iteration.
 typedef u32(vm_map_iter_f)(
-  vm_pte_t* table, u32 level, vm_ptab_t ptab, u32 index, u64 vfn, uintptr data);
+  vm_table_t* table, u32 level, vm_ptab_t ptab, u32 index, u64 vfn, uintptr data);
 
 // vm_map_iter iterates over a map, calling fn for each page mapping
 // or each unused (pte==0) page table.
@@ -360,15 +369,60 @@ typedef u32(vm_map_iter_f)(
 void vm_map_iter(vm_map_t*, u64 start_vaddr, vm_map_iter_f* fn, uintptr data);
 
 
-// vm_pte_outaddr accesses the vm_pte_t.outaddr pointer of a pte
-inline static void* nullable vm_pte_outaddr(const vm_pte_t* pte) {
-  return (void*)(uintptr)(pte->outaddr << PAGE_SIZE_BITS);
+// vm_page_perm returns vm_perm_t of a PTE
+inline static vm_perm_t vm_page_perm(const vm_page_t* page) {
+  return *(vm_perm_t*)page & ((vm_perm_t)VM_PERM_MAX);
 }
 
-// vm_pte_set_outaddr sets vm_pte_t.outaddr
-inline static void vm_pte_set_outaddr(vm_pte_t* pte, void* nullable outaddr) {
-  pte->outaddr = (u64)(uintptr)outaddr >> PAGE_SIZE_BITS;
+// vm_page_haddr accesses the hfn field of a page as a host address
+inline static u64 vm_page_haddr(const vm_page_t* page) {
+  return page->hfn << PAGE_SIZE_BITS;
 }
+
+// vm_page_set_haddr sets host address of page
+inline static void vm_page_set_haddr(vm_page_t* page, u64 haddr) {
+  page->hfn = haddr >> PAGE_SIZE_BITS;
+}
+
+// vm_table_ptab accesses the ptab; the array of entries, of a table
+inline static vm_ptab_t nullable vm_table_ptab(const vm_table_t* table) {
+  return (void*)(uintptr)(table->hfn << PAGE_SIZE_BITS);
+}
+
+// vm_table_set_ptab sets ptab of table
+inline static void vm_table_set_ptab(vm_table_t* table, vm_ptab_t nullable ptab) {
+  table->hfn = (u64)(uintptr)ptab >> PAGE_SIZE_BITS;
+}
+
+// vm_ptab_page_end_index returns the last ptab index for level==VM_PTAB_LEVELS-1.
+// When we are visiting a table of pages, there is one too many pages at the end
+// as a result from VFN being offset by (VM_ADDR_MIN/PAGE_SIZE).
+inline static u32 vm_ptab_page_end_index(u64 vfn) {
+  u32 end_index = VM_PTAB_LEN;
+  if (VM_ADDR_MIN > 0) {
+    bool islasttab = vfn + VM_PTAB_LEN > (VM_VFN_MAX+1);
+    end_index -= (u32)(VM_ADDR_MIN/PAGE_SIZE) * islasttab;
+  }
+  return end_index;
+}
+
+
+// vm_vfn_ptab_index returns the ptab index at level for vfn
+// E.g. for vfn 0x0000deada:
+//              0000000000 000000011 011110101 011011010
+//   level:          0         1         2         3
+//   index:          0         3        245       218
+inline static u32 vm_vfn_ptab_index(u64 vfn, u32 level) {
+  u32 p = (VM_VFN_BITS - 1u) - (VM_PTAB_BITS * level);
+  return (u32)rsm_getbits(vfn, p, VM_PTAB_BITS);
+}
+
+
+// vm_ptab_alloc allocates a new page table (initialized, ready to be used)
+vm_ptab_t nullable vm_ptab_alloc(rmm_t* mm);
+
+// vm_ptab_free frees a page table previously allocated with the same mm
+void vm_ptab_free(rmm_t* mm, vm_ptab_t);
 
 
 // vm_cache_init initializes a vm_cache_t

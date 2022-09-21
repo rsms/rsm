@@ -236,48 +236,52 @@ static_assert(IS_ALIGN2(STK_SPLIT_LINK_SIZE, STK_ALIGN), "");
 
 static i64 stkmem_grow(EXEC_PARAMS, i64 delta) {
   u64 sp = SP;
-  u64 newsp = sp - (u64)delta;
-
   check(IS_ALIGN2(sp, STK_ALIGN), EX_E_UNALIGNED_STACK, sp, STK_ALIGN);
   check(IS_ALIGN2(delta, STK_ALIGN), EX_E_UNALIGNED_STORE, delta, STK_ALIGN);
   vm_map_t* vm_map = &t->m->s->vm_map;
 
-  // Allocate new stack and split the stack
+  // Allocate new stack
   u64 newsize = ALIGN2((u64)delta, PAGE_SIZE)*2;
+  u64 npages = newsize/PAGE_SIZE;
   rerr_t err;
+
+  assert(IS_ALIGN2(t->stack_lo, PAGE_SIZE));
+
+  dlog("current stack: %012llx-%012llx (%llu pages)",
+    t->stack_lo, t->stack_hi, (t->stack_hi - t->stack_lo)/PAGE_SIZE);
+
   vm_map_lock(vm_map);
 
-  u64 stack_lo = 0;
-  u64 npages = newsize/PAGE_SIZE;
-
-  // Note: we could attempt to allocate a new stack just before the current one.
-  // In practice it will always fail for the main task.
-  // stack_lo = ALIGN2_FLOOR(sp - newsize, PAGE_SIZE);
-  // npages = t->stack_lo - stack_lo;
-
-  // find a free region of virtual memory
-  err = vm_map_findspace(vm_map, &stack_lo, npages);
-  if UNLIKELY(err) {
-    if (err == rerr_nomem)
-      panic("out of memory white trying to grow stack");
-    safecheckf(err==0, "vm_map_findspace: %s", rerr_str(err));
+  // first, attempt to find space just above the current stack
+  u64 stack_lo = t->stack_lo - newsize;
+  err = vm_map_add(vm_map, stack_lo, 0, npages, VM_PERM_RW);
+  if (err) {
+    safecheckf(err == rerr_exists, "vm_map_add %s", rerr_str(err));
+    // region above current stack is not free; find any free region
+    stack_lo = 0;
+    err = vm_map_findspace(vm_map, &stack_lo, npages);
+    if UNLIKELY(err) {
+      if (err == rerr_nomem)
+        panic("out of memory white trying to grow stack");
+      safecheckf(err==0, "vm_map_findspace: %s", rerr_str(err));
+    }
+    dlog("vm_map found free space at %012llx", stack_lo);
+    err = vm_map_add(vm_map, stack_lo, 0, npages, VM_PERM_RW);
+    safecheckf(err==0, "vm_map %s", rerr_str(err));
   }
-  dlog("vm_map found free space at %012llx", stack_lo);
 
-  err = vm_map_add(vm_map, &stack_lo, 0, newsize/PAGE_SIZE, VM_PERM_RW);
   vm_map_unlock(vm_map);
-  safecheckf(err==0, "vm_map %s", rerr_str(err));
 
   // new stack pointer.
   // reserve space on new stack for saving link to previous stack
-  newsp = (stack_lo + newsize) - STK_SPLIT_LINK_SIZE;
+  u64 newsp = (stack_lo + newsize) - STK_SPLIT_LINK_SIZE;
 
   // save previous stack range
   vm_cache_t* vm_cache = m_vm_cache(t->m, VM_PERM_RW);
   u64* newstack = (void*)VM_TRANSLATE(vm_cache, vm_map, newsp, STK_ALIGN);
-  newstack[0] = sp;          // newsp
-  newstack[1] = t->stack_hi; // newsp+8
-  newstack[2] = t->stack_lo; // newsp+16
+  newstack[0] = SP;
+  newstack[1] = t->stack_hi;
+  newstack[2] = t->stack_lo;
 
   // update task with current stack limits (always inside page boundary)
   t->stack_lo = stack_lo;

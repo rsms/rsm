@@ -538,6 +538,16 @@ typedef __builtin_va_list va_list;
   sizeof(u32) < sizeof(z__) ? (u32)MIN((__typeof__(z__))U32_MAX,z__) : (u32)z__; \
 })
 
+// T rsm_getbits(T x, u32 p, u32 n) returns the (right adjusted) n-bit field
+// of x that begins at position p. We assume that bit position 0 is at the right end
+// and that n and p are sensible positive values.
+// For example, rsm_getbits(x, 4, 3) returns the three bits
+// in bit positions 4, 3 and 2, right adjusted.
+// [from K&R, 2nd Ed., pg. 49: get n bits from position p]
+#define rsm_getbits(x, p, n) ( \
+  ((x) >> ((p) + 1u - (n))) & ~(~(__typeof__(x))0 << (n)) \
+)
+
 // kibibyte magnitudes for making code easier to read
 #define KiB 1024lu
 #define MiB 0x100000lu   /* 1024^2 */

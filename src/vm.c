@@ -123,11 +123,11 @@ u64 _vm_cache_miss(vm_cache_t* cache, vm_map_t* map, u64 vaddr, vm_op_t op) {
   // get page table entry for the virtual page address (lookup via VFN)
   assert(!rwmutex_islocked(&map->lock));
   vm_map_rlock(map);
-  vm_pte_t* pte = vm_map_access(map, VM_VFN(vaddr), /*is_access*/true);
+  vm_page_t* page = vm_map_access(map, VM_VFN(vaddr), /*is_access*/true);
   vm_map_runlock(map);
 
   // check if the lookup failed
-  if UNLIKELY(!pte) {
+  if UNLIKELY(!page) {
     panic("invalid address 0x%llx (not mapped)", vaddr);
     return 0;
   }
@@ -136,7 +136,7 @@ u64 _vm_cache_miss(vm_cache_t* cache, vm_map_t* map, u64 vaddr, vm_op_t op) {
   vm_perm_t wantperm = 0;
   wantperm |= (VM_OP_TYPE(op) == VM_OP_LOAD) * VM_PERM_R;
   wantperm |= (VM_OP_TYPE(op) == VM_OP_STORE) * VM_PERM_W;
-  vm_perm_t hasperm = VM_PTE_PERM(pte);
+  vm_perm_t hasperm = vm_page_perm(page);
   if UNLIKELY(!VM_PERM_CHECK(hasperm, wantperm)) {
     trace("wantperm %s not in hasperm %s", vm_perm_str(wantperm), vm_perm_str(hasperm));
     if (VM_OP_TYPE(op) == VM_PERM_R)
@@ -145,16 +145,16 @@ u64 _vm_cache_miss(vm_cache_t* cache, vm_map_t* map, u64 vaddr, vm_op_t op) {
     return 0;
   }
 
-  pte->accessed = true;
-  pte->written |= (VM_OP_TYPE(op) == VM_OP_STORE);
+  page->accessed = true;
+  page->written |= (VM_OP_TYPE(op) == VM_OP_STORE);
 
   // calculate page addresses
-  uintptr hpaddr = (uintptr)(pte->outaddr << PAGE_SIZE_BITS);
+  uintptr hpaddr = (uintptr)vm_page_haddr(page);
   u64 vpaddr = VM_PAGE_ADDR(vaddr);
 
   trace("%s 0x%llx -> %p", __FUNCTION__, vaddr, (void*)hpaddr);
 
-  if (pte->uncacheable)
+  if (page->uncacheable)
     return (u64)hpaddr - vpaddr; // vm_cache_ent_t.haddr_diff
 
   return vm_cache_add(cache, vpaddr, hpaddr);
@@ -263,7 +263,7 @@ static void test_vm() {
 
     void* haddr = assertnotnull( rmm_allocpages(mm, npages) );
     vm_map_lock(map);
-    rerr_t err = vm_map_add(map, &vaddr, (uintptr)haddr, npages, perm);
+    rerr_t err = vm_map_add(map, vaddr, (uintptr)haddr, npages, perm);
     vm_map_unlock(map);
     assertf(err == 0, "vm_map_add: %s", rerr_str(err));
 
@@ -289,9 +289,11 @@ static void test_vm() {
     //VM_LOAD(u32, cache_rw, map, vaddr); // error
 
     // writing to a read-only page fails
+    dlog("—————map");
     vm_map_lock(map);
-    err = vm_map_add(map, &vaddr, 0lu, npages, VM_PERM_R);
+    err = vm_map_add(map, vaddr, 0lu, npages, VM_PERM_R);
     vm_map_unlock(map);
+    dlog("—————access");
     assertf(err == 0, "vm_map_add: %s", rerr_str(err));
     value = VM_LOAD(u32, cache_r, map, vaddr); // ok
     //VM_STORE(u32, cache_rw, map, vaddr, value); // error

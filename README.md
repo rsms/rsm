@@ -1,4 +1,4 @@
-# RSM
+<img src="etc/rsm.svg" alt="RSM" width=96>
 
 RSM is a virtual computer, a form of virtual machine.
 

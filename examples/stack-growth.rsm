@@ -1,0 +1,33 @@
+//!exe2-only  (requires exe engine v2)
+//
+// This demonstrates automatic stack growth.
+// Using the stkmem instruction instead of directly incrementing
+// and decrementing SP prevents stack overflow.
+//
+// stkmem +N allocates N bytes of stack space (decrements SP by N.)
+// If the stack is not large enough for N more bytes,
+// the following steps are taken:
+//   1. Attempt to grow the current stack by mapping enough extra
+//      memory pages "above" (at lower address) the current stack.
+//      If that memory is in use, allocate any region of memory
+//      large enough for the requested stack space and "split" the
+//      stack: essentially forms a linked list of stacks.
+//   3. Finally, update SP to point to the (potentially new) stack
+//      offset by N.
+//
+// stkmem -N deallocates N bytes of stack space (increments SP by N.)
+// If SP drops to a link to a split stack, the current stack is freed
+// and SP is set to the linked "previous" stack.
+//
+// In this example we allocate 2MB which is guaranteed to push SP
+// beyond the initial stack capacity, which is 1MB.
+
+fun main() {
+  stkmem 2097152 // allocate 2MB of stack memory
+
+  // store to the top of the stack
+  R1 = 0xdeadbeefface
+  store R1 SP -8
+
+  stkmem -2097152 // deallocate 2MB of stack memory
+}

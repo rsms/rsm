@@ -45,11 +45,9 @@
   }
   #ifdef TRACE_MEMORY
     #if defined(SCHED_TRACE)
-      #define tracemem(fmt, args...) \
-        _schedtrace(2, "[interp/mem]", fmt " \e[2m(%s:%d)\e[0m", \
-          ##args, __FILE__, __LINE__)
+      #define tracemem(fmt, args...) _schedtrace(2, __FUNCTION__, fmt, ##args)
     #else
-      #define tracemem dlog
+      #define tracemem(fmt, args...) dlog("[mem] " fmt, ##args)
     #endif
   #else
     #define tracemem(...) ((void)0)
@@ -171,10 +169,8 @@ enum execerr_t {
   u64 vaddr__ = (vaddr); \
   u64 value__ = VM_LOAD( \
     TYPE, m_vm_cache((t)->m, VM_PERM_RW), &(t)->m->s->vm_map, vaddr__); \
-  tracemem("LOAD %s 0x%llx (align %lu) => 0x%llx (host 0x%lx)", \
-    #TYPE, vaddr__, _Alignof(TYPE), value__, \
-    VM_TRANSLATE(m_vm_cache((t)->m, VM_PERM_RW), &(t)->m->s->vm_map, \
-      vaddr__, _Alignof(TYPE))); \
+  tracemem("LOAD %s 0x%llx (align %lu) => 0x%llx", \
+    #TYPE, vaddr__, _Alignof(TYPE), value__); \
   value__; \
 })
 
@@ -182,10 +178,8 @@ enum execerr_t {
 #define MSTORE(TYPE, vaddr, value) { \
   u64 vaddr__ = (vaddr); \
   u64 value__ = (value); \
-  tracemem("STORE %s 0x%llx (align %lu) => 0x%llx (host 0x%lx)", \
-    #TYPE, value__, _Alignof(TYPE), vaddr__, \
-    VM_TRANSLATE(m_vm_cache((t)->m, VM_PERM_RW), &(t)->m->s->vm_map, \
-      vaddr__, _Alignof(TYPE))); \
+  tracemem("STORE %s 0x%llx (align %lu) => 0x%llx", \
+    #TYPE, value__, _Alignof(TYPE), vaddr__); \
   VM_STORE( \
     TYPE, m_vm_cache((t)->m, VM_PERM_RW), &(t)->m->s->vm_map, vaddr__, value__); \
 }
@@ -234,42 +228,46 @@ static void push_PC(EXEC_PARAMS) {
 static_assert(IS_ALIGN2(STK_SPLIT_LINK_SIZE, STK_ALIGN), "");
 
 
-static i64 stkmem_grow(EXEC_PARAMS, i64 delta) {
+static i64 stkmem_grow(EXEC_PARAMS, u64 delta) {
   u64 sp = SP;
   check(IS_ALIGN2(sp, STK_ALIGN), EX_E_UNALIGNED_STACK, sp, STK_ALIGN);
   check(IS_ALIGN2(delta, STK_ALIGN), EX_E_UNALIGNED_STORE, delta, STK_ALIGN);
   vm_map_t* vm_map = &t->m->s->vm_map;
 
-  // Allocate new stack
-  u64 newsize = ALIGN2((u64)delta, PAGE_SIZE)*2;
+  // TODO: consider a "better" increment than 2x the required memory
+  u64 newsize = ALIGN2(delta, PAGE_SIZE)*2;
   u64 npages = newsize/PAGE_SIZE;
   rerr_t err;
 
   assert(IS_ALIGN2(t->stack_lo, PAGE_SIZE));
 
-  dlog("current stack: %012llx-%012llx (%llu pages)",
-    t->stack_lo, t->stack_hi, (t->stack_hi - t->stack_lo)/PAGE_SIZE);
-
   vm_map_lock(vm_map);
 
-  // first, attempt to find space just above the current stack
+  // attempt to expand the stack by mapping addresses above the current stack
   u64 stack_lo = t->stack_lo - newsize;
   err = vm_map_add(vm_map, stack_lo, 0, npages, VM_PERM_RW);
-  if (err) {
-    safecheckf(err == rerr_exists, "vm_map_add %s", rerr_str(err));
-    // region above current stack is not free; find any free region
-    stack_lo = 0;
-    err = vm_map_findspace(vm_map, &stack_lo, npages);
-    if UNLIKELY(err) {
-      if (err == rerr_nomem)
-        panic("out of memory white trying to grow stack");
-      safecheckf(err==0, "vm_map_findspace: %s", rerr_str(err));
-    }
-    dlog("vm_map found free space at %012llx", stack_lo);
-    err = vm_map_add(vm_map, stack_lo, 0, npages, VM_PERM_RW);
-    safecheckf(err==0, "vm_map %s", rerr_str(err));
+  if (!err) {
+    vm_map_unlock(vm_map);
+    t->stack_lo = stack_lo;
+    tracemem("stack extended to %012llx-%012llx (%llu pages)",
+      t->stack_lo, t->stack_hi, IDIV_CEIL(t->stack_hi - t->stack_lo, PAGE_SIZE));
+    return sp - delta;
   }
 
+  // vm_map_add should have failed with rerr_exists
+  safecheckf(err == rerr_exists, "vm_map_add %s", rerr_str(err));
+
+  // region above current stack is not free
+  // find any free region and split the stack
+  stack_lo = 0;
+  err = vm_map_findspace(vm_map, &stack_lo, npages);
+  if UNLIKELY(err) {
+    if (err == rerr_nomem)
+      panic("out of memory white trying to grow stack");
+    safecheckf(err==0, "vm_map_findspace: %s", rerr_str(err));
+  }
+  err = vm_map_add(vm_map, stack_lo, 0, npages, VM_PERM_RW);
+  safecheckf(err==0, "vm_map %s", rerr_str(err));
   vm_map_unlock(vm_map);
 
   // new stack pointer.
@@ -296,9 +294,9 @@ static i64 stkmem_grow(EXEC_PARAMS, i64 delta) {
   return newsp - delta;
 }
 
-static i64 stkmem_shrink(EXEC_PARAMS, i64 delta) {
+static i64 stkmem_unlink(EXEC_PARAMS, u64 delta) {
   // end of a split stack -- unmap it & unlink
-  u64 sp = SP + (u64)-delta;
+  u64 sp = SP + delta;
 
   // unmap current stack being retired
   vm_map_t* vm_map = &t->m->s->vm_map;
@@ -324,36 +322,30 @@ static i64 stkmem_shrink(EXEC_PARAMS, i64 delta) {
   return newsp;
 }
 
-static i64 stkmem_alloc(EXEC_PARAMS, i64 delta) {
-  u64 sp = SP;
-  u64 newsp;
-  if (check_sub_overflow(sp, (u64)delta, &newsp) || UNLIKELY(newsp < t->stack_lo)) {
-    // Not enough space in current stack
-    return stkmem_grow(EXEC_ARGS, delta);
-  }
-  return newsp;
-}
-
-static i64 stkmem_free(EXEC_PARAMS, i64 delta) {
-  u64 sp = SP;
-  u64 newsp;
-  if (check_add_overflow(sp, (u64)-delta, &newsp) || UNLIKELY(newsp > t->stack_hi)) {
-    dlog("unbalanced stkmem calls (overflow from stkmem %lld)", delta);
-    execerr(EX_E_STACK_OVERFLOW, sp, (u64)-delta);
-    return sp;
-  }
-  if UNLIKELY(newsp == t->stack_hi && t->nsplitstack > 0) {
-    // end of a split stack -- unmap it & unlink
-    return stkmem_shrink(EXEC_ARGS, delta);
-  }
-  return newsp;
-}
-
 // stkmem returns new SP with delta added
 static i64 stkmem(EXEC_PARAMS, i64 delta) {
-  if (delta < 0)
-    return stkmem_free(EXEC_ARGS, delta);
-  return stkmem_alloc(EXEC_ARGS, delta);
+  u64 sp = SP;
+  u64 newsp;
+  if (delta < 0) {
+    // stkmem -N -- shrink stack (increment sp)
+    assert(IS_ALIGN2((u64)-delta, STK_ALIGN));
+    if (check_add_overflow(sp, (u64)-delta, &newsp) || UNLIKELY(newsp > t->stack_hi)) {
+      dlog("unbalanced stkmem calls (overflow from stkmem %lld)", delta);
+      execerr(EX_E_STACK_OVERFLOW, sp, (u64)-delta);
+      return sp;
+    }
+    // if we reached end of a split stack, unlink it
+    if UNLIKELY(newsp == t->stack_hi && t->nsplitstack > 0)
+      return stkmem_unlink(EXEC_ARGS, (u64)-delta);
+  } else {
+    // stkmem +N -- grow stack (decrement sp)
+    assert(IS_ALIGN2((u64)delta, STK_ALIGN));
+    if (check_sub_overflow(sp, (u64)delta, &newsp) || UNLIKELY(newsp < t->stack_lo)) {
+      // Not enough space in current stack
+      return stkmem_grow(EXEC_ARGS, (u64)delta);
+    }
+  }
+  return newsp;
 }
 
 // —————————— I/O

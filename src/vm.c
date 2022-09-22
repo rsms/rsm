@@ -289,11 +289,9 @@ static void test_vm() {
     //VM_LOAD(u32, cache_rw, map, vaddr); // error
 
     // writing to a read-only page fails
-    dlog("—————map");
     vm_map_lock(map);
     err = vm_map_add(map, vaddr, 0lu, npages, VM_PERM_R);
     vm_map_unlock(map);
-    dlog("—————access");
     assertf(err == 0, "vm_map_add: %s", rerr_str(err));
     value = VM_LOAD(u32, cache_r, map, vaddr); // ok
     //VM_STORE(u32, cache_rw, map, vaddr, value); // error

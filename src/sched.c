@@ -1809,7 +1809,7 @@ static void dlog_memory_map(
 
   #define SEG(name, haddr, hsize, vaddr, vaddr_hi) { \
     if ((vaddr_hi) - (vaddr) == 0 && hsize > 0) { \
-      log("  %-7s  (not mapped)                     0  %012lx-%012lx %8zu", \
+      log("  %-7s  (not mapped)                     0  %012lx…%012lx %8zu", \
         (name), \
         (haddr), ((haddr) + (hsize))-1, (hsize)); \
     } else if ((vaddr_hi) - (vaddr) == 0) { \
@@ -1817,7 +1817,7 @@ static void dlog_memory_map(
         (name), \
         (hsize)); \
     } else { \
-      log("  %-7s  %012llx-%012llx %8llu  %012lx-%012lx %8zu", \
+      log("  %-7s  %012llx…%012llx %8llu  %012lx…%012lx %8zu", \
         (name), \
         (vaddr), (vaddr_hi)-1, ((vaddr_hi) - (vaddr)), \
         (haddr), ((haddr) + (hsize))-1, (hsize)); \

@@ -1,0 +1,190 @@
+---
+layout: simple2
+title: "Transcript of RSM Episode 6"
+---
+
+<h1>{{page.title}}</h1>
+<p><a href="./">RSM project page</a></p>
+<p>
+<a class="time" name="t6.15" href="#t6.15">00:06</a> the part that parses our little assembly language<br>
+<a class="time" name="t11.589" href="#t11.589">00:11</a> and builds a virtual machine a set of virtual machine<br>
+<a class="time" name="t18.55" href="#t18.55">00:18</a> instructions so we started out by just filling up a an array in memory with<br>
+<a class="time" name="t23.349" href="#t23.349">00:23</a> just the actual you know instructions here right<br>
+<a class="time" name="t28.15" href="#t28.15">00:28</a> the next thing we did was we implemented a formatter so that we can see the<br>
+<a class="time" name="t33.11" href="#t33.11">00:33</a> output of them let's print this out or sort of the<br>
+<a class="time" name="t37.75" href="#t37.75">00:37</a> the state of it and so to speak what the computer sees and then after that we built an interpreter or evaluator or whatever<br>
+<a class="time" name="t44.79" href="#t44.79">00:44</a> what i call that the the thing that actually like executes<br>
+<a class="time" name="t50.549" href="#t50.549">00:50</a> the instructions in a virtual machine and then we get to a point where it starts<br>
+<a class="time" name="t55.11" href="#t55.11">00:55</a> getting kind of kind of janky to like write<br>
+<a class="time" name="t58.95" href="#t58.95">00:58</a> programs like this and compile them into the program it would be nice if we can write them sort of like this<br>
+<a class="time" name="t66.39" href="#t66.39">01:06</a> like this text it is probably hard to see so let's paste that to here oops<br>
+<a class="time" name="t72.07" href="#t72.07">01:12</a> um and remove that okay so it'd be nice if<br>
+<a class="time" name="t76.95" href="#t76.95">01:16</a> we can write code it kind of looks like this<br>
+<a class="time" name="t81.429" href="#t81.429">01:21</a> and to begin with we'll just gonna explicitly name the arguments but eventually as we were talking about an earlier part we'll be<br>
+<a class="time" name="t90.069" href="#t90.069">01:30</a> able to use any names here and have the the<br>
+<a class="time" name="t95.03" href="#t95.03">01:35</a> assembler allocate reducers for us but we're not going to get to that just now but a little bit later okay so this is the goal to be able to write something like this and then for a little parser to uh<br>
+<a class="time" name="t107.749" href="#t107.749">01:47</a> to parse this and to build uh these instructions for us that we can<br>
+<a class="time" name="t112.95" href="#t112.95">01:52</a> unrun and that way we can give you know we can<br>
+<a class="time" name="t117.429" href="#t117.429">01:57</a> compile this little program and then we can just give it some text<br>
+<a class="time" name="t122.709" href="#t122.709">02:02</a> and it can just kind of run it so yesterday i uh started working on a<br>
+<a class="time" name="t128.55" href="#t128.55">02:08</a> simple parser that's what we'll be working on today so first off a couple of tokens<br>
+<a class="time" name="t134.71" href="#t134.71">02:14</a> actually i should give a little bit overview perhaps of the of the structure<br>
+<a class="time" name="t139.99" href="#t139.99">02:19</a> of these things and so um the first of the goal for the assembler<br>
+<a class="time" name="t150.71" href="#t150.71">02:30</a> one scan scan the input<br>
+<a class="time" name="t158.79" href="#t158.79">02:38</a> for uh tokens just looking into this keyboard<br>
+<a class="time" name="t163.75" href="#t163.75">02:43</a> scan name for tokens the next thing that it does is that it<br>
+<a class="time" name="t169.27" href="#t169.27">02:49</a> parses the semantic of<br>
+<a class="time" name="t176.63" href="#t176.63">02:56</a> those tokens right so that becomes some sort of ast and after that it generates<br>
+<a class="time" name="t189.19" href="#t189.19">03:09</a> it actually it probably like checks it shakes checks that the um<br>
+<a class="time" name="t196.949" href="#t196.949">03:16</a> esd or whatever is valid right like you know if you<br>
+<a class="time" name="t201.99" href="#t201.99">03:21</a> like types and stuff like that uh it won't be very complicated since or some language is very simple and finally it<br>
+<a class="time" name="t210.39" href="#t210.39">03:30</a> generates code right or vm instructions that is and eventually constants and stuff like that okay so that is what the assembler does<br>
+<a class="time" name="t222.789" href="#t222.789">03:42</a> so far i've implemented this part and we can have a look at that and then the next thing we're going to do is uh<br>
+<a class="time" name="t229.91" href="#t229.91">03:49</a> to parse the to assign meaning to these tokens right<br>
+<a class="time" name="t236" href="#t236">03:56</a> okay [Applause] so first off here is a<br>
+<a class="time" name="t244.149" href="#t244.149">04:04</a> definition of all the different tokens that might occur in the source text<br>
+<a class="time" name="t249.91" href="#t249.91">04:09</a> and here which so this becomes an idiom just off to here you can see it at the end here's him right<br>
+<a class="time" name="t254.71" href="#t254.71">04:14</a> so and here is the um the end of the input stream<br>
+<a class="time" name="t260.87" href="#t260.87">04:20</a> token so we'll we'll see in a minute here while that is useful anyhow<br>
+<a class="time" name="t267.909" href="#t267.909">04:27</a> that's what that is this one says that this token is a comment and comments<br>
+<a class="time" name="t272.55" href="#t272.55">04:32</a> in the in the syntax that i've come up with so far is<br>
+<a class="time" name="t277.03" href="#t277.03">04:37</a> slash kind of like the the line comments of c and then yeah like what is like and then we have a couple of simple<br>
+<a class="time" name="t288.469" href="#t288.469">04:48</a> tokens left parenthesis right parenthesis semicolon<br>
+<a class="time" name="t293.43" href="#t293.43">04:53</a> um equals slash minus there will be more of these here later right like plus and stuff like that then we have uh names and these are<br>
+<a class="time" name="t301.83" href="#t301.83">05:01</a> things that you know these tokens have um so there's some set of bytes or some integer value<br>
+<a class="time" name="t309.43" href="#t309.43">05:09</a> associated with these so i'll label it something that kind of looks like this you know it's some some<br>
+<a class="time" name="t315.59" href="#t315.59">05:15</a> name and a colon uh a register something that looks like this is a capital r with a number um or capital f with a number<br>
+<a class="time" name="t323.51" href="#t323.51">05:23</a> and anything else that doesn't match these things is just some symbolic name<br>
+<a class="time" name="t328.469" href="#t328.469">05:28</a> um and this is how i like to use right parsers<br>
+<a class="time" name="t333.43" href="#t333.43">05:33</a> i'll start with something like like this<br>
+<a class="time" name="t339.029" href="#t339.029">05:39</a> something like this where there is a end of input token<br>
+<a class="time" name="t343.83" href="#t343.83">05:43</a> usually there's not a common token ignore comments but and then um just uh yes the very few basic things<br>
+<a class="time" name="t351.43" href="#t351.43">05:51</a> that i need and that's sort of like a catch-all that's like a symbolic like um<br>
+<a class="time" name="t358.15" href="#t358.15">05:58</a> a name if you wanted or identifier or whatever you want to call it sort of like anything that that doesn't parses<br>
+<a class="time" name="t365.029" href="#t365.029">06:05</a> these things will be treated as a name so uh yes i'm doing what i did there so<br>
+<a class="time" name="t372.309" href="#t372.309">06:12</a> uh the the the symbol token that is what<br>
+<a class="time" name="t377.67" href="#t377.67">06:17</a> most things that got you know that doesn't have specific syntax that is going to become patterns are going to become a symbol<br>
+<a class="time" name="t386.95" href="#t386.95">06:26</a> then we have literal numbers these are sort of like you know you just type something like this by the way if it's not apparent each of<br>
+<a class="time" name="t394.39" href="#t394.39">06:34</a> these tokens have a little example next to them just to to make it easy to remember what<br>
+<a class="time" name="t401.43" href="#t401.43">06:41</a> they what they represent so we want to be able to use you know write<br>
+<a class="time" name="t405.029" href="#t405.029">06:45</a> one two three in our search code right through to mean like the number one two three um<br>
+<a class="time" name="t411.99" href="#t411.99">06:51</a> and uh it's also possible to write a there are three<br>
+<a class="time" name="t419.99" href="#t419.99">06:59</a> uh bases that i currently support it's pretty easy to add other support for other bases but these are the ones that<br>
+<a class="time" name="t425.749" href="#t425.749">07:05</a> i think i'll need or want so base two zero b is the prefix<br>
+<a class="time" name="t430.629" href="#t430.629">07:10</a> ones and zeros base 10 no prefix is decimal<br>
+<a class="time" name="t438.55" href="#t438.55">07:18</a> and base 16 hexadecimal crx or capital or lowercase both of these okay<br>
+<a class="time" name="t441.83" href="#t441.83">07:21</a> um and and all of these<br>
+<a class="time" name="t446.23" href="#t446.23">07:26</a> can accept a a negative sign at the at the beginning and the scanner will treat them<br>
+<a class="time" name="t455.43" href="#t455.43">07:35</a> differently if they do for example you know overflow shaking of the value<br>
+<a class="time" name="t459.83" href="#t459.83">07:39</a> so what's and then we'll follow here it's just keywords so these are things that are that parse the symbols<br>
+<a class="time" name="t468.629" href="#t468.629">07:48</a> and then we'll be like hey wait a second fun is actually like a keyword called<br>
+<a class="time" name="t473.909" href="#t473.909">07:53</a> you know function definition keyword and i 16 right is a<br>
+<a class="time" name="t479.51" href="#t479.51">07:59</a> also keyword i 16 keyword for the type i 16. uh just putting them here makes it like really easy to play around with these things because never ever<br>
+<a class="time" name="t488.71" href="#t488.71">08:08</a> have uh have i put something like this together and it just right on the on the first try so we're definitely gonna have to change this it's nice to set this up to<br>
+<a class="time" name="t496.39" href="#t496.39">08:16</a> make okay so let's let's have a look at the<br>
+<a class="time" name="t504.15" href="#t504.15">08:24</a> the scanner the part that's that scans the input so we go to the bottom here here is uh<br>
+<a class="time" name="t509.589" href="#t509.589">08:29</a> the the main function the entry here that is<br>
+<a class="time" name="t515.269" href="#t515.269">08:35</a> the assembly function assemble it takes a destination output<br>
+<a class="time" name="t520.79" href="#t520.79">08:40</a> array of instructions uh the capacity of that array<br>
+<a class="time" name="t526.63" href="#t526.63">08:46</a> and then it takes the input source as just a a currently it's just a um<br>
+<a class="time" name="t534.47" href="#t534.47">08:54</a> zero terminated like a case c string um but it then the first thing we do is just call the parse function so remember like the there are four stages to this the first one is the scanning the tokens and parse<br>
+<a class="time" name="t549.35" href="#t549.35">09:09</a> the semantic meaning of those tokens and we got to do that yes one go this is not in a more complicated language might<br>
+<a class="time" name="t555.75" href="#t555.75">09:15</a> separate the two um but in this case we just kind of sort of<br>
+<a class="time" name="t561.19" href="#t561.19">09:21</a> mix them together because it's a simple syntax so the first thing we do is just to do that parse and eventually we'll do you<br>
+<a class="time" name="t569.03" href="#t569.03">09:29</a> know analysis to check for things so to do analysis<br>
+<a class="time" name="t576.389" href="#t576.389">09:36</a> and then we'll we'll do cogen code narration<br>
+<a class="time" name="t582.47" href="#t582.47">09:42</a> so the parse function starts out by just allocating a bit of state it allocates<br>
+<a class="time" name="t585.75" href="#t585.75">09:45</a> and all the stack here and press the pointer uh the the parse state we have here<br>
+<a class="time" name="t592.71" href="#t592.71">09:52</a> this is uh data that will uh mostly change as the<br>
+<a class="time" name="t598.15" href="#t598.15">09:58</a> scanner and parser as we're i'm just gonna say parsing as we're parsing the<br>
+<a class="time" name="t602.949" href="#t602.949">10:02</a> input these things are changing here's a cursor to the uh the current slash next<br>
+<a class="time" name="t608.63" href="#t608.63">10:08</a> byte that we're looking at in the input stream this is tells us when the input<br>
+<a class="time" name="t613.509" href="#t613.509">10:13</a> stream actually ends this is the beginning of the current token that we just parsed<br>
+<a class="time" name="t619.269" href="#t619.269">10:19</a> this is the beginning of the current line and from this we can compute the uh<br>
+<a class="time" name="t623.67" href="#t623.67">10:23</a> the column we're gonna have to keep that separate<br>
+<a class="time" name="t628.23" href="#t628.23">10:28</a> um oh well this could be done in two ways this is usually how to do it it just allows for like indentation sensitive syntax and stuff to implement<br>
+<a class="time" name="t635.91" href="#t635.91">10:35</a> it this way uh this is the line number it starts with one and it counts up every time we encounter a<br>
+<a class="time" name="t643.35" href="#t643.35">10:43</a> line feed then we have a the current token and<br>
+<a class="time" name="t647.829" href="#t647.829">10:47</a> that's one of these constants that we looked at up here is one of these that is the the token that we just parsed or scanned<br>
+<a class="time" name="t658.87" href="#t658.87">10:58</a> this is a flag that says are we going to insert a synthetic semicolon token or<br>
+<a class="time" name="t664.87" href="#t664.87">11:04</a> not this is a really neat trick that i've learned from the go compiler<br>
+<a class="time" name="t669.509" href="#t669.509">11:09</a> it allows us to write code that can<br>
+<a class="time" name="t674.15" href="#t674.15">11:14</a> have statements separated either by line breaks or by semicolons<br>
+<a class="time" name="t679.67" href="#t679.67">11:19</a> and you can kind of intermix that in a very deterministic and easy parse way it's<br>
+<a class="time" name="t685.91" href="#t685.91">11:25</a> not like javascript so uh so this is uh i i like this word for<br>
+<a class="time" name="t692.71" href="#t692.71">11:32</a> anything anyhow so this is going to just be set to true depending on the type of<br>
+<a class="time" name="t697.35" href="#t697.35">11:37</a> token that we scan so if we scan someone like a plus token it's going to be false because i expect<br>
+<a class="time" name="t703.19" href="#t703.19">11:43</a> something to come after plus but if you scan something like a number electoral or a name or a symbol it'll be set to true and if we then<br>
+<a class="time" name="t712.389" href="#t712.389">11:52</a> encounter a new line we're going to use you know kind of tell the parser that's like yeah there's<br>
+<a class="time" name="t719.91" href="#t719.91">11:59</a> a semicolon here although it isn't this flag is is specifically for parsing<br>
+<a class="time" name="t724.949" href="#t724.949">12:04</a> numbers this says if the uh the number that we're where he has parsed if that's negative and we have a<br>
+<a class="time" name="t733.19" href="#t733.19">12:13</a> number here for the value of a number that we just parsed<br>
+<a class="time" name="t737.829" href="#t737.829">12:17</a> or our parsing and finally we have just a uh an error sort of message so this is to not know<br>
+<a class="time" name="t749.829" href="#t749.829">12:29</a> it's not it's not a very complicated error handling we need here so this is going to be enough at least for now<br>
+<a class="time" name="t756.069" href="#t756.069">12:36</a> okay so back to the parse function so we set that up uh our par state here<br>
+<a class="time" name="t762.389" href="#t762.389">12:42</a> we set the cursor the input cursor to the the source text the beginning of it we set the end to the source text<br>
+<a class="time" name="t770.389" href="#t770.389">12:50</a> uh to the you know to the first to the address just after the source states<br>
+<a class="time" name="t776.55" href="#t776.55">12:56</a> and in this case remember we are starting out we're not really taking files as inputs just yet when we do we'll add like a you know a size<br>
+<a class="time" name="t784.389" href="#t784.389">13:04</a> argument here but for now we're just taking a c string so this will use string line here<br>
+<a class="time" name="t790.87" href="#t790.87">13:10</a> we set a blind start uh this start of the first line is the<br>
+<a class="time" name="t795.35" href="#t795.35">13:15</a> you know this is start of the input the we initialize line number two to one<br>
+<a class="time" name="t800.47" href="#t800.47">13:20</a> if line numbers were zero initialized we can just drop that since you know<br>
+<a class="time" name="t805.269" href="#t805.269">13:25</a> in c at least c11 then any unknown numbers here would be zero<br>
+<a class="time" name="t811.19" href="#t811.19">13:31</a> and uh here's our main scanning loop so we'll be we'll be adding to this and doing some parsing in<br>
+<a class="time" name="t816.629" href="#t816.629">13:36</a> here and currently there's a function that's defined just above here let me bring that into you it's the log parse state and this<br>
+<a class="time" name="t829.03" href="#t829.03">13:49</a> function up here it's used for is for development purposes<br>
+<a class="time" name="t833.269" href="#t833.269">13:53</a> this is the one that if we let's run i think my computer is starting a little<br>
+<a class="time" name="t840.629" href="#t840.629">14:00</a> bit it looks like linking is taking a while um<br>
+<a class="time" name="t845.67" href="#t845.67">14:05</a> so this function just prints out the the tokens that we're seeing<br>
+<a class="time" name="t850.47" href="#t850.47">14:10</a> so question mark here means that i'm gonna stop somewhere<br>
+<a class="time" name="t855.59" href="#t855.59">14:15</a> oh look at that each<br>
+<a class="time" name="t859.35" href="#t859.35">14:19</a> keyword token okay there we go um so we are scanning a token and we're we<br>
+<a class="time" name="t867.829" href="#t867.829">14:27</a> keep scanning for the next token so we say hey scan the next token<br>
+<a class="time" name="t873.11" href="#t873.11">14:33</a> and unless that token was the tn token so<br>
+<a class="time" name="t878.069" href="#t878.069">14:38</a> this is the end of input stream print it and then scan another one<br>
+<a class="time" name="t881.99" href="#t881.99">14:41</a> right so we just keep going so let me show you<br>
+<a class="time" name="t891.35" href="#t891.35">14:51</a> i'm gonna let's copy this in here so we can have a look at that in our parse um kids upload that<br>
+<a class="time" name="t901.03" href="#t901.03">15:01</a> i was just playing around with some let's do test things out<br>
+<a class="time" name="t910.389" href="#t910.389">15:10</a> before we start this video okay so this is the this is the<br>
+<a class="time" name="t915.35" href="#t915.35">15:15</a> currently built that's its source so first we we scan fun which is a<br>
+<a class="time" name="t921.59" href="#t921.59">15:21</a> keyword so we get keyword function line one column one<br>
+<a class="time" name="t925.59" href="#t925.59">15:25</a> then we get a name sim a symbol whatever um and that's<br>
+<a class="time" name="t931.91" href="#t931.91">15:31</a> factorial right and we get the parentheses here start parentheses and<br>
+<a class="time" name="t935.99" href="#t935.99">15:35</a> parentheses and then we got a keyword i32<br>
+<a class="time" name="t942.629" href="#t942.629">15:42</a> uh and we get another keyword i32 and now we see here now we got our special um<br>
+<a class="time" name="t948.949" href="#t948.949">15:48</a> magical semi colon generated from uh yes the line break<br>
+<a class="time" name="t953.43" href="#t953.43">15:53</a> here next thing we are label<br>
+<a class="time" name="t957.749" href="#t957.749">15:57</a> we don't get a semicolon after the label so here's a condition where<br>
+<a class="time" name="t962.069" href="#t962.069">16:02</a> you know uh you know you can you can just do this it's just as valid<br>
+<a class="time" name="t966.79" href="#t966.79">16:06</a> and next you know we get a register<br>
+<a class="time" name="t974.069" href="#t974.069">16:14</a> so a capital r as i mentioned earlier is a i was debating a little bit about maybe<br>
+<a class="time" name="t984.949" href="#t984.949">16:24</a> she used something else like dollar for registers or whatever but<br>
+<a class="time" name="t989.91" href="#t989.91">16:29</a> if anyone comes here or familiar with other assemblies then dollar usually has<br>
+<a class="time" name="t994.15" href="#t994.15">16:34</a> a different meaning like literal or something like that so you know uh let's keep it simple like<br>
+<a class="time" name="t1000.23" href="#t1000.23">16:40</a> you know if you really need to call a local like r something use lowercase or<br>
+<a class="time" name="t1005.269" href="#t1005.269">16:45</a> like any other character started with it's gonna be fine um so we have a register and it names the register and we can see in this case we have some extra information that we printed out here so here we have we've interpreted this number um as an actual number and we checked that we checked the balance of that number<br>
+<a class="time" name="t1025.11" href="#t1025.11">17:05</a> two and now we can have a look at the the error here so let's say that we we name a register that's too large<br>
+<a class="time" name="t1031.75" href="#t1031.75">17:11</a> then we run this and it's going to say on line three column five<br>
+<a class="time" name="t1036.47" href="#t1036.47">17:16</a> we have an invalid register so line three column five right right<br>
+<a class="time" name="t1042.549" href="#t1042.549">17:22</a> here this isn't a valid register 199 that doesn't that reduce doesn't if exist um same thing if we like do something like this it's also like yeah that's not a number but in that case<br>
+<a class="time" name="t1053.35" href="#t1053.35">17:33</a> we're not the detail about the error message really we only care about that this is in the value register<br>
+<a class="time" name="t1060.789" href="#t1060.789">17:40</a> uh and then you know it keeps going here i'm just testing uh just making sure<br>
+<a class="time" name="t1066.549" href="#t1066.549">17:46</a> that the unicode uh sorry the utf-8 validator is like okay it's not a<br>
+<a class="time" name="t1070.71" href="#t1070.71">17:50</a> perfect validator but it's it's just something fun that i did last night just to make sure that um it's really<br>
+<a class="time" name="t1076.71" href="#t1076.71">17:56</a> dumb actually and again it's not it's not super reliable but it's<br>
+<a class="time" name="t1081.909" href="#t1081.909">18:01</a> okay this thing is like you know eats some utf-8 sequences<br>
+<a class="time" name="t1087.75" href="#t1087.75">18:07</a> uh when it's scanning a symbol so here's my i'm using my favorite<br>
+<a class="time" name="t1092.87" href="#t1092.87">18:12</a> um example uh that has a serial joiner here<br>
+<a class="time" name="t1098.31" href="#t1098.31">18:18</a> somewhere um so it's a uh it's the emoji for like woman and then<br>
+<a class="time" name="t1106.47" href="#t1106.47">18:26</a> it's a skin tone modifier five and then zero would join her and then we<br>
+<a class="time" name="t1110.87" href="#t1110.87">18:30</a> have a um let's just start<br>
+<a class="time" name="t1114.07" href="#t1114.07">18:34</a> so yeah and then we have a um<br>
+<a class="time" name="t1120.47" href="#t1120.47">18:40</a> rocket and that becomes woman astronaut with skin tone modified five<br>
+<a class="time" name="t1125.27" href="#t1125.27">18:45</a> woman astronaut uh so that's what we're seeing over here slowly mode here and now we just got return you know and<br>
+<a class="time" name="t1132.63" href="#t1132.63">18:52</a> and our real function i'm just keeping it small knight is to test things out like this is obviously not like valid syntax but we'll get to that<br>
+<a class="time" name="t1141.83" href="#t1141.83">19:01</a> the real program that we're gonna parse is is more like this right it has some<br>
+<a class="time" name="t1146.47" href="#t1146.47">19:06</a> some actually uh meaningful stuff in it<br>
+<a class="time" name="t1152.95" href="#t1152.95">19:12</a> so uh yeah that's that's what we are now i'm going to do a<br>
+<a class="time" name="t1158.39" href="#t1158.39">19:18</a> separate video when i'm working on implementing the parser<br>
+<a class="time" name="t1163.19" href="#t1163.19">19:23</a> so here that's the summary of where we are and how things work<br>
+</p>

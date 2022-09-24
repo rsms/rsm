@@ -1,0 +1,473 @@
+---
+layout: simple2
+title: "Transcript of RSM Episode 4"
+---
+
+<h1>{{page.title}}</h1>
+<p><a href="./">RSM project page</a></p>
+<p>
+<a class="time" name="t1.589" href="#t1.589">00:01</a> fourth part third part one two and three you can<br>
+<a class="time" name="t5.67" href="#t5.67">00:05</a> find on the youtube channel there's also a webpage on my homepage that you can go<br>
+<a class="time" name="t8.79" href="#t8.79">00:08</a> to um that that has all the videos you can<br>
+<a class="time" name="t12.23" href="#t12.23">00:12</a> download the videos if you wanna watch them offline okay so where we left off the the last<br>
+<a class="time" name="t16.87" href="#t16.87">00:16</a> time kind of wrapping up the instruction<br>
+<a class="time" name="t25.349" href="#t25.349">00:25</a> encoding for this this um kind of virtual machine instructions<br>
+<a class="time" name="t31.349" href="#t31.349">00:31</a> uh and what i'm going to work on now in this fourth part is<br>
+<a class="time" name="t35.51" href="#t35.51">00:35</a> to recap sorry no work on first i'm going to recap a little bit the changes that i made since the the third part this is i don't know<br>
+<a class="time" name="t44.069" href="#t44.069">00:44</a> 15 hours to go or something like that it's a couple of small changes and then we're going to have a look at<br>
+<a class="time" name="t50.229" href="#t50.229">00:50</a> uh three different ways by which we can<br>
+<a class="time" name="t55.67" href="#t55.67">00:55</a> evaluate or execute um the this code right sort of like the actual virtual machine that kind of runs the code<br>
+<a class="time" name="t62.069" href="#t62.069">01:02</a> so i hope that sounds good i'm going to have a little eye on the shot here<br>
+<a class="time" name="t68.789" href="#t68.789">01:08</a> there are thoughts on dino yeah you know it's super cool it's called a it has this function where you can just kind of bundle things together into a portable<br>
+<a class="time" name="t77.03" href="#t77.03">01:17</a> ish executable it's kind of cool um let's see stream looks good thank you will this be a regular thing yeah<br>
+<a class="time" name="t92.31" href="#t92.31">01:32</a> maybe it will no matter the situation you know at home uh it's just nice to be<br>
+<a class="time" name="t95.429" href="#t95.429">01:35</a> able to you know to speak with another office is<br>
+<a class="time" name="t98.95" href="#t98.95">01:38</a> usually in there so it's a little awkward to you know talk in the middle of the day if there's not a person here having meetings and such<br>
+<a class="time" name="t105.91" href="#t105.91">01:45</a> um some more love for sublime that's cool<br>
+<a class="time" name="t111.27000000000001" href="#t111.27000000000001">01:51</a> someone regretting up in big sur uh i hope i said it right yeah it is mono i<br>
+<a class="time" name="t127.67" href="#t127.67">02:07</a> love it i use it everywhere from a lot of space text now um it's super show<br>
+<a class="time" name="t132.309" href="#t132.309">02:12</a> okay look um i wish you guys can that we can talk with each other i think it's awkward that's like this text chat but you know<br>
+<a class="time" name="t141.43" href="#t141.43">02:21</a> it is what it is part four what is what have i done uh since part<br>
+<a class="time" name="t146.869" href="#t146.869">02:26</a> three so this project is about coming up with this little um computer<br>
+<a class="time" name="t153.43" href="#t153.43">02:33</a> right or this virtual computer a little little language for it<br>
+<a class="time" name="t157.50900000000001" href="#t157.50900000000001">02:37</a> a little assembly language for it little virtual machine you can run it something that's kind of portable um and just kind of quickly reiterate the<br>
+<a class="time" name="t165.82999999999998" href="#t165.82999999999998">02:45</a> project goals here uh primarily it's just something i want<br>
+<a class="time" name="t169.589" href="#t169.589">02:49</a> to do because i i think it's it's going to be fun and i want to you know learn<br>
+<a class="time" name="t173.35" href="#t173.35">02:53</a> stuff uh secondly i hope it can be a sort of<br>
+<a class="time" name="t177.75" href="#t177.75">02:57</a> substrate um sort of like a foundation that i can<br>
+<a class="time" name="t181.75" href="#t181.75">03:01</a> build other things on like i enjoy making like programming languages and compilers and stuff like that and there's usually a point where you want to generate machine code or you want to<br>
+<a class="time" name="t190.22899999999998" href="#t190.22899999999998">03:10</a> generate some some sort of target code like webassembly or whatever um and that can get kind of meaty um it's<br>
+<a class="time" name="t197.50900000000001" href="#t197.50900000000001">03:17</a> really cool if this could just be one of those targets so you just make a little thing anyhow and in<br>
+<a class="time" name="t204.55" href="#t204.55">03:24</a> longevity it would be really neat to be able to write programs um at rich programs like multimedia programs not just text programs that can<br>
+<a class="time" name="t214.55" href="#t214.55">03:34</a> survive a decade of two of bit rots like today like i go and look at like a<br>
+<a class="time" name="t220.22899999999998" href="#t220.22899999999998">03:40</a> web thing particular web things that i wrote just a few years ago and they don't work anymore in like a modern browser i'm like oh yeah well i'm i'm just gonna stop maintaining them right<br>
+<a class="time" name="t229.27" href="#t229.27">03:49</a> um so i think that there's some at least for uh for enjoyable software for like<br>
+<a class="time" name="t233.50900000000001" href="#t233.50900000000001">03:53</a> personal personal scale software for fun things i think that there's real value<br>
+<a class="time" name="t238.949" href="#t238.949">03:58</a> in making that um have a long life so probably goes<br>
+<a class="time" name="t243.91" href="#t243.91">04:03</a> what changed since last time uh there was a there was a file with uh<br>
+<a class="time" name="t249.589" href="#t249.589">04:09</a> instruction encoding that we created last time um i decided that was just like bad and<br>
+<a class="time" name="t254.309" href="#t254.309">04:14</a> i was sort of like going as my own advice actually in you know in a way to keep it simple<br>
+<a class="time" name="t259.749" href="#t259.749">04:19</a> so i undid that i just lifted all that back into the one-handed file so there's just this one header file there's this prelude file to these to find some like basic stuff because we're dealing with c here but it's it's not project specific<br>
+<a class="time" name="t271.11" href="#t271.11">04:31</a> so anyhow so lift those in here so there he is back into the one header file<br>
+<a class="time" name="t275.59000000000003" href="#t275.59000000000003">04:35</a> um oh hey edward<br>
+<a class="time" name="t283.27" href="#t283.27">04:43</a> um i hope you're doing well uh so uh so i did that i lifted this back in here<br>
+<a class="time" name="t289.749" href="#t289.749">04:49</a> and that was that was a good decision now there's just this one file to kind of care about these little helper macros um and<br>
+<a class="time" name="t296.629" href="#t296.629">04:56</a> constants they've just sort of made a way down here to the the the constant section of this uh<br>
+<a class="time" name="t302.07" href="#t302.07">05:02</a> header file and uh and some of these function otherwise there there is uh there is<br>
+<a class="time" name="t312.15" href="#t312.15">05:12</a> much to do so that was this to do point right so that's done<br>
+<a class="time" name="t315.909" href="#t315.909">05:15</a> then the second point and this is what we'll be working on or i'll be working on here in a moment um it's the building evaluator<br>
+<a class="time" name="t325.11" href="#t325.11">05:25</a> sorry i'm listening to music and like there's this amazing buggy mac os<br>
+<a class="time" name="t329.67" href="#t329.67">05:29</a> it's long standing i don't know if you guys so this happens sometimes when you<br>
+<a class="time" name="t334.87" href="#t334.87">05:34</a> reboot your system it just does this but i like that little music in the<br>
+<a class="time" name="t342.79" href="#t342.79">05:42</a> background um so we gotta build this evaluator executed for the virtual machine instructions and last night um after<br>
+<a class="time" name="t353.029" href="#t353.029">05:53</a> dinner i felt inspired so i started putting together just a stun for that<br>
+<a class="time" name="t356.55" href="#t356.55">05:56</a> and i think that's a good idea because that saves us some some time to see me<br>
+<a class="time" name="t361.59" href="#t361.59">06:01</a> just knocking out some some boilerplate so this is uh this is where i'm currently at and this is where we'll<br>
+<a class="time" name="t368.469" href="#t368.469">06:08</a> keep going okay<br>
+<a class="time" name="t372.629" href="#t372.629">06:12</a> so here we have a similar little uh program and on the right side here if i<br>
+<a class="time" name="t376.71" href="#t376.71">06:16</a> hit save here we can see it's sort of like recompiling and then re-running and<br>
+<a class="time" name="t381.11" href="#t381.11">06:21</a> we see the output from our formatting function that we put together in a previous part this shows us the the instruction offset so 0 1 2 3 that's<br>
+<a class="time" name="t391.27" href="#t391.27">06:31</a> the instruction offset or program counter if you were running this program<br>
+<a class="time" name="t395.83" href="#t395.83">06:35</a> and here we have the instructions along with their arguments all right so we have a move instruction and this implements a factorial function is a<br>
+<a class="time" name="t403.11" href="#t403.11">06:43</a> it's a simple example here<br>
+<a class="time" name="t408.71" href="#t408.71">06:48</a> okay now i'm going to show you it looks like if we if you run this thing<br>
+<a class="time" name="t413.27" href="#t413.27">06:53</a> so here's a new function that i wrote last night called eval<br>
+<a class="time" name="t418.39" href="#t418.39">06:58</a> it needs some registers or registers so we just allocate those there are<br>
+<a class="time" name="t427.189" href="#t427.189">07:07</a> 32 in this isa which is documented in the in the readme file here there are<br>
+<a class="time" name="t432.71" href="#t432.71">07:12</a> 32 integral registers and 32 floating point registers now this code using floating point none of that i'm not<br>
+<a class="time" name="t438.469" href="#t438.469">07:18</a> bothered with any of that yet so don't need that and yeah we used allocate 32 of those<br>
+<a class="time" name="t444.87" href="#t444.87">07:24</a> for virtual registers on the stack here and we just passed this into the eval function along with the program so this<br>
+<a class="time" name="t449.909" href="#t449.909">07:29</a> is the set of virtual machine instructions and pc here has a different meaning down<br>
+<a class="time" name="t455.749" href="#t455.749">07:35</a> here it's essentially just how many instructions are there in this in this array um and here we are setting up so we're just a zero in this i say<br>
+<a class="time" name="t468.71" href="#t468.71">07:48</a> is the first argument passed along to a function so if we look at this up here<br>
+<a class="time" name="t475.589" href="#t475.589">07:55</a> factorial function it takes one argument so this will be in radius zero and it<br>
+<a class="time" name="t480.39" href="#t480.39">08:00</a> produces one output which will also eventually end up being reduced to zero<br>
+<a class="time" name="t484.309" href="#t484.309">08:04</a> so before we call this factorial function we need to set up its import arguments and uh we do that here and we<br>
+<a class="time" name="t490.309" href="#t490.309">08:10</a> give it number three and i think that should produce the result night i think<br>
+<a class="time" name="t497.43" href="#t497.43">08:17</a> now this this virtual machine is not it doesn't work yet we're going to make this work so this is not going to be<br>
+<a class="time" name="t503.51" href="#t503.51">08:23</a> the um the correct result here but we can print this out just for now<br>
+<a class="time" name="t506.629" href="#t506.629">08:26</a> um oh god um oh that's<br>
+<a class="time" name="t514.7090000000001" href="#t514.7090000000001">08:34</a> what's that there we go crap so the output here is 11 that's not<br>
+<a class="time" name="t520.7090000000001" href="#t520.7090000000001">08:40</a> correct i believe uh okay now let's have a look at the uh the<br>
+<a class="time" name="t526.31" href="#t526.31">08:46</a> way by which we we could evaluate these virtual machine intersections let's just comment this out i think this is confusing for me<br>
+<a class="time" name="t535.11" href="#t535.11">08:55</a> okay so here's some new code that you haven't seen before if you've been following along um there are generally at least in my experience now it's not like i'm a<br>
+<a class="time" name="t545.35" href="#t545.35">09:05</a> i'm a you know professional or expert on virtual machines like you know<br>
+<a class="time" name="t549.67" href="#t549.67">09:09</a> i've read about them i've made some toy attempts at them and stuff like that so by no means am i an expert<br>
+<a class="time" name="t557.75" href="#t557.75">09:17</a> here um but anyhow what up well gathered there are three general ways to implement this in a programming language like c the first one which is the<br>
+<a class="time" name="t565.35" href="#t565.35">09:25</a> current one that we have enabled is with one big switch uh statement so now i get some some macros here so we<br>
+<a class="time" name="t572.87" href="#t572.87">09:32</a> can switch between the three without having to have a copy of the code but so essentially what we're doing here is like we do switch and then these are cases so switch on the uh on the<br>
+<a class="time" name="t585.99" href="#t585.99">09:45</a> current operation and then we do you know if the operation<br>
+<a class="time" name="t590.47" href="#t590.47">09:50</a> is moved then do this thing uh if the operation is loaded out then do that thing and so on right it's just a switch case um the other the other way of doing things is with a jump table<br>
+<a class="time" name="t604.949" href="#t604.949">10:04</a> that has the the address of like a shankar code so this would traditionally be what most um<br>
+<a class="time" name="t612.87" href="#t612.87">10:12</a> vm implementations implemented in assembly with you so you just build a<br>
+<a class="time" name="t618.55" href="#t618.55">10:18</a> table that maps and we got one here uh that maps the uh the operation to<br>
+<a class="time" name="t625.03" href="#t625.03">10:25</a> some offset in code so clearing and gcc allows you to do is super yankee syntax<br>
+<a class="time" name="t629.11" href="#t629.11">10:29</a> but like this basically takes the address of um a certain offset in your code right<br>
+<a class="time" name="t636.71" href="#t636.71">10:36</a> which is expressed as a label in c uh and third there is this is probably a<br>
+<a class="time" name="t641.35" href="#t641.35">10:41</a> more sort of like a less common thing to see and see but um<br>
+<a class="time" name="t646.79" href="#t646.79">10:46</a> just as this is effective in many cases uh similar to to a gem<br>
+<a class="time" name="t653.509" href="#t653.509">10:53</a> like a jump table of addresses you use a table of functions that you do tail<br>
+<a class="time" name="t658.47" href="#t658.47">10:58</a> calls so you know for people into functional programming you know you have continuation passing style right where<br>
+<a class="time" name="t663.99" href="#t663.99">11:03</a> like instead of returning a value and using a stack to push pop on a stack you<br>
+<a class="time" name="t668.23" href="#t668.23">11:08</a> call a function with arguments and then that function instead of returning just calls the next function it calls an x function and so on<br>
+<a class="time" name="t675.11" href="#t675.11">11:15</a> i'll obviously if you just do that with a traditional stack and you push something and push something if you do that enough times right you can run out of stack memory you got a stack overflow<br>
+<a class="time" name="t683.19" href="#t683.19">11:23</a> um and so the there is this optimization called a tail call where uh at the end of uh you<br>
+<a class="time" name="t691.829" href="#t691.829">11:31</a> know at the end of a function when you're returning from it rather than returning uh i should qualify that better at the end of function when you're calling another function um but rather than just like pushing on<br>
+<a class="time" name="t703.99" href="#t703.99">11:43</a> the stack calling that function right and then returning and popping immediately you can say you know what we<br>
+<a class="time" name="t708.63" href="#t708.63">11:48</a> don't need the stack frame anymore because there's there's nothing else after this function call<br>
+<a class="time" name="t714.79" href="#t714.79">11:54</a> so you can just pop the stack right there and<br>
+<a class="time" name="t718.87" href="#t718.87">11:58</a> and just jump to that function you don't even need to set up any sort of stack<br>
+<a class="time" name="t723.43" href="#t723.43">12:03</a> space for it anyhow if you're curious about what what tail calls are go check<br>
+<a class="time" name="t727.829" href="#t727.829">12:07</a> it out and learn more about it anyhow it's it essentially produces similar code and i got a little setup here and we're going to see what different code these<br>
+<a class="time" name="t736.47" href="#t736.47">12:16</a> will generate for x86 we can look at arm64 too<br>
+<a class="time" name="t741.43" href="#t741.43">12:21</a> okay so we got one big switched uh statement that's currently the current strategy we can just make sure that all of these work so strategy two is going to produce<br>
+<a class="time" name="t749.19" href="#t749.19">12:29</a> a jump table and now we get the same the same effect here kind of works i've only implemented the logic for two<br>
+<a class="time" name="t759.59" href="#t759.59">12:39</a> instructions so far which is the first two that are being issued in this program and we'll we can uh sort of hammer out the rest of them<br>
+<a class="time" name="t768.79" href="#t768.79">12:48</a> so in the second strategy what happens down here is that these instead of these becoming case statements these now become labels<br>
+<a class="time" name="t776.15" href="#t776.15">12:56</a> so these are now transformed into if we do<br>
+<a class="time" name="t780.15" href="#t780.15">13:00</a> this these are now transformed to something that looks like this there is labels and essentially uh what will will be added<br>
+<a class="time" name="t789.509" href="#t789.509">13:09</a> into the table is the address offset for this instruction right here whatever is this<br>
+<a class="time" name="t796.31" href="#t796.31">13:16</a> corresponds to a machine code um<br>
+<a class="time" name="t800.55" href="#t800.55">13:20</a> and then our third strategy and that code is a little different so that isn't in the latter part of the file so okay look at that so i broke that that<br>
+<a class="time" name="t812.31" href="#t812.31">13:32</a> is lovely um<br>
+<a class="time" name="t816.31" href="#t816.31">13:36</a> okay let's see if we can quickly fix this so that we can have a look at this<br>
+<a class="time" name="t822.949" href="#t822.949">13:42</a> t ctmo is some suspicion that's the let's see here<br>
+<a class="time" name="t835.67" href="#t835.67">13:55</a> so what is happening here is uh oh<br>
+<a class="time" name="t848.629" href="#t848.629">14:08</a> yeah this obviously is dumb so i need to add some code here and we got to see this in a minute when we start looking at what uh what code that that the<br>
+<a class="time" name="t856.55" href="#t856.55">14:16</a> compiler generates for free these different strategies you kind of need to put something in here otherwise the the compiler is too clever and realizes that<br>
+<a class="time" name="t863.99" href="#t863.99">14:23</a> all of these do the same thing and it can just sort of skip generating code for it and it makes it harder to compare so i'm kind of doing this to make sure that it's or something so the instruction here gets<br>
+<a class="time" name="t875.269" href="#t875.269">14:35</a> too large and it overflows the the space we allocated for registers and so<br>
+<a class="time" name="t880.47" href="#t880.47">14:40</a> uh what we can do we can just do modulus here and we have here so we're looking at the um<br>
+<a class="time" name="t887.11" href="#t887.11">14:47</a> the way to evaluate the virtual machine program and we're looking at the three different strategies uh a big switch statement um sort of a address jump table and a<br>
+<a class="time" name="t901.43" href="#t901.43">15:01</a> typical function table um and now we're sort of like trying to<br>
+<a class="time" name="t905.189" href="#t905.189">15:05</a> figure out like which one will give the most ergonomic experience for um<br>
+<a class="time" name="t910.31" href="#t910.31">15:10</a> for writing this program that's short and concise that allows us to play around with<br>
+<a class="time" name="t916.71" href="#t916.71">15:16</a> instructions and stuff like that and present concept that<br>
+<a class="time" name="t920.55" href="#t920.55">15:20</a> and we can also look at the code that get a better sense of what the uh the<br>
+<a class="time" name="t928.629" href="#t928.629">15:28</a> the technical trade-offs are for these different approaches<br>
+<a class="time" name="t934.389" href="#t934.389">15:34</a> so maybe we should start there uh so a switch case this is the current strategy<br>
+<a class="time" name="t940.069" href="#t940.069">15:40</a> uh we have that running on the site uh if uh if we have a look at i put together a<br>
+<a class="time" name="t946.71" href="#t946.71">15:46</a> little script here let's see there there it is and we can just open it up you can see what it does so we run the script<br>
+<a class="time" name="t952.23" href="#t952.23">15:52</a> um it uses ghost names compiles this one<br>
+<a class="time" name="t957.43" href="#t957.43">15:57</a> file the eval file here to uh used assembly for the for x86<br>
+<a class="time" name="t961.35" href="#t961.35">16:01</a> um and that is removed some uh some decorations in the assembly i put the clang generates but not no actual like<br>
+<a class="time" name="t970.55" href="#t970.55">16:10</a> data or instructions and then um we just look at it and i count the<br>
+<a class="time" name="t974.389" href="#t974.389">16:14</a> lights at the bottom here okay i also have this file open here so we can switch to and have a look<br>
+<a class="time" name="t982.389" href="#t982.389">16:22</a> so this first strategy then we have a this one function that's just one function of the strategy um and none of this is being used right so<br>
+<a class="time" name="t991.509" href="#t991.509">16:31</a> this is this is not there essentially then we have this state for a loop so<br>
+<a class="time" name="t996.629" href="#t996.629">16:36</a> exec here is like a label that next here will jump back to exec and that increases the you know it grabs<br>
+<a class="time" name="t1003.03" href="#t1003.03">16:43</a> the next instruction from the the array of instructions increases the program counter and just grabs the first argument because all of these are going to need it and then it just jumps to one of these right and then it repeats so there's a loop going on until it hits red<br>
+<a class="time" name="t1017.59" href="#t1017.59">16:57</a> the red instruction in which case this eval function is returns okay<br>
+<a class="time" name="t1024.71" href="#t1024.71">17:04</a> um so what's going on as we uh we're going to look at this rsm eval<br>
+<a class="time" name="t1029.029" href="#t1029.029">17:09</a> function so we're going to scroll up here and this is actually a relatively small<br>
+<a class="time" name="t1034.949" href="#t1034.949">17:14</a> code now all of these dlog statements are just excluded from this build otherwise there would be a lot of a lot of stuff here so this does x86 um so this just sets up the<br>
+<a class="time" name="t1046.15" href="#t1046.15">17:26</a> stack for this function um and then it we are doing let's see where is<br>
+<a class="time" name="t1053.27" href="#t1053.27">17:33</a> that yep uh so<br>
+<a class="time" name="t1059.83" href="#t1059.83">17:39</a> this uh shift bit shift uh right um is what's happening in here this macro<br>
+<a class="time" name="t1066.31" href="#t1066.31">17:46</a> if we jump over to these guys here you're going to see a bit shift right so that's what we got and we're going to have an and um so that's the the end operation here<br>
+<a class="time" name="t1076.549" href="#t1076.549">17:56</a> and the mask it just you know the compiler has figured out that that's 31.<br>
+<a class="time" name="t1080.95" href="#t1080.95">18:00</a> so there's there's nothing else there so we have two operations happening that's where they come from sorry if alpha<br>
+<a class="time" name="t1088.15" href="#t1088.15">18:08</a> and the next thing it does so like this is<br>
+<a class="time" name="t1093.43" href="#t1093.43">18:13</a> interesting so um when you use a switch statement right you have something like<br>
+<a class="time" name="t1097.83" href="#t1097.83">18:17</a> you know switch uh like a thing right<br>
+<a class="time" name="t1102.71" href="#t1102.71">18:22</a> and now we have a bunch of cases so case you know one do this case two three four do this and that you<br>
+<a class="time" name="t1109.11" href="#t1109.11">18:29</a> know it's sort of like a um like a fork in a row right you you walk<br>
+<a class="time" name="t1115.75" href="#t1115.75">18:35</a> out in the woods and suddenly the the road splits in three ways and you have<br>
+<a class="time" name="t1120.23" href="#t1120.23">18:40</a> to choose which way to go that's that's kind of like a switch switch statement in a nutshell right so it can it can be really useful<br>
+<a class="time" name="t1127.27" href="#t1127.27">18:47</a> for a lot of things it's a really ergonomic construct i think many program<br>
+<a class="time" name="t1131.909" href="#t1131.909">18:51</a> languages offer them some you know with discriminated unions and stuff like that is kind of neat we just in this case like really basic with uh with just uh<br>
+<a class="time" name="t1140.31" href="#t1140.31">19:00</a> constants snc what's neat about it though is that it is a high level construct and the compiler will do really clever stuff<br>
+<a class="time" name="t1147.59" href="#t1147.59">19:07</a> like trademark at the end if you have a if you have a like maybe two or three cases<br>
+<a class="time" name="t1154.63" href="#t1154.63">19:14</a> uh and the code is kind of small um ish for each of these cases it's<br>
+<a class="time" name="t1158.63" href="#t1158.63">19:18</a> probably just gonna do comparison things like equivalent to if you use if else if<br>
+<a class="time" name="t1162.549" href="#t1162.549">19:22</a> else if and if you have a lot of case statements or a lot of code in these case statements um it might uh and and this<br>
+<a class="time" name="t1170.87" href="#t1170.87">19:30</a> is what it's done here for us using clang let's produce this because what is<br>
+<a class="time" name="t1175.35" href="#t1175.35">19:35</a> done now is actually implementing a jump table for us which is the second strategy we looked at so what this this means the load<br>
+<a class="time" name="t1182.71" href="#t1182.71">19:42</a> effective address um this instructions this just goes and<br>
+<a class="time" name="t1187.27" href="#t1187.27">19:47</a> grabs the it loads the offset for the jump<br>
+<a class="time" name="t1193.11" href="#t1193.11">19:53</a> table that it made for us and it gave it gave it this like kind of if you look at<br>
+<a class="time" name="t1196.549" href="#t1196.549">19:56</a> just this it's kind of fun it's like a face but it it produced this young<br>
+<a class="time" name="t1200.71" href="#t1200.71">20:00</a> temple and gave it this kind of yankee name and we gotta find it at the end oh<br>
+<a class="time" name="t1205.51" href="#t1205.51">20:05</a> i think i kind of accidentally stripped that out um<br>
+<a class="time" name="t1211.59" href="#t1211.59">20:11</a> luckily i did save oh i did save<br>
+<a class="time" name="t1215.59" href="#t1215.59">20:15</a> the unstripped version here okay so oh long okay not a quad<br>
+<a class="time" name="t1221.27" href="#t1221.27">20:21</a> um so yeah here it had generated a table so this is a table it starts upside zero<br>
+<a class="time" name="t1226.47" href="#t1226.47">20:26</a> uh um and there's gonna be a long it's gonna eight bytes on this so by eight<br>
+<a class="time" name="t1232.47" href="#t1232.47">20:32</a> um and we can have 16 here right and so on and then these ones are uh are labels<br>
+<a class="time" name="t1239.43" href="#t1239.43">20:39</a> and these here's constants that this is assembly again this is not machine code right so the assembler will<br>
+<a class="time" name="t1247.59" href="#t1247.59">20:47</a> chunk these into the you know the the the read only it depends elf or mac or<br>
+<a class="time" name="t1252.149" href="#t1252.149">20:52</a> whatever it'll chunk these things into just data uh read all the data into an<br>
+<a class="time" name="t1257.51" href="#t1257.51">20:57</a> executable if you were to build an executable here<br>
+<a class="time" name="t1261.75" href="#t1261.75">21:01</a> and it will and these are gonna do the same thing essentially so what it does is for for for this for example which is<br>
+<a class="time" name="t1270.23" href="#t1270.23">21:10</a> down here this is a um an address of an instruction and it does this fancy thing lbb06 is a<br>
+<a class="time" name="t1277.59" href="#t1277.59">21:17</a> audio generated name for a label that is up here and this is going to be<br>
+<a class="time" name="t1285.669" href="#t1285.669">21:25</a> see we can just look at this so lbb03 corresponds to<br>
+<a class="time" name="t1290.39" href="#t1290.39">21:30</a> this condition here and zero four to this since you're five and so on right so jumping back to um to the code i'm<br>
+<a class="time" name="t1298.07" href="#t1298.07">21:38</a> gonna stop here and we can look at the right side as that now we know my little<br>
+<a class="time" name="t1303.19" href="#t1303.19">21:43</a> um graph macro here just grab thing is to erase those constants unfortunately but everything else is there<br>
+<a class="time" name="t1310.95" href="#t1310.95">21:50</a> so it did generate a jump table for us it's kind of interesting um<br>
+<a class="time" name="t1316.149" href="#t1316.149">21:56</a> and gcc will do the same thing you can use things like you know godbolt.org and stuff to explore these things if you don't want to do it like this in terminal um okay so at the at the end so what it<br>
+<a class="time" name="t1326.63" href="#t1326.63">22:06</a> does here is just loading uh the uh the address of the table of<br>
+<a class="time" name="t1333.19" href="#t1333.19">22:13</a> the jump table into register 8. and the next thing that it does<br>
+<a class="time" name="t1337.669" href="#t1337.669">22:17</a> uh so we can follow along up here right it increments the program counter<br>
+<a class="time" name="t1344.23" href="#t1344.23">22:24</a> i'm pretty sure that's what it does oh i should and i'm pretty rusty at x867<br>
+<a class="time" name="t1353.59" href="#t1353.59">22:33</a> and written in a long time but let's just get past that i don't know i might be lying and i want to say something that i'm not confident about the next thing it does is just to uh to<br>
+<a class="time" name="t1365.909" href="#t1365.909">22:45</a> oh shoot oh yeah it would be the uh it would be this thing with this thing<br>
+<a class="time" name="t1370.149" href="#t1370.149">22:50</a> so it would essentially uh load the uh the operation<br>
+<a class="time" name="t1375.669" href="#t1375.669">22:55</a> that's what it's doing here okay it's the ar and that's the operation<br>
+<a class="time" name="t1382.39" href="#t1382.39">23:02</a> and then it now has an offset so that's that's why it's adding this okay obviously that's what it's<br>
+<a class="time" name="t1387.909" href="#t1387.909">23:07</a> it wasn't obvious to me for a second so i shouldn't say that but in the yum table it added um it added on the value in register c here<br>
+<a class="time" name="t1399.19" href="#t1399.19">23:19</a> or cx which would be the uh where we have uploaded the current upcode<br>
+<a class="time" name="t1404.789" href="#t1404.789">23:24</a> all right so up here we've done get up and they<br>
+<a class="time" name="t1409.909" href="#t1409.909">23:29</a> get loaded into register cx and then adds that on to the offset of the um table and now you got the address in the um table i think that's what's going on<br>
+<a class="time" name="t1419.51" href="#t1419.51">23:39</a> um and then just does jump uh now x36 you know it's an it's an um legacy laden instruction set there's you know 10 000 pages of manuals and<br>
+<a class="time" name="t1429.909" href="#t1429.909">23:49</a> stuff you can read about it so you know some of these have a little quirky things like q it's like a quality you know it's like uh you know you have a different letter here it's just uh the the size of the<br>
+<a class="time" name="t1440.07" href="#t1440.07">24:00</a> argument so that's what i'm saying is jumping at you okay so jump here this now<br>
+<a class="time" name="t1446.789" href="#t1446.789">24:06</a> will move there if you imagine that the program does this down like this right it comes to this jump instruction now what it's going to do is like not just go here it might but<br>
+<a class="time" name="t1456.549" href="#t1456.549">24:16</a> it's probably not going to do that so we'll jump to whatever uh<br>
+<a class="time" name="t1461.35" href="#t1461.35">24:21</a> executable address is loaded from register cx still asterisks means<br>
+<a class="time" name="t1466.23" href="#t1466.23">24:26</a> the load the value from it so uh so that's the jump that we're<br>
+<a class="time" name="t1471.51" href="#t1471.51">24:31</a> doing right so if we're if we now found an operation called uh drz<br>
+<a class="time" name="t1477.269" href="#t1477.269">24:37</a> right then what's happening here is that we'll do a jump pass all those things down to brc<br>
+<a class="time" name="t1482.47" href="#t1482.47">24:42</a> so now it would go down here and then it might jump down here right if this is<br>
+<a class="time" name="t1489.029" href="#t1489.029">24:49</a> brz and now it will do a thing so this is the actual this is the actual code<br>
+<a class="time" name="t1494.71" href="#t1494.71">24:54</a> or an example of the actual code that one of our virtual instructions would would um equate to right this is what the virtual<br>
+<a class="time" name="t1502.31" href="#t1502.31">25:02</a> machine would translate over to x86 in this case or some other architecture like arm and when it's done in this case just you know we can see it's very efficient the only overhead here for uh for having<br>
+<a class="time" name="t1515.59" href="#t1515.59">25:15</a> an extra instruction operation here um is really is this uh jampatian this<br>
+<a class="time" name="t1520.31" href="#t1520.31">25:20</a> is essentially zero overhead in this case which is very neat right<br>
+<a class="time" name="t1523.909" href="#t1523.909">25:23</a> um so it does the thing it does uh in this<br>
+<a class="time" name="t1529.11" href="#t1529.11">25:29</a> case we just fill these with uh just some some assignments to this this<br>
+<a class="time" name="t1534.07" href="#t1534.07">25:34</a> register set uh we just do this to make sure that the<br>
+<a class="time" name="t1537.99" href="#t1537.99">25:37</a> code that the compiler doesn't eliminate this code so we can look at it uh so the the the<br>
+<a class="time" name="t1545.029" href="#t1545.029">25:45</a> move l we see here which is a move like a you know copy<br>
+<a class="time" name="t1549.75" href="#t1549.75">25:49</a> copy this to that um that's essentially what's happening right we copied this value to this location<br>
+<a class="time" name="t1556.23" href="#t1556.23">25:56</a> um and then it does what it does next right it's kind of interesting so now it<br>
+<a class="time" name="t1563.99" href="#t1563.99">26:03</a> which i think the com if we look at this yeah so it's interesting so uh the<br>
+<a class="time" name="t1569.11" href="#t1569.11">26:09</a> compiler has now generated roughly the same code twice<br>
+<a class="time" name="t1574.31" href="#t1574.31">26:14</a> but it's skipping this load effective address instruction but otherwise it does something very similar we can see the add cue here<br>
+<a class="time" name="t1583.11" href="#t1583.11">26:23</a> being reflected here right the same thing and uh it is<br>
+<a class="time" name="t1591.11" href="#t1591.11">26:31</a> setting something to two yeah let's skip that um and then it's jumping again and now<br>
+<a class="time" name="t1597.11" href="#t1597.11">26:37</a> jim's done other thing it does another instruction and then jumps back and here what<br>
+<a class="time" name="t1602.549" href="#t1602.549">26:42</a> essentially what what all of this code does it's the same stuff that we just walked through up here it's just again the conveyor has decided that it's got to be more effective to duplicate this code which i'm not sure is true but that's what it decided to do so it does the same thing um it you know increments<br>
+<a class="time" name="t1618.39" href="#t1618.39">26:58</a> our program counter after it's loaded the next instruction and then it does<br>
+<a class="time" name="t1624.31" href="#t1624.31">27:04</a> you know a shift and an end to extract the the value of the argument a<br>
+<a class="time" name="t1630.47" href="#t1630.47">27:10</a> again you can look up this here if you're curious what that means<br>
+<a class="time" name="t1634.31" href="#t1634.31">27:14</a> um and then it does the the looks up the<br>
+<a class="time" name="t1638.83" href="#t1638.83">27:18</a> upper the the operation of the instruction so this macro corresponds to<br>
+<a class="time" name="t1643.99" href="#t1643.99">27:23</a> this thing right and then it does a a load from the table and now we're at<br>
+<a class="time" name="t1648.31" href="#t1648.31">27:28</a> this this point here it loads from a table it adds the the operation right<br>
+<a class="time" name="t1655.909" href="#t1655.909">27:35</a> and then it jumps to the next level so real efficient okay uh so it's kind of cool we've seen here that you know if you just write a switch statement in um in many cases the<br>
+<a class="time" name="t1669.43" href="#t1669.43">27:49</a> uh the compiler will just be really smart and modern compilers are just like<br>
+<a class="time" name="t1675.43" href="#t1675.43">27:55</a> you know is mind-blowingly good or smart maybe it's it's a stretch but mind-blowingly good at um generating really efficient code so it's<br>
+<a class="time" name="t1683.909" href="#t1683.909">28:03</a> almost like the the higher level constructs you use the better code you're gonna get uh you know it<br>
+<a class="time" name="t1691.83" href="#t1691.83">28:11</a> could feel it you know exciting or enticing to try to do what we're gonna<br>
+<a class="time" name="t1696.47" href="#t1696.47">28:16</a> try to do next right to implement this ourselves and we're going to see that we<br>
+<a class="time" name="t1700.31" href="#t1700.31">28:20</a> we're probably going to get a worse code of at least the same code okay so let's<br>
+<a class="time" name="t1706.23" href="#t1706.23">28:26</a> stretch switch to strategy 2 with strategy 2 uh and i'm going to x this uh excess out<br>
+<a class="time" name="t1716.95" href="#t1716.95">28:36</a> um just to show you that it works right okay so strategy two<br>
+<a class="time" name="t1721.029" href="#t1721.029">28:41</a> now the corresponding markers here are gonna change now we're going to instead of having this high level switch we're now going to explicitly<br>
+<a class="time" name="t1729.269" href="#t1729.269">28:49</a> load the address of a an instruction i'm going to build a<br>
+<a class="time" name="t1735.75" href="#t1735.75">28:55</a> table so we generate that with a preprocessor macro down here<br>
+<a class="time" name="t1740.149" href="#t1740.149">29:00</a> this thing uh i mentioned this earlier this is sort<br>
+<a class="time" name="t1743.75" href="#t1743.75">29:03</a> of like a quick little way to just grab the address the effective address of a label<br>
+<a class="time" name="t1749.83" href="#t1749.83">29:09</a> this is something that the compatible will do for you it's a bit tricky since you have a shaken an egg like you know<br>
+<a class="time" name="t1755.909" href="#t1755.909">29:15</a> where's the where's the address of it you don't know until you actually like assemble everything into machine code<br>
+<a class="time" name="t1761.029" href="#t1761.029">29:21</a> um so that's how we can build a table here<br>
+<a class="time" name="t1765.43" href="#t1765.43">29:25</a> i'm not sure i don't think this is c11 but i think it is some sort of you know extension that's been supported by clang and most high-end c composers<br>
+<a class="time" name="t1774.07" href="#t1774.07">29:34</a> for a long time in jesus here for sure it's it most of these weird things are<br>
+<a class="time" name="t1777.99" href="#t1777.99">29:37</a> gcc inventions so i'm guessing that's what it is uh so we're building a little<br>
+<a class="time" name="t1784.23" href="#t1784.23">29:44</a> table instead of doing switch we used to go to you know a specific address<br>
+<a class="time" name="t1789.83" href="#t1789.83">29:49</a> and then instead of doing a case um uh sort of a case thing we just<br>
+<a class="time" name="t1795.909" href="#t1795.909">29:55</a> we just enter a label so that's in c again how you know you will uh you will<br>
+<a class="time" name="t1800.47" href="#t1800.47">30:00</a> tell the compiler that like whatever follows this whatever instruction follows this this label in the code that you generate give it this name right so that can reference that in other places go to's and stuff and um and the the rest of it is unchanged there's nothing else that differs it's only the way by which we dispatch the next<br>
+<a class="time" name="t1824.789" href="#t1824.789">30:24</a> you know the dispatch the or root rather uh the work we're gonna do right so<br>
+<a class="time" name="t1828.07" href="#t1828.07">30:28</a> we're doing different work for different instructions so we see that it works the same way where we run this and if we run this<br>
+<a class="time" name="t1836.63" href="#t1836.63">30:36</a> thing now again uh that just composite assembly and we inspect assembly we're<br>
+<a class="time" name="t1841.51" href="#t1841.51">30:41</a> gonna see that we're actually getting worse code and i think what is happening actually is by pattern recognition i think it is<br>
+<a class="time" name="t1848.63" href="#t1848.63">30:48</a> doing some it is doing some inlining perhaps<br>
+<a class="time" name="t1851.909" href="#t1851.909">30:51</a> but um that doesn't really matter what it's doing we're just getting a lot more code<br>
+<a class="time" name="t1859.75" href="#t1859.75">30:59</a> uh if this actually runs faster so this is why earlier i was saying we we're not<br>
+<a class="time" name="t1863.509" href="#t1863.509">31:03</a> concerned about performance at least i'm not concerned about performance maybe i will never be with rsm<br>
+<a class="time" name="t1871.269" href="#t1871.269">31:11</a> and definitely absolutely not at this stage like this is not how you get<br>
+<a class="time" name="t1875.909" href="#t1875.909">31:15</a> something to run really fast and efficiently it's not by like trying to<br>
+<a class="time" name="t1880.549" href="#t1880.549">31:20</a> figure out like which instructions it generates before you even put it to good<br>
+<a class="time" name="t1883.99" href="#t1883.99">31:23</a> use so that's not at all what we're doing here this might very well be much faster<br>
+<a class="time" name="t1888.87" href="#t1888.87">31:28</a> than the other thing it doesn't really matter what i wanted to show you here is<br>
+<a class="time" name="t1896.71" href="#t1896.71">31:36</a> that the there is a there is an intimate connection between the way like we structure programs right<br>
+<a class="time" name="t1903.909" href="#t1903.909">31:43</a> and the what what code is actually generated from this high level c right<br>
+<a class="time" name="t1909.509" href="#t1909.509">31:49</a> so in this case we're like well you know we did some we have to do extra work right we have to like generate this table we have to use this possibly extension that's not standard right um to make this work right and what is the<br>
+<a class="time" name="t1923.19" href="#t1923.19">32:03</a> upside is the code better no it's just like more code right uh it worked just as well it's not like we can do anything new so that doesn't seem to give us anything over a switch statement now on with some compilers<br>
+<a class="time" name="t1937.19" href="#t1937.19">32:17</a> um it's not true for uh for the for the big mono ones anymore<br>
+<a class="time" name="t1941.19" href="#t1941.19">32:21</a> but for some compilers like one big switch statement is a challenge for<br>
+<a class="time" name="t1945.909" href="#t1945.909">32:25</a> things like register allocation um like you have you know a limited number of registers in x86 you have just a couple of them on arm64 you have a lot<br>
+<a class="time" name="t1956.07" href="#t1956.07">32:36</a> of them on some systems like x86 now 32 bits x86 you have just a couple you know<br>
+<a class="time" name="t1960.63" href="#t1960.63">32:40</a> is it four or five or something like that anyhow so and and most compilers<br>
+<a class="time" name="t1964.549" href="#t1964.549">32:44</a> what they will do is like they will do register allocation per function a function basis function for function basis and so if you have a bunch of little small functions here and there<br>
+<a class="time" name="t1974.87" href="#t1974.87">32:54</a> it can you know just and then just a few locals a few variables right uh and let's say that those are<br>
+<a class="time" name="t1981.83" href="#t1981.83">33:01</a> you know uh the same or fewer numbers than the number of reducers register allocation is pretty straightforward you just hand them out and you get right<br>
+<a class="time" name="t1990.549" href="#t1990.549">33:10</a> a regis a good register allocator will um uh<br>
+<a class="time" name="t1995.35" href="#t1995.35">33:15</a> will be able to make really good use of that even if you have more variables than registers anyhow that is a huge big<br>
+<a class="time" name="t2001.509" href="#t2001.509">33:21</a> topic very interesting if you want to go read about reduce your allocation the gist of it is with one big switch<br>
+<a class="time" name="t2007.19" href="#t2007.19">33:27</a> statement you're going to have all of this code and some compilers will struggle to do<br>
+<a class="time" name="t2013.43" href="#t2013.43">33:33</a> efficient register allocation for that and your compile times are higher and your code quality is lower and stuff like that now i don't at least from my<br>
+<a class="time" name="t2021.35" href="#t2021.35">33:41</a> explorations and my experience with with clang that's that's not true in this case so<br>
+<a class="time" name="t2027.11" href="#t2027.11">33:47</a> for us a switch statement so far seems like a really good option okay so the third one is to use tail calls um<br>
+<a class="time" name="t2035.83" href="#t2035.83">33:55</a> so i already talked a little bit earlier about what tail calls uh i keep looking<br>
+<a class="time" name="t2040.389" href="#t2040.389">34:00</a> at my other camera that's if i'm looking out over here yeah i forget you guys over there um yeah macros for the win edward<br>
+<a class="time" name="t2047.83" href="#t2047.83">34:07</a> um in an earlier part i was i was briefly mentioning that um i am not shy uh for you know about for with<br>
+<a class="time" name="t2061.43" href="#t2061.43">34:21</a> macros i think when um when macros can improve like readability and the understandability of code i think it's fantastic but it's a really thin line to balance there between obfuscating something and<br>
+<a class="time" name="t2074.629" href="#t2074.629">34:34</a> and making something clear right so like next here as a macro like what does this<br>
+<a class="time" name="t2079.03" href="#t2079.03">34:39</a> do right if you're if you didn't write this code and you see next year you have to go look that up right to understand what this what this line of code does so<br>
+<a class="time" name="t2086.47" href="#t2086.47">34:46</a> you know it there's definitely a cost to it but sometimes it's it's pretty neat<br>
+<a class="time" name="t2090.149" href="#t2090.149">34:50</a> um i think macros in particular for stuff that we're doing right now experimenting and figuring things out um can be a really helpful tool to just<br>
+<a class="time" name="t2099.51" href="#t2099.51">34:59</a> like get stuff done you have to explore things right so<br>
+<a class="time" name="t2104.63" href="#t2104.63">35:04</a> if if i weren't using macros here right i would have had to sprinkle these if uh<br>
+<a class="time" name="t2110.069" href="#t2110.069">35:10</a> if statements pre-press a preprocessor if statements throughout the code down here and it would be much harder for us to read this and and see that you know<br>
+<a class="time" name="t2118.069" href="#t2118.069">35:18</a> that these things are actually the same anyhow so the the third strategy here<br>
+<a class="time" name="t2124.069" href="#t2124.069">35:24</a> with uh tail calls now i think i already saved this so we already got a sneak<br>
+<a class="time" name="t2127.75" href="#t2127.75">35:27</a> peek of the code he generates and surprise surprise it generates really<br>
+<a class="time" name="t2134.069" href="#t2134.069">35:34</a> surprisingly good good code again now we're looking at assembly this is not actually machine code there uh<br>
+<a class="time" name="t2141.75" href="#t2141.75">35:41</a> there might be some final optimizations down here like push q for example like<br>
+<a class="time" name="t2145.03" href="#t2145.03">35:45</a> we'll um will uh<br>
+<a class="time" name="t2150.63" href="#t2150.63">35:50</a> let's see here if i remember correctly so push q will increment the uh the<br>
+<a class="time" name="t2155.19" href="#t2155.19">35:55</a> stack pointer um by the uh the rm<br>
+<a class="time" name="t2162.47" href="#t2162.47">36:02</a> the reducer size right of the so q it bytes so what it does is that it takes the<br>
+<a class="time" name="t2168.47" href="#t2168.47">36:08</a> value you give it it um it stores it into memory at the current<br>
+<a class="time" name="t2175.51" href="#t2175.51">36:15</a> address of uh the stack pointer register so this essentially is like it's an x86<br>
+<a class="time" name="t2179.27" href="#t2179.27">36:19</a> thing some other architectures have a push um thing too but really it's like a it's<br>
+<a class="time" name="t2184.23" href="#t2184.23">36:24</a> like a bundle of instructions so it does a couple of things um<br>
+<a class="time" name="t2189.19" href="#t2189.19">36:29</a> so um but it does it more efficiently like this it's an actual you know it's an actual instruction not not like a an<br>
+<a class="time" name="t2197.349" href="#t2197.349">36:37</a> assembly construct so it can be a little bit more effective than than doing like three or four instructions that would accomplish the same goal so that's something to notice here because each of these<br>
+<a class="time" name="t2208.63" href="#t2208.63">36:48</a> functions so now instead of having switch cases right we're dealing with functions so one function per op code<br>
+<a class="time" name="t2215.51" href="#t2215.51">36:55</a> what's nice about this from an ergonomic perspective is that we now have these little like<br>
+<a class="time" name="t2220.63" href="#t2220.63">37:00</a> unit these little functions that are easy we can just kind of you know we can we can move them around right<br>
+<a class="time" name="t2226.15" href="#t2226.15">37:06</a> just trying to like get into the move state we can move them around uh the<br>
+<a class="time" name="t2231.27" href="#t2231.27">37:11</a> order here is not important i guess it's we can<br>
+<a class="time" name="t2239.67" href="#t2239.67">37:19</a> sort of like you know deal with these in the same ways that you will deal with functions we can take the we can take the address of the function uh in a uh standard way that is not<br>
+<a class="time" name="t2250.79" href="#t2250.79">37:30</a> non-standard now i'm keep making assumptions this is non-standard if someone knows if double ampersand to take the addressable label is a standard or it's not like drop that into the chat it would be interesting to know i'm just assuming that it's not standard anyhow so we can do that in standard way take the address of a function um and the tail call part here it's important<br>
+<a class="time" name="t2275.03" href="#t2275.03">37:55</a> so there's a couple of things that that that needs to be true for a tail call to<br>
+<a class="time" name="t2280.55" href="#t2280.55">38:00</a> be guaranteed in a compiler like clang and gcc the the number of arguments and the type of the arguments uh between the thing doing a tail call<br>
+<a class="time" name="t2291.67" href="#t2291.67">38:11</a> and the thing it is calling to must be exactly the same um so for that reason<br>
+<a class="time" name="t2299.27" href="#t2299.27">38:19</a> is this is not entirely true like so so the so this is for the guarantee for<br>
+<a class="time" name="t2304.15" href="#t2304.15">38:24</a> things to be a tail call to be true uh then in practice the up the<br>
+<a class="time" name="t2309.03" href="#t2309.03">38:29</a> optimizing part of these compilers well like you know even if you give it just a few arguments it will it will do a tail<br>
+<a class="time" name="t2315.589" href="#t2315.589">38:35</a> call for you or optimize things to tell call as far as it can you know with<br>
+<a class="time" name="t2319.67" href="#t2319.67">38:39</a> unless there's any undefined behavior or anything like that but to get a guarantee for a tail call<br>
+<a class="time" name="t2324.79" href="#t2324.79">38:44</a> this has to be true the argument has to be the same for the color and the quality so for that reason uh i'm setting this<br>
+<a class="time" name="t2332.55" href="#t2332.55">38:52</a> up that there are uh and this is is inspired by a silly widget maybe that<br>
+<a class="time" name="t2336.71" href="#t2336.71">38:56</a> does this or maybe it's historically i can remember but again the power of uh of macros here<br>
+<a class="time" name="t2343.75" href="#t2343.75">39:03</a> right so define the parameters and this makes it just just saves me from typing<br>
+<a class="time" name="t2348.23" href="#t2348.23">39:08</a> out this on every place where it says params so every every handler function right takes these<br>
+<a class="time" name="t2355.109" href="#t2355.109">39:15</a> parameters and then when it calls to the nexthander function um these are the arguments and he has<br>
+<a class="time" name="t2360.71" href="#t2360.71">39:20</a> kind of typed those out next to each other uh since you know um if we add an<br>
+<a class="time" name="t2366.069" href="#t2366.069">39:26</a> argument here or change a name to it it's much less likely that<br>
+<a class="time" name="t2370.79" href="#t2370.79">39:30</a> i'll screw up and forget one about it the next<br>
+<a class="time" name="t2380.31" href="#t2380.31">39:40</a> call here so up here our next thing we do a go to to get up to this label right<br>
+<a class="time" name="t2384.95" href="#t2384.95">39:44</a> that did the next uh that extracted the next instruction increased the pairing<br>
+<a class="time" name="t2388.31" href="#t2388.31">39:48</a> counter in uh in this version sorry for the<br>
+<a class="time" name="t2391.75" href="#t2391.75">39:51</a> scrolling in this version uh next is a function<br>
+<a class="time" name="t2396.55" href="#t2396.55">39:56</a> call just like all the other things so it's all function calls and calls to this function which does the same thing so it extracts the<br>
+<a class="time" name="t2405.349" href="#t2405.349">40:05</a> the next instruction from the our list of instructions it increases the program counter<br>
+<a class="time" name="t2411.91" href="#t2411.91">40:11</a> and then it just jumps to the into this table right<br>
+<a class="time" name="t2418.23" href="#t2418.23">40:18</a> based on the outcome and this table has been generated down here this code looks almost identical to our<br>
+<a class="time" name="t2429.27" href="#t2429.27">40:29</a> and this is the entry function right so we had one up here it's just a single<br>
+<a class="time" name="t2433.349" href="#t2433.349">40:33</a> function with a loop in it down here instead we have a function that is the starting point and then it passes the torch on so to speak right<br>
+<a class="time" name="t2441.109" href="#t2441.109">40:41</a> it's like okay now you go right and now you go um<br>
+<a class="time" name="t2449.829" href="#t2449.829">40:49</a> and so at this point we do eval next um this code runs right we do what we just<br>
+<a class="time" name="t2455.75" href="#t2455.75">40:55</a> talked about and it jumps to the next function so it jumps to one of these functions if we look at the<br>
+<a class="time" name="t2462.79" href="#t2462.79">41:02</a> uh the assembly that uh clang spit out we have uh<br>
+<a class="time" name="t2471.51" href="#t2471.51">41:11</a> the entry function on here so this just sets things up this does the same stuff we talked about before it loads you know the the offset<br>
+<a class="time" name="t2479.43" href="#t2479.43">41:19</a> of this table when you have to talk about that and then it just does a jump<br>
+<a class="time" name="t2482.47" href="#t2482.47">41:22</a> to eval next right so this is where we<br>
+<a class="time" name="t2486.63" href="#t2486.63">41:26</a> begin our little journey and and in this case i think it added it to the end it just you know it just<br>
+<a class="time" name="t2492.39" href="#t2492.39">41:32</a> moves code around tries to be clever about that that's what it added it to the end and so eval next<br>
+<a class="time" name="t2498.79" href="#t2498.79">41:38</a> will so here's where we start seeing some of the potential downsides in code quality<br>
+<a class="time" name="t2505.99" href="#t2505.99">41:45</a> between tail calls and using a switch so it for some reason pushes<br>
+<a class="time" name="t2514.39" href="#t2514.39">41:54</a> the uh the stack base pointer onto the stack<br>
+<a class="time" name="t2519.589" href="#t2519.589">41:59</a> and then it copies the uh the base pointer to the stack<br>
+<a class="time" name="t2524.23" href="#t2524.23">42:04</a> pointer and essentially it does like stack work but it doesn't actually use<br>
+<a class="time" name="t2527.75" href="#t2527.75">42:07</a> the stack um this function right so none of these<br>
+<a class="time" name="t2532.15" href="#t2532.15">42:12</a> functions use the stack so it's just like this this is just busy<br>
+<a class="time" name="t2539.03" href="#t2539.03">42:19</a> work it's not accomplishing anything so so the commodity kind of failed there unless i'm like totally missing something but uh i don't i don't think this is used in the stack at all so anyhow it it it<br>
+<a class="time" name="t2548.79" href="#t2548.79">42:28</a> takes the hit of doing that work that doesn't need to do and then it does the<br>
+<a class="time" name="t2553.349" href="#t2553.349">42:33</a> work of you know loading the instruction increasing the the problem counter and<br>
+<a class="time" name="t2557.829" href="#t2557.829">42:37</a> looking like loading the address getting to upload the address and into uh it<br>
+<a class="time" name="t2565.67" href="#t2565.67">42:45</a> choose this register x and that does um to uh whichever function not just that<br>
+<a class="time" name="t2570.63" href="#t2570.63">42:50</a> right so in our little example program let's see if we can scroll up to one of the printouts we first have a move and then after that we got a load and<br>
+<a class="time" name="t2581.99" href="#t2581.99">43:01</a> then we got a brz and so on all right so uh the first thing it's going to do<br>
+<a class="time" name="t2586.55" href="#t2586.55">43:06</a> is going to jump to here right so we'll start executing code here and here again we see it again does work uh to use to<br>
+<a class="time" name="t2595.75" href="#t2595.75">43:15</a> save the stack state essentially um and it does the the the balancing work<br>
+<a class="time" name="t2601.03" href="#t2601.03">43:21</a> down here to restore the stack state even though it does not use the stack<br>
+<a class="time" name="t2605.99" href="#t2605.99">43:25</a> uh so maybe maybe there's a way to say tell the compiler um i guess a lot and then you know<br>
+<a class="time" name="t2611.51" href="#t2611.51">43:31</a> to tell the compiler as you're finished my thought to tell the compiler um uh<br>
+<a class="time" name="t2618.069" href="#t2618.069">43:38</a> not to bother with those stack things or rather to say like hey this this function is never used anywhere else than here but i<br>
+<a class="time" name="t2625.43" href="#t2625.43">43:45</a> think static should accomplish that that you know it's just local to this this file this compilation unit and uh the rest of the code here is like<br>
+<a class="time" name="t2635.109" href="#t2635.109">43:55</a> pretty step forward it's just what we're seeing here so it<br>
+<a class="time" name="t2639.67" href="#t2639.67">43:59</a> gets the argument a um and it loads another registers and<br>
+<a class="time" name="t2644.87" href="#t2644.87">44:04</a> move thing is essentially just copying uh the value in one register to the<br>
+<a class="time" name="t2651.03" href="#t2651.03">44:11</a> to another register and then it jumps and it keeps going<br>
+<a class="time" name="t2657.91" href="#t2657.91">44:17</a> so this is a totally valid and viable solution for us this tail call<br>
+<a class="time" name="t2663.99" href="#t2663.99">44:23</a> approach uh it will have roughly the same runtime characteristics it will have the same limitations which are<br>
+<a class="time" name="t2670.23" href="#t2670.23">44:30</a> uh which are non since it does not use the stack right it can just keep<br>
+<a class="time" name="t2674.87" href="#t2674.87">44:34</a> it it won't sort of uh grow the stack or anything like that even if it it might appear too right<br>
+<a class="time" name="t2680.069" href="#t2680.069">44:40</a> this is doing a call and call and call a call um but unfortunately the the uh the ergonomics<br>
+<a class="time" name="t2688.95" href="#t2688.95">44:48</a> here and the code repetition i think just kind of erases some of the usefulness of this at least with this<br>
+<a class="time" name="t2695.03" href="#t2695.03">44:55</a> such a good compiler like clang that is able to uh to produce really good code with efficient register usage for the switch case um so i think the switch case it is<br>
+<a class="time" name="t2709.43" href="#t2709.43">45:09</a> uh it is portable it seems the hundred good code in this case and if it ever becomes a performance issue we can always do one of the other two approaches for for uh for that to<br>
+<a class="time" name="t2720.87" href="#t2720.87">45:20</a> improve performance but again performance is not a<br>
+<a class="time" name="t2724.63" href="#t2724.63">45:24</a> question right now okay so what you're going to do is uh i'm going<br>
+<a class="time" name="t2731.27" href="#t2731.27">45:31</a> to make a let's see i'm just going to make a copy of this i just want to keep this around so i have a little like<br>
+<a class="time" name="t2737.829" href="#t2737.829">45:37</a> i just pasted in a temporary buffer so i i<br>
+<a class="time" name="t2741.829" href="#t2741.829">45:41</a> tend to keep little copies around of things that are written so i can go and reference them again later um but now we just can remove all the<br>
+<a class="time" name="t2752.47" href="#t2752.47">45:52</a> so this bye bye check in on the stream and see if it still works yeah it does amazing<br>
+<a class="time" name="t2761.03" href="#t2761.03">46:01</a> and uh almost no one is watching that's amazing yeah this i can i can see how this is boring the most um okay so we can just drop this we just inline<br>
+<a class="time" name="t2781.43" href="#t2781.43">46:21</a> put the switch here uh next shortening precise<br>
+<a class="time" name="t2787.43" href="#t2787.43">46:27</a> the the case might be a simpler to use case<br>
+<a class="time" name="t2793.99" href="#t2793.99">46:33</a> r up um<br>
+<a class="time" name="t2811.349" href="#t2811.349">46:51</a> and all of this goes away okay now 30 40-ish lines<br>
+<a class="time" name="t2817.99" href="#t2817.99">46:57</a> that's pretty good i mean it doesn't really do much<br>
+<a class="time" name="t2823.19" href="#t2823.19">47:03</a> um and another thing we can do here we can just drop this label we can do a for<br>
+<a class="time" name="t2829.349" href="#t2829.349">47:09</a> loop and before doing this just to verify that<br>
+<a class="time" name="t2832.87" href="#t2832.87">47:12</a> this doesn't have a weird impact on good quality but i don't<br>
+<a class="time" name="t2836.39" href="#t2836.39">47:16</a> think it would let's do this<br>
+<a class="time" name="t2844.069" href="#t2844.069">47:24</a> should never be able to get outside of it um so that's guaranteed at this point uh<br>
+<a class="time" name="t2850.23" href="#t2850.23">47:30</a> and we can return from our function and let's get these cups next to<br>
+<a class="time" name="t2861.99" href="#t2861.99">47:41</a> okay see if that works<br>
+<a class="time" name="t2865.75" href="#t2865.75">47:45</a> yeah that's roughly the same code<br>
+<a class="time" name="t2869.309" href="#t2869.309">47:49</a> uh lbp1 let's see<br>
+<a class="time" name="t2878.95" href="#t2878.95">47:58</a> 15. i see just stay slippery ah interesting<br>
+<a class="time" name="t2902.95" href="#t2902.95">48:22</a> yeah we definitely get more is more code in this case um and different go to you<br>
+<a class="time" name="t2907.51" href="#t2907.51">48:27</a> know so the again i keep talking about perf but i think it's at this<br>
+<a class="time" name="t2912.95" href="#t2912.95">48:32</a> it's just important to keep mentioning that this is not about performance it's more about the the quality of things it just feels good you know if you're like making i mean this hobby project is not for um for any commercial purposes right like so the incentives here are not efficiency in terms of money or getting<br>
+<a class="time" name="t2929.829" href="#t2929.829">48:49</a> shipping things or anything like that here my incentives are like about making<br>
+<a class="time" name="t2934.549" href="#t2934.549">48:54</a> something that is that is nice you know that is kind of elegant that feels good<br>
+<a class="time" name="t2939.43" href="#t2939.43">48:59</a> um and so that is the driving motivator by me is like doing all this work right now i just wanted to feel good you know<br>
+<a class="time" name="t2947.109" href="#t2947.109">49:07</a> it's like if you make a nice uh wooden table or something like that then you<br>
+<a class="time" name="t2951.109" href="#t2951.109">49:11</a> for yourself you might take is the time you need to make sure that the the wood<br>
+<a class="time" name="t2956.71" href="#t2956.71">49:16</a> uh and yes it's the right piece of wood and uh you know the way you fold your<br>
+<a class="time" name="t2961.03" href="#t2961.03">49:21</a> wooden stuff is like all the little things that uh commercially might not make any sense to do you you would do it right uh or your home you know well little<br>
+<a class="time" name="t2971.589" href="#t2971.589">49:31</a> things that makes things nice um<br>
+<a class="time" name="t2975.03" href="#t2975.03">49:35</a> so i think it really doesn't matter what we're doing here this label is also shorter than the for loop ish<br>
+<a class="time" name="t3004.15" href="#t3004.15">50:04</a> stick to this let's be good uh more familiar to someone else who might stumble up endless up on this kid to see that yeah break is a familiar<br>
+<a class="time" name="t3020.47" href="#t3020.47">50:20</a> thing capital letters next is is not fishes okay i think we're gonna stop it<br>
+<a class="time" name="t3032.71" href="#t3032.71">50:32</a> there um this has been pretty long what we've done and let me exit out of<br>
+<a class="time" name="t3041.43" href="#t3041.43">50:41</a> this and run the program again uh so what we've done now we've we've put together a uh<br>
+<a class="time" name="t3046.15" href="#t3046.15">50:46</a> the the beginning the sapling of uh the<br>
+<a class="time" name="t3050.95" href="#t3050.95">50:50</a> evaluator of the virtual machine uh it seems to be working we know that the code we're generating is<br>
+<a class="time" name="t3057.75" href="#t3057.75">50:57</a> nice and small and reliable we've done it in a standard<br>
+<a class="time" name="t3061.75" href="#t3061.75">51:01</a> way portable way so if you toss that into toss this into<br>
+<a class="time" name="t3067.27" href="#t3067.27">51:07</a> another compiler we can be fairly confident that it'll work in behavior the same way the code is very readable<br>
+<a class="time" name="t3075.43" href="#t3075.43">51:15</a> it's very straightforward code we so far we might add to these locals that<br>
+<a class="time" name="t3081.51" href="#t3081.51">51:21</a> we're using here but so far like we're getting we're getting by with uh<br>
+<a class="time" name="t3085.349" href="#t3085.349">51:25</a> with fairly small and clear code we just deal with a<br>
+<a class="time" name="t3089.03" href="#t3089.03">51:29</a> single function um it's all good so in the next in the next part<br>
+<a class="time" name="t3097.589" href="#t3097.589">51:37</a> um we will be uh flushing out the uh the other instructions that we need to complete our uh function our example<br>
+<a class="time" name="t3103.43" href="#t3103.43">51:43</a> function here uh and then we'll see the running so<br>
+<a class="time" name="t3107.349" href="#t3107.349">51:47</a> here we're calling it so we'll see that function running and we'll hopefully see this the correct result coming out at the end and then we would have<br>
+<a class="time" name="t3114.71" href="#t3114.71">51:54</a> implemented and completed the first big milestone of this project which would be<br>
+<a class="time" name="t3119.67" href="#t3119.67">51:59</a> to have a full pipeline where we construct a program we evaluate the<br>
+<a class="time" name="t3124.47" href="#t3124.47">52:04</a> program into the uh the actual uh you know results so it'll<br>
+<a class="time" name="t3129.67" href="#t3129.67">52:09</a> be a complete very small very limited but still complete and valid a little<br>
+<a class="time" name="t3133.589" href="#t3133.589">52:13</a> virtual um virtual machine so uh check out next part and<br>
+<a class="time" name="t3138.4" href="#t3138.4">52:18</a> i hope you enjoyed this one<br>
+</p>

@@ -1,0 +1,21 @@
+@font-face {
+  font-family: Inter_v;
+  font-style: oblique 0deg 10deg;
+  font-weight: 100 900;
+  font-display: block;
+  src: url('Inter-V.var.woff2') format("woff2");
+}
+@font-face {
+  font-family: 'jbmono';
+  font-weight: 100 800;
+  font-style: normal;
+  font-named-instance: 'Regular';
+  src: url("https://rsms.me/res/fonts/jbm/jetbrains-mono-wght.woff2") format("woff2");
+}
+@font-face {
+  font-family: 'jbmono';
+  font-weight: 100 800;
+  font-style: italic;
+  font-named-instance: 'Italic';
+  src: url("https://rsms.me/res/fonts/jbm/jetbrains-mono-italic_wght.woff2") format("woff2");
+}

@@ -1,0 +1,449 @@
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>rsm</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <style type="text/css">
+
+@font-face {
+  font-family: basis33;
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('basis33.woff2') format('woff2');
+}
+
+body {
+  padding:0;
+  margin:0;
+  background: white;
+  color:black;
+  height: 100%; /* firefox */
+
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  font-smoothing: unset;
+  filter: contrast(1);
+  font-family: basis33, monospace; font-size: 24px; line-height: 1.0;
+}
+pre, code, textarea, button {
+  font: inherit;
+  margin: 0;
+}
+form { margin: 0; }
+
+button {
+/*  background: #000;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  line-height: 24px;*/
+}
+
+.main {
+  position: absolute;
+  top: 0; right: 0; bottom: 0; left: 0;
+  display: flex;
+  flex-direction: row;
+  justify-content: stretch;
+  justify-items: stretch;
+  overflow: hidden;
+}
+  .main .texts {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: stretch;
+    overflow: hidden;
+  }
+    .main .texts > * {
+      flex: 1 1;
+      flex-direction: column;
+      display: flex;
+    }
+    .main .texts > * > *:first-child {
+      padding: 16px 24px 8px 24px;
+      opacity: 0.2;
+      user-select: none;
+      cursor: default;
+      pointer-events: none;
+    }
+    .main .texts .editor {
+      overflow: hidden;
+    }
+      .editor .scroll {
+        flex: 1 1;
+        display: block;
+        overflow-y: auto;
+      }
+        .editor .scroll .wrap {
+          flex: 1 1;
+          display: flex;
+        }
+          .editor .wrap .lineno {
+            white-space: pre;
+            padding-left: 8px;
+            opacity: 0.4;
+            user-select: none;
+            cursor: default;
+            pointer-events: none;
+          }
+          .editor .wrap textarea {
+            flex: 1 1;
+            display: block;
+            padding: 0 24px 24px 8px;
+            background: none;
+            white-space: pre;
+            font-size: inherit;
+            outline: none;
+            border: none;
+            resize: none;
+            overflow-y: hidden;
+            -moz-tab-size: 2;
+            -o-tab-size: 2;
+            tab-size: 2;
+          }
+    .main .texts .console {
+      overflow: auto;
+      border-left: 2px solid #000;
+    }
+      .main .texts .console #console {
+        /*overflow: auto;*/
+        white-space: pre-wrap;
+        font-size: inherit;
+        margin: 0;
+        height: 100%;
+        padding: 0 24px 24px 24px;
+      }
+      .main .texts .console #console .err {
+        background: #ffeef4;
+        color: #cf0000;
+      }
+      .main .texts .console #console .warn {
+        background: #fff8bf;
+        color: #3d2500;
+      }
+  .main .form {
+    flex: 0 1 auto;
+    flex-direction: column;
+    display: flex;
+    align-items: start;
+    overflow: hidden;
+    padding: 16px;
+    border-left: 2px solid #000;
+  }
+    .main .form > * {
+      margin-bottom: 16px;
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .main .form > .controls {
+      width: 100%;
+    }
+      .main .form > .controls button {
+        width: 100%;
+      }
+    .main .form > .regnames {
+      flex-basis: auto;
+    }
+      .main .form > .regnames > * {
+        padding-right: 8px;
+      }
+      .main .form > * > input {
+        flex: 0 0 auto;
+        height: 32px;
+        line-height: 24px;
+        padding: 8px;
+        margin: 0;
+        border: none;
+        background: #eee;
+      }
+      .main .form > * > input {
+        flex: 1 1 auto;
+        width: 100%;
+        margin-top: 4px;
+        min-width: 16px;
+        max-width: 164px;
+        font: inherit;
+        -moz-appearance: textfield;
+        /*outline: none;
+        border: none;
+        background: none;*/
+      }
+        .main .form input::-webkit-outer-spin-button,
+        .main .form input::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+
+@media (max-width:1024px) {
+  body { font-size: 16px; }
+  .main .texts { flex-direction: column; }
+  .main .form > * > input {
+    max-width: 64px;
+    height: 24px;
+    line-height: 16px;
+    padding: 2px;
+  }
+  .main .texts .console { border-left: none; border-top: 2px solid #000; }
+}
+
+@media (prefers-color-scheme:dark){}
+
+  </style>
+</head>
+<body>
+
+<div class="main">
+  <div class="texts">
+    <div class="editor">
+      <div>EDITOR</div>
+      <div class="scroll">
+        <div class="wrap">
+          <div class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12</div>
+        <textarea class="source"
+          spellcheck="false"
+          autocorrect="off"
+          autocapitalize="off"
+          wrap="soft"
+          autofocus>
+fun factorial (i32) i32 {
+    R1 = R0       // ACC = argument 0
+    R0 = 1        // RES
+    brz R1 end    // if n==0 goto end
+  b1:             // <- [b0] b1
+    R0 = R1 * R0  // RES = ACC * RES
+    R1 = R1 - 1   // ACC = ACC - 1
+    brnz R1  b1   // if n!=0 goto b1
+  end:            // <- b0 [b1]
+    ret           // RES is at R0
+}
+</textarea>
+        </div>
+      </div>
+    </div>
+    <div class="console">
+      <div>LOG</div>
+      <code id="console"></code>
+    </div>
+  </div>
+  <form class="form">
+    <div class="controls">
+      <button name="run">Run</button>
+    </div>
+    <div class="inregs"
+      title="Register state when program starts; input arguments to entry function">
+      Input R
+      <input type="number" min="0" max="18446744073709551615" step="1" value="6">
+      <input type="number" min="0" max="18446744073709551615" step="1" value="0">
+      <input type="number" min="0" max="18446744073709551615" step="1" value="0">
+      <input type="number" min="0" max="18446744073709551615" step="1" value="0">
+      <input type="number" min="0" max="18446744073709551615" step="1" value="0">
+      <input type="number" min="0" max="18446744073709551615" step="1" value="0">
+      <input type="number" min="0" max="18446744073709551615" step="1" value="0">
+      <input type="number" min="0" max="18446744073709551615" step="1" value="0">
+    </div>
+    <div class="outregs" title="Register state after program finishes">
+      Output R
+      <input type="text" readonly value="0">
+      <input type="text" readonly value="0">
+      <input type="text" readonly value="0">
+      <input type="text" readonly value="0">
+      <input type="text" readonly value="0">
+      <input type="text" readonly value="0">
+      <input type="text" readonly value="0">
+      <input type="text" readonly value="0">
+    </div>
+  </form>
+</div>
+
+<script>
+const console_elem = document.querySelector("#console")
+const textarea_elem = document.querySelector("textarea.source")
+const inregs_elem = document.querySelector(".inregs")
+const outregs_elem = document.querySelector(".outregs")
+const form_elem = document.querySelector(".form")
+const run_button = document.querySelector('button[name="run"]')
+const lineno_elem = document.querySelector('.editor .lineno')
+
+function htmllog(line, className) {
+  const span = document.createElement("span")
+  if (className)
+    span.className = className
+  span.innerText = line + "\n"
+  console_elem.appendChild(span)
+  if (span.scrollIntoViewIfNeeded) {
+    span.scrollIntoViewIfNeeded()
+  } else {
+    span.scrollIntoView()
+  }
+}
+
+function logerr(msg, iswarning) {
+  console.error(msg)
+  htmllog(msg, iswarning ? "warn" : "err")
+}
+
+window.onerror = function(message, source, lineno, colno, error) {
+  logerr(`web browser error: ${message}`)
+}
+</script>
+<script type="module">
+import { createRSMInstance } from "./rsm.js"
+
+// API
+//   interface VMCode { filename: string; length: number }
+//   interface RSMInstance {
+//     compile(source :string, filename? :string) :VMCode
+//       // Compiles RSM assembly to VM bytecode. Throws errors.
+//     vmexec(vmcode :VMCode, ...args :int[]) :int[8]
+//       // Takes up to 8 arguments (R0...R7), returns state of R0...R7
+//     vmfree(vmcode :VMCode) :void
+//       // Frees memory occupied by vmcode. After this call, vmcode.length==0
+//     log :(msg:string)=>void
+//       // Called by wasm module with log messages. Defaults to console.log
+//   }
+//   createRSMInstance(urlorp :string|Promise<ArrayBuffer>, nmempages? :number) :RSMInstance
+//     // Creates a new RSM WASM module instance and initializes it.
+//     // nmempages specifies the number of memory pages to allocate for the wasm instance.
+//     // (One page is 65536 B, 64 ikB.)
+(async() => { try {
+
+let rsm = await createRSMInstance("rsm.wasm")
+
+// rsm = await createRSMInstance("../out/rsm.wasm?" + Date.now());console.log("rsm",rsm)
+let vmcode = null
+let lineno_timer = null
+let lineno_count = 0
+textarea_elem.oninput = onedit
+textarea_elem.focus()
+form_elem.onsubmit = () => { run(); return false }
+run_button.onclick = () => {}
+
+rsm.log = (line) => {
+  console.log(line)
+  htmllog(line)
+}
+
+function onedit(ev) {
+  clearTimeout(lineno_timer)
+  lineno_update()
+  // lineno_timer = setTimeout(lineno_update, 100)
+  compile()
+}
+
+function lineno_update() {
+  let text = textarea_elem.value
+  let nlines = 1
+  let pos = 0
+  for (;;) {
+    pos = text.indexOf('\n', pos)
+    if (pos == -1)
+      break
+    pos++
+    nlines++
+  }
+  if (nlines == 0)
+    nlines = 1
+  if (nlines == lineno_count)
+    return
+
+  if (lineno_count == 0 || nlines < lineno_count) {
+    // no state or lines were removed
+    let s = ""
+    for (let i = 0; i < nlines; i++)
+      s += (i+1) + "\n"
+    lineno_elem.innerText = s
+  } else {
+    // lines added
+    let s = ""
+    for (let i = 0; i < nlines - lineno_count; i++)
+      s += (i+nlines) + "\n"
+    lineno_elem.innerText += s
+  }
+  lineno_count = nlines
+}
+
+async function compile(isretry) {
+  console_elem.innerText = ""
+  if (vmcode)
+    rsm.vmfree(vmcode)
+  try {
+    let start = performance.now()
+    vmcode = rsm.compile(textarea_elem.value)
+    htmllog(`compiled program (${vmcode.length} instr, ${fmtduration(start)})`)
+    htmllog(rsm.vmfmt(vmcode))
+    run_button.disabled = false
+    return true
+  } catch (err) {
+    if (err.message == "out of memory" && !isretry) {
+      // until we have a better memory allocator, just reset the WASM instance on OOM
+      rsm = await createRSMInstance()
+      return compile(true)
+    }
+    logerr(err.message, err.message.includes(" warning:"))
+    vmcode = null
+    run_button.disabled = true
+    return false
+  }
+}
+
+function run() {
+  if (!vmcode) {
+    htmllog(`can't run invalid program`)
+    return
+  }
+
+  // set input register state
+  let inregs = []
+  if (typeof BigInt == "undefined") {
+    for (let i = 0; i < 8; i++)
+      inregs[i] = parseInt(inregs_elem.children[i].value) >>> 0
+  } else {
+    for (let i = 0; i < 8; i++)
+      inregs[i] = BigInt(inregs_elem.children[i].value)
+  }
+
+  htmllog(`running program (${vmcode.length} instructions)`)
+  let start = performance.now()
+  let result = rsm.vmexec(vmcode, ...inregs)
+  htmllog(`program finished after ${fmtduration(start)}`)
+
+  // update UI with output register state
+  for (let i = 0; i < 8; i++)
+    outregs_elem.children[i].value = result[i]
+}
+
+function fmtduration(starttime) {
+  let ms = performance.now() - starttime
+  return (
+    ms >  1000   ? (ms/1000).toFixed(2) + "s" :
+    ms >= 1      ? ms.toFixed(1) + "ms" :
+    ms <  0.0001 ? "<1µs" :
+    (ms*1000).toFixed(0) + "µs"
+  )
+}
+
+lineno_update()
+compile().then(ok => { ok && run() })
+
+} catch (e) {
+  logerr(`js error: ${e}`)
+}})()
+</script>
+</body>
+</html>

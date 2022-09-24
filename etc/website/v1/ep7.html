@@ -1,0 +1,91 @@
+---
+layout: simple2
+title: "Transcript of RSM Episode 7"
+---
+
+<h1>{{page.title}}</h1>
+<p><a href="./">RSM project page</a></p>
+<p>
+<a class="time" name="t5.11" href="#t5.11">00:05</a> so welcome to part seven this is going to be very brief because if you would<br>
+<a class="time" name="t10.47" href="#t10.47">00:10</a> like to learn more about what's been going on since part six<br>
+<a class="time" name="t14.95" href="#t14.95">00:14</a> i was doing a live stream it's quite long but there's a link in the description here on the if you're<br>
+<a class="time" name="t20.63" href="#t20.63">00:20</a> watching this on the youtube and it will be a link on the<br>
+<a class="time" name="t24.15" href="#t24.15">00:24</a> web page too to the recording of the live stream<br>
+<a class="time" name="t30.87" href="#t30.87">00:30</a> during that stream we were implementing the parser for the assembler or at least the beginning of it and we got it working you can see it opening here on the side i'll just summarize that and show you in<br>
+<a class="time" name="t42.95" href="#t42.95">00:42</a> just a minute and to make any change to anything else i don't think so no we did not uh so we spent most of the<br>
+<a class="time" name="t51.59" href="#t51.59">00:51</a> time in here writing this out<br>
+<a class="time" name="t56.31" href="#t56.31">00:56</a> what we've introduced is uh a couple of things we have a pratt style<br>
+<a class="time" name="t63.028999999999996" href="#t63.028999999999996">01:03</a> parser that uses the dispatch table with prefix and infix parslets<br>
+<a class="time" name="t67.35" href="#t67.35">01:07</a> for handling uh precedence and stuff like that we have introduced a new structure called a node or describing an ast or<br>
+<a class="time" name="t76.31" href="#t76.31">01:16</a> maybe an you know ssa thing later who knows but the thing is that we parse as<br>
+<a class="time" name="t80.39" href="#t80.39">01:20</a> a node it's really simple right now it has a<br>
+<a class="time" name="t85.429" href="#t85.429">01:25</a> type where we can reuse just the token for from the scanner that we looked at in the previous part we have the source location<br>
+<a class="time" name="t93.83" href="#t93.83">01:33</a> for it and as well as some data fields<br>
+<a class="time" name="t100.63" href="#t100.63">01:40</a> depending on the type of dna node and the actual the actual parser itself<br>
+<a class="time" name="t105.91" href="#t105.91">01:45</a> ended up being fairly small we gave we get the uh the scanner here a<br>
+<a class="time" name="t110.469" href="#t110.469">01:50</a> better name for advanced the parser since we ended up just kind of cutting it down it's sort of logically more what it does rather than like scan talk which is<br>
+<a class="time" name="t119.91" href="#t119.91">01:59</a> technically i guess more correct but advanced advance um makes more sense<br>
+<a class="time" name="t126.069" href="#t126.069">02:06</a> and i here start some of the the the parse code that we wrote or i wrote<br>
+<a class="time" name="t131.029" href="#t131.029">02:11</a> is it oh yeah we i don't know i want to feel like we're doing this together but so we implemented two parslets<br>
+<a class="time" name="t143.99" href="#t143.99">02:23</a> one that's a prefix parselet for the uh for the register type<br>
+<a class="time" name="t148.79" href="#t148.79">02:28</a> uh a token and it's really straightforward we create one of these nodes that we that we defined and we set<br>
+<a class="time" name="t155.03" href="#t155.03">02:35</a> its value to the current numeric value that's been<br>
+<a class="time" name="t159.67000000000002" href="#t159.67000000000002">02:39</a> parsed right so if we reduce the one over here it would be one<br>
+<a class="time" name="t163.67000000000002" href="#t163.67000000000002">02:43</a> and then we advance departure to the next token<br>
+<a class="time" name="t170.309" href="#t170.309">02:50</a> and then we wrote an infix parslet for the equality operator<br>
+<a class="time" name="t175.19" href="#t175.19">02:55</a> this one takes a thing on the left side in the example here it'll get a register<br>
+<a class="time" name="t180.229" href="#t180.229">03:00</a> so receive it here and then it will parse an expression on the right hand side which in our example will be is not<br>
+<a class="time" name="t185.99" href="#t185.99">03:05</a> a register and it builds up a yet another node with<br>
+<a class="time" name="t192.22899999999998" href="#t192.22899999999998">03:12</a> operands instead of an integer value this type of node will have two operands which is these are the<br>
+<a class="time" name="t198.39" href="#t198.39">03:18</a> the left-hand side and the right-hand then we have the then we have the<br>
+<a class="time" name="t209.03" href="#t209.03">03:29</a> parser dispatch table this map a token to uh a<br>
+<a class="time" name="t216.71" href="#t216.71">03:36</a> prefix parslet and or an infix parslet so we see that for registered tokens we have our register prefix parsley up here<br>
+<a class="time" name="t224.949" href="#t224.949">03:44</a> and for the uh the equal sign we have our in equal in fixed parser for the<br>
+<a class="time" name="t233.11" href="#t233.11">03:53</a> and comments we just ignore and all the other tokens we'll have just zero here<br>
+<a class="time" name="t237.82999999999998" href="#t237.82999999999998">03:57</a> and we're we're sort of saying that you know to do essentially for those things<br>
+<a class="time" name="t241.75" href="#t241.75">04:01</a> and we'll keep adding to this table as we add more parse functions for more<br>
+<a class="time" name="t246.63" href="#t246.63">04:06</a> types of things and finally we have the the sort of the<br>
+<a class="time" name="t251.27" href="#t251.27">04:11</a> um the the less specific the the root parse<br>
+<a class="time" name="t256.789" href="#t256.789">04:16</a> function whatever that parses like any statement<br>
+<a class="time" name="t261.83" href="#t261.83">04:21</a> and expects a semicolon explicit or implicit at the end<br>
+<a class="time" name="t266.95" href="#t266.95">04:26</a> and this one is the sort of the the thing that does the lookup in the<br>
+<a class="time" name="t270.87" href="#t270.87">04:30</a> table so it takes the current token that's been scanned which we've primed<br>
+<a class="time" name="t274.71" href="#t274.71">04:34</a> the person out before we call this the first time so it takes the it looks for previous parts that it's an error if it doesn't find one and at this point we will find a lot because we're still working on it<br>
+<a class="time" name="t286.15" href="#t286.15">04:46</a> the next thing it does is that it calls the prefix parselet and so what happens<br>
+<a class="time" name="t289.749" href="#t289.749">04:49</a> here is really just like calling one of these functions right so we'll call the the partial distance function<br>
+<a class="time" name="t298.39" href="#t298.39">04:58</a> and the result from that will be in node uh and we have some code here to catch some errors some programming errors as we're working on this and the next thing that it does is that<br>
+<a class="time" name="t309.83" href="#t309.83">05:09</a> it looks for an infix parser parslet matching the token that comes after here<br>
+<a class="time" name="t315.43" href="#t315.43">05:15</a> so in the case of you know we have a you know register what's it<br>
+<a class="time" name="t319.909" href="#t319.909">05:19</a> um register one will be he will be here<br>
+<a class="time" name="t335.35" href="#t335.35">05:35</a> right um at this point and then sorry at this point we'll be there<br>
+<a class="time" name="t342.15" href="#t342.15">05:42</a> and after we parse that the parser is now here and there is a infix parslet for the equal sign<br>
+<a class="time" name="t351.189" href="#t351.189">05:51</a> so we'll look that up and we'll pass along the thing that we just parsed into<br>
+<a class="time" name="t354.71" href="#t354.71">05:54</a> there the infix function and we keep doing that as as long as we have infix<br>
+<a class="time" name="t362.07" href="#t362.07">06:02</a> parslets available for the next token that we got and as long as the the precedence there is the same or higher<br>
+<a class="time" name="t368.95" href="#t368.95">06:08</a> we just keep wrapping essentially um tokens sorry nodes that were parsing sd notes<br>
+<a class="time" name="t376.07" href="#t376.07">06:16</a> and we can see that wrapping effect over here so this is the result of parsing the<br>
+<a class="time" name="t386.309" href="#t386.309">06:26</a> so we sample program here let me scroll it up oh it's in a different file of<br>
+<a class="time" name="t389.43" href="#t389.43">06:29</a> course so here's a sample program these two we<br>
+<a class="time" name="t397.59000000000003" href="#t397.59000000000003">06:37</a> will uh we'll have this wrapping effect first we parse the r1 right and then the infix<br>
+<a class="time" name="t403.909" href="#t403.909">06:43</a> thing comes into play and we pass that kind of throw that in there and that parses another one and that that<br>
+<a class="time" name="t411.749" href="#t411.749">06:51</a> wraps those two uh into one and that's how we got the the tree structure from<br>
+<a class="time" name="t416.95" href="#t416.95">06:56</a> this type of uh parser this type of parser and yeah so uh so that was the success<br>
+<a class="time" name="t423.27" href="#t423.27">07:03</a> we ended up uh parsing a very simple but yet valid<br>
+<a class="time" name="t430.629" href="#t430.629">07:10</a> uh tiny chunk of our assembly language here and in the next<br>
+<a class="time" name="t436.469" href="#t436.469">07:16</a> in the next part let me save that changes that i made in the next part<br>
+<a class="time" name="t440.629" href="#t440.629">07:20</a> we'll be looking at expanding this partially to cover the entire example factorial function<br>
+<a class="time" name="t447.909" href="#t447.909">07:27</a> and that includes all of the syntax of of this which looks like a lot that is probably<br>
+<a class="time" name="t453.99" href="#t453.99">07:33</a> going to be pretty pure little code to add to our already existing parser most<br>
+<a class="time" name="t458.87" href="#t458.87">07:38</a> of the infrastructure is there after that will be and let me switch back to<br>
+<a class="time" name="t463.749" href="#t463.749">07:43</a> uh assembly assembler file here<br>
+<a class="time" name="t467.909" href="#t467.909">07:47</a> so after that uh we'll be working on the<br>
+<a class="time" name="t473.11" href="#t473.11">07:53</a> analysis pass which also i suspect will be very minimal we might actually not even need it for to complete you know<br>
+<a class="time" name="t479.35" href="#t479.35">07:59</a> our example function so this will do things like making sure that you know um if you the types match and stuff like that<br>
+<a class="time" name="t489.11" href="#t489.11">08:09</a> and then what we'll do next is the code generation to generate these virtual<br>
+<a class="time" name="t492.79" href="#t492.79">08:12</a> machine instructions which we can then pass on to our<br>
+<a class="time" name="t497.51" href="#t497.51">08:17</a> interpreter and run all programs from the command line and stuff like that and it's got to be a big milestone<br>
+<a class="time" name="t503.909" href="#t503.909">08:23</a> so that's what we've been up to since the since the past part six uh and i<br>
+<a class="time" name="t509.909" href="#t509.909">08:29</a> hope uh that you enjoy these little videos and the progress and uh if you're<br>
+<a class="time" name="t513.909" href="#t513.909">08:33</a> interested in stuff i hope you've also found the code on github and maybe<br>
+<a class="time" name="t518.31" href="#t518.31">08:38</a> following along maybe you're even making your own version of this that'd be cool to see and so bye bye for now see you later<br>
+</p>

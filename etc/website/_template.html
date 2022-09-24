@@ -1,0 +1,16 @@
+<!DOCTYPE HTML>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ page.title.startsWith("RSM") ? page.title : page.title + " • RSM" }}</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="shortcut icon" href="/favicon.ico">
+  <link rel="stylesheet" type="text/css" href="{{
+    cacheBustFileURL(site.baseURL + 'style.css') }}">
+</head>
+<body>
+<a href="{{ site.baseURL }}"><img src="{{ site.baseURL }}rsm.svg" alt="RSM" class="logo" width=96 height=96></a>
+{{! page.body }}
+</body>
+</html>

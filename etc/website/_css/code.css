@@ -1,0 +1,116 @@
+pre {
+  --fg-comment:    rgba(var(--foreground-color-rgb),0.5);
+  --fg-commenterr: rgb(186, 94, 81);
+  --fg-keyword:    #d73a49;
+  --fg-type:       var(--fg-keyword);
+  --fg-data:       #333377;
+  --fg-string:     #333377;
+  --fg-diff-add:   #55a532;
+  --bg-diff-add:   #eaffea;
+  --fg-diff-rem:   #bd2c00;
+  --bg-diff-rem:   #ffecec;
+
+  @media (prefers-color-scheme: dark) {
+    --fg-comment:    rgba(var(--foreground-color-rgb),0.4);
+    --fg-commenterr: #735048;
+    --fg-keyword:    #ff7b72;
+    --fg-data:       #abe0ec;
+    --fg-string:     rgb(165, 214, 255);
+    --fg-diff-add:   #55a532;
+    --bg-diff-add:   #eaffea;
+    --fg-diff-rem:   #bd2c00;
+    --bg-diff-rem:   #ffecec;
+  }
+
+  background:    var(--code-bg);
+  font-size:     0.875rem;  /* 14dp @ font-size 16 */
+  /* font-size:     0.9375rem; */  /* 15dp @ font-size 16 */
+  padding:       0.625rem;  /* 10dp @ font-size 16 */
+  border-radius: 0.3125rem; /* 5dp @ font-size 16 */
+  -webkit-text-size-adjust: none;
+}
+
+/* comments  */
+.hl-comment {
+  color: var(--fg-comment);
+  & .hl-errormsg { color: var(--fg-commenterr) }
+}
+
+/* meta (?) */
+.hl-meta { color: var(--fg-keyword) }
+
+/* variable */
+.hl-variable,
+.hl-template-variable {
+  /* color: rgba(var(--foreground-color-rgb),0.6); */
+}
+
+/* type */
+.hl-type {
+  color: var(--fg-type);
+}
+
+/* keywords */
+.hl-keyword,
+.hl-selector-tag,
+.hl-section,
+.hl-name,
+.hl-tag,
+.hl-attr,
+.hl-selector-id,
+.hl-selector-class,
+.hl-selector-attr,
+.hl-selector-pseudo,
+.hl-built_in {
+  color: var(--fg-keyword);
+}
+
+/* data  */
+.hl-strong,
+.hl-emphasis,
+.hl-number,
+.hl-literal,
+.hl-bullet,
+.hl-attribute,
+.hl span.n + span.o + span.n {
+  color: var(--fg-data);
+}
+
+/* string literal data */
+.hl-string,
+.hl-quote {
+  color: var(--fg-string);
+}
+
+.hl-typedef {
+  .hl-title {
+    font-weight: 600;
+  }
+}
+
+.hl-symbol {
+  font-weight: 500;
+}
+
+.hl-function {
+  .hl-title {
+    font-weight: 600;
+  }
+  .hl-params {}
+  .hl-params + .hl-title {
+    color: var(--fg-type);
+    font-weight: initial;
+  }
+}
+
+/* diff */
+.hl-addition { color:var(--fg-diff-add); background-color:var(--bg-diff-add); }
+.hl-deletion { color:var(--fg-diff-rem); background-color:var(--bg-diff-rem); }
+
+/* hyperlink..? */
+.hl-link {}
+
+/* shell prompt */
+.language-shell > .language-bash {
+  font-weight: 600;
+}

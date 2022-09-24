@@ -1,0 +1,185 @@
+---
+layout: simple2
+title: "Transcript of RSM Episode 5"
+---
+
+<h1>{{page.title}}</h1>
+<p><a href="./">RSM project page</a></p>
+<p>
+<a class="time" name="t3.189" href="#t3.189">00:03</a> this is a pretty brief part i believe<br>
+<a class="time" name="t8.629" href="#t8.629">00:08</a> an update from where we left off in the last part this is to implement<br>
+<a class="time" name="t13.669" href="#t13.669">00:13</a> the uh evaluator of the virtual machine<br>
+<a class="time" name="t21.429" href="#t21.429">00:21</a> so we got this factorial function here and what i've done is like i've added a<br>
+<a class="time" name="t26.39" href="#t26.39">00:26</a> reference implementation just to make sure that things works<br>
+<a class="time" name="t31.75" href="#t31.75">00:31</a> in just c and then down here where we were running<br>
+<a class="time" name="t34.87" href="#t34.87">00:34</a> our program yesterday<br>
+<a class="time" name="t39.59" href="#t39.59">00:39</a> i've added a printout from running the uh the reference<br>
+<a class="time" name="t43.51" href="#t43.51">00:43</a> implementation which you know my compiler will produce code for with<br>
+<a class="time" name="t47.99" href="#t47.99">00:47</a> these same inputs and then we just do what we did yesterday<br>
+<a class="time" name="t53.75" href="#t53.75">00:53</a> and so i found a bug yesterday i was running<br>
+<a class="time" name="t61.349" href="#t61.349">01:01</a> this and i got into infinite loop so this is<br>
+<a class="time" name="t65.83" href="#t65.83">01:05</a> the output from uh from running the program so i just<br>
+<a class="time" name="t69.59" href="#t69.59">01:09</a> got into infinitely but i was like what is going on did i get this wrong since i just kind of dried code this so to speak<br>
+<a class="time" name="t76.789" href="#t76.789">01:16</a> right i didn't actually know if this was um this was the correct implementation and i was like how do i even try this<br>
+<a class="time" name="t83.10900000000001" href="#t83.10900000000001">01:23</a> so i tossed this together looked at the code that was generated from uh<br>
+<a class="time" name="t90.63" href="#t90.63">01:30</a> by my compiler which looked sort of like this lifted over show some debugging from yesterday so this is kind of what my compiler would generate for for the c function<br>
+<a class="time" name="t103.99000000000001" href="#t103.99000000000001">01:43</a> um and then i just step through it in my head like what would happen right if you<br>
+<a class="time" name="t109.19" href="#t109.19">01:49</a> know i gave it an input of three and i was like what the hell this is you know this is what i'm doing here what's what's going on um and it turned out<br>
+<a class="time" name="t118.149" href="#t118.149">01:58</a> that down here i just had a typo it's had a zero there<br>
+<a class="time" name="t123.03" href="#t123.03">02:03</a> uh where it would subtract from reduced to zero instead of raised to one um so this this was still correct but this<br>
+<a class="time" name="t130.22899999999998" href="#t130.22899999999998">02:10</a> this was not um oh yeah so once he has to fix the little<br>
+<a class="time" name="t136.39" href="#t136.39">02:16</a> mistake it actually worked and uh the evaluators this first up this<br>
+<a class="time" name="t141.589" href="#t141.589">02:21</a> is just a little function used to development utility<br>
+<a class="time" name="t145.99" href="#t145.99">02:25</a> this is the thing that prints out these numbers if we just remove this and run it you'll see that there's no output but the result from the computation is still correct okay so<br>
+<a class="time" name="t155.35" href="#t155.35">02:35</a> this is just this sort of printout so this is helpful<br>
+<a class="time" name="t159.11" href="#t159.11">02:39</a> to debug what this shows is the state of the first six registers<br>
+<a class="time" name="t163.99" href="#t163.99">02:43</a> um before an instruction so when we start<br>
+<a class="time" name="t168.55" href="#t168.55">02:48</a> this program to do<br>
+<a class="time" name="t173.43" href="#t173.43">02:53</a> down here right we set up our registers and we set up the first register which is the first argument to the number three so that's what we're seeing here is zero it's number three the rest of the zero which is should probably just<br>
+<a class="time" name="t184.869" href="#t184.869">03:04</a> do this just to make that expected so this this means<br>
+<a class="time" name="t189.67" href="#t189.67">03:09</a> that the compiler will zero all of these values of this array rather than in this case it's sort of like yolo you might get some random<br>
+<a class="time" name="t196.79" href="#t196.79">03:16</a> bytes and for debugging purposes actually it might just be why is that oh no that's not going to<br>
+<a class="time" name="t209.35" href="#t209.35">03:29</a> work of course serious special so we get mem set or something like that<br>
+<a class="time" name="t213.03" href="#t213.03">03:33</a> might actually be so let's set it to the size of<br>
+<a class="time" name="t225.589" href="#t225.589">03:45</a> the array so now these are all gonna be huge values so that's gonna be a problem but<br>
+<a class="time" name="t231.03" href="#t231.03">03:51</a> uh oh yeah my proof function does not handle that okay let's just undo what i was was doing here and do<br>
+<a class="time" name="t237.82999999999998" href="#t237.82999999999998">03:57</a> let's zero them out for now uh get sidetracked okay so this is the state of the registers<br>
+<a class="time" name="t246.309" href="#t246.309">04:06</a> and then this is just a printout of the instruction that we're running<br>
+<a class="time" name="t250.71" href="#t250.71">04:10</a> so calling this format function that we've already written it's in this<br>
+<a class="time" name="t258.15" href="#t258.15">04:18</a> this this little chunk of code used to be us in here is broke that out to a separate function so that we can print just instruction by instruction instead of a whole program<br>
+<a class="time" name="t268.31" href="#t268.31">04:28</a> and that is prints it out and then we see so state of registers before the instruction the instructions we run<br>
+<a class="time" name="t275.909" href="#t275.909">04:35</a> and then here subsequently we have the state of the registers after the instructions is executed right and then we have next instruction and so on so we<br>
+<a class="time" name="t285.909" href="#t285.909">04:45</a> see that we're copying the value of zero this is zero into resistor one<br>
+<a class="time" name="t291.909" href="#t291.909">04:51</a> and yes we have now three here in both places and the next thing we do is that we load<br>
+<a class="time" name="t299.03" href="#t299.03">04:59</a> the constant one into zero and now yes wrist zero has one<br>
+<a class="time" name="t304.39" href="#t304.39">05:04</a> uh the next swing with you uh we will conditionally do a jump here if register one<br>
+<a class="time" name="t312.55" href="#t312.55">05:12</a> is zero but it is not so this does nothing this just continues<br>
+<a class="time" name="t316.39" href="#t316.39">05:16</a> so we just continue here uh the next thing we multiply or is it<br>
+<a class="time" name="t321.909" href="#t321.909">05:21</a> zero at resistor one and zero and store that in raise to zero um<br>
+<a class="time" name="t328.15" href="#t328.15">05:28</a> and since multiplying one by three is the same there is uh there's really no<br>
+<a class="time" name="t332.469" href="#t332.469">05:32</a> difference here but indeed it did change the registers at least theoretically<br>
+<a class="time" name="t339.11" href="#t339.11">05:39</a> next thing we just subtract one from register the value under this one<br>
+<a class="time" name="t343.83" href="#t343.83">05:43</a> and then we store that to register one this is where i had a bug where i had registered zero over here um<br>
+<a class="time" name="t349.909" href="#t349.909">05:49</a> and uh so now that we've subtracted let's see<br>
+<a class="time" name="t357.11" href="#t357.11">05:57</a> yeah so we've multiplied one by three right so that meant we just get three<br>
+<a class="time" name="t361.35" href="#t361.35">06:01</a> essentially a copy and then after we've subtracted one we<br>
+<a class="time" name="t365.59" href="#t365.59">06:05</a> have two here now and uh um<br>
+<a class="time" name="t371.749" href="#t371.749">06:11</a> register one here in our implementation let me let me scroll that up here little function<br>
+<a class="time" name="t377.67" href="#t377.67">06:17</a> um whereas the one is our accumulator that<br>
+<a class="time" name="t380.95" href="#t380.95">06:20</a> is the that is the uh starts with input argument and we're going to keep subtracting that until it's zero and then we're done the function is down when n is zero and we just subtract about one for every loop<br>
+<a class="time" name="t393.11" href="#t393.11">06:33</a> so that's what what this one is doing here and then we we this is the the final like instruction<br>
+<a class="time" name="t400.39" href="#t400.39">06:40</a> here in the program then we check if<br>
+<a class="time" name="t404.15" href="#t404.15">06:44</a> um the value in register one<br>
+<a class="time" name="t409.83" href="#t409.83">06:49</a> is not zero and if it is we do a jump and in this<br>
+<a class="time" name="t414.39" href="#t414.39">06:54</a> case release one is not zero so this will do a jump and we do a jump three<br>
+<a class="time" name="t418.23" href="#t418.23">06:58</a> instructions back so they just means if we look at the the<br>
+<a class="time" name="t422.629" href="#t422.629">07:02</a> implementation of this here so here we have this instruction right<br>
+<a class="time" name="t425.99" href="#t425.99">07:05</a> so if the value of the register uh the register that we're naming<br>
+<a class="time" name="t433.029" href="#t433.029">07:13</a> is not zero then you just alter the program counter by this value so minus three<br>
+<a class="time" name="t439.99" href="#t439.99">07:19</a> and that means that once we get down here right and we're gonna rewind the<br>
+<a class="time" name="t443.35" href="#t443.35">07:23</a> programming counter three that means that we're gonna keep go back and execute this one more time and that's what happens so we see here<br>
+<a class="time" name="t453.11" href="#t453.11">07:33</a> that that these instructions here oops are repeated three times right so it happens here again and it tests as there is the one zero no it's not and it jumps back and<br>
+<a class="time" name="t463.029" href="#t463.029">07:43</a> it does this one more time and then it says is redistribu is released one is<br>
+<a class="time" name="t467.51" href="#t467.51">07:47</a> that zero and yes it is and the function is complete and we return and the return value we've<br>
+<a class="time" name="t473.029" href="#t473.029">07:53</a> uh we've multiplied since this is a zero so<br>
+<a class="time" name="t478.629" href="#t478.629">07:58</a> this is the result of the factorial function um so up here doesn't help there the the correct value we initialize it here<br>
+<a class="time" name="t487.029" href="#t487.029">08:07</a> uh and yeah i guess for input three yeah so if<br>
+<a class="time" name="t501.43" href="#t501.43">08:21</a> argument zero is three i guess that's how we can think about it<br>
+<a class="time" name="t507.589" href="#t507.589">08:27</a> when when this is three like we we were you know going up like this anyhow i shouldn't yeah that's weird uh there's a better way to expand on us but um yeah so that's that it works uh and it's<br>
+<a class="time" name="t518.949" href="#t518.949">08:38</a> you know it's a reasonably compact and<br>
+<a class="time" name="t523.67" href="#t523.67">08:43</a> unpleasant sort of the buying experience and he got to um i got to scratch my head a little bit about about that yesterday<br>
+<a class="time" name="t531.99" href="#t531.99">08:51</a> uh so so that's it for this update i just want to show you that it works again you know all of this code is on getup if it hasn't occurred to you yet<br>
+<a class="time" name="t538.63" href="#t538.63">08:58</a> um you could follow along with us if you wanted to you can you know grab a copy<br>
+<a class="time" name="t545.269" href="#t545.269">09:05</a> of the code and you can sort of uh tinker along here or you just do your<br>
+<a class="time" name="t549.43" href="#t549.43">09:09</a> own kind of thing and check in sometimes or you know just just watch it for the fun of it uh what i'm gonna do next is uh probably a little as a smd parser to be<br>
+<a class="time" name="t562.389" href="#t562.389">09:22</a> able to write this kind of code instead of this um and and probably during that point uh<br>
+<a class="time" name="t574.79" href="#t574.79">09:34</a> adding more instructions will be something that will do so right now the the instruction the set<br>
+<a class="time" name="t581.35" href="#t581.35">09:41</a> of instructions here is is very small right and actually some of these are not being used they should be tested not that they're very<br>
+<a class="time" name="t591.03" href="#t591.03">09:51</a> complicated i mean this is the entire implementation of the virtual machine right now it's very small and this is what we looked at if you're curious how we got to this look at um uh part number four<br>
+<a class="time" name="t604.87" href="#t604.87">10:04</a> of this series uh one thing though one thing i should mention that we talked about in part number four i talked about part number four was uh the the tail call<br>
+<a class="time" name="t614.79" href="#t614.79">10:14</a> table approach that we were trying out so we were trying three approaches we were trying out um a switch statement which<br>
+<a class="time" name="t621.99" href="#t621.99">10:21</a> we ended up using a label jump table approach which turns<br>
+<a class="time" name="t626.47" href="#t626.47">10:26</a> out to essentially be slightly worse code or<br>
+<a class="time" name="t630.389" href="#t630.389">10:30</a> roughly the same code a switch statement for um for more effort and then the third<br>
+<a class="time" name="t637.19" href="#t637.19">10:37</a> approach we tried was to use um functions with with tail call optimization taking so a csp style thing<br>
+<a class="time" name="t644.55" href="#t644.55">10:44</a> and we noticed when we um ran that through the compiler to to ask it to<br>
+<a class="time" name="t648.949" href="#t648.949">10:48</a> give us what the the assembly would be for the target machine the x86 in this case it inserted a lot of uh stack<br>
+<a class="time" name="t657.59" href="#t657.59">10:57</a> manipulation code uh and the prologue and epilogue of each of these functions<br>
+<a class="time" name="t661.19" href="#t661.19">11:01</a> which sort of has a uh<br>
+<a class="time" name="t665.91" href="#t665.91">11:05</a> makes it messy would you know eventually when performance get becomes you know<br>
+<a class="time" name="t671.59" href="#t671.59">11:11</a> a concern it might be a challenge anyhow it just didn't feel right and i was i was looking that up a little bit and doing some research about that<br>
+<a class="time" name="t679.11" href="#t679.11">11:19</a> and those things i guess it would be nice if<br>
+<a class="time" name="t682.949" href="#t682.949">11:22</a> i had a copy of that so i can show you what it was but essentially you can you<br>
+<a class="time" name="t687.11" href="#t687.11">11:27</a> can go back and look at par 4 if you want to have a look at the specifics but<br>
+<a class="time" name="t692.23" href="#t692.23">11:32</a> essentially at the the beginning of each function it would do something like<br>
+<a class="time" name="t696.23" href="#t696.23">11:36</a> uh push first push the uh the stack pointer<br>
+<a class="time" name="t703.11" href="#t703.11">11:43</a> to maybe the stack base pointer i can remember it's called x86 and then it would like you know it would increase the stack pointer actually it's like the frame pointer so that's the point right so it would store the frame pointer at the current stack pointer it will like increment like the stack pointer<br>
+<a class="time" name="t719.19" href="#t719.19">11:59</a> and then you know we have the actual code and then it would be do the opposite so it would restore the frame<br>
+<a class="time" name="t724.389" href="#t724.389">12:04</a> pointer from um so it would sort of um decrement the everyday stack pointer<br>
+<a class="time" name="t735.59" href="#t735.59">12:15</a> um and it turns out that if you call if you what is that f omits<br>
+<a class="time" name="t743.99" href="#t743.99">12:23</a> um frame pointer<br>
+<a class="time" name="t749.67" href="#t749.67">12:29</a> maybe paint pointer so you can give this both gcc incline<br>
+<a class="time" name="t755.99" href="#t755.99">12:35</a> accepts this then it won't generate this unless it it you know unless the function actually uses the stack<br>
+<a class="time" name="t761.11" href="#t761.11">12:41</a> um and this the frame pointer is used for debugging<br>
+<a class="time" name="t770.31" href="#t770.31">12:50</a> um it allows you and in in some languages like c plus plus that has stack unwinding and stuff like that it's i think it's also used for that at least i know it is on windows um and so you know you could you could set this<br>
+<a class="time" name="t782.55" href="#t782.55">13:02</a> and the code generator would be much leaner actually like it would be equivalent to the code of a roughly equivalent code of the switch statement which is super cool with with tail calls<br>
+<a class="time" name="t791.75" href="#t791.75">13:11</a> but uh as as far as i understand that this is a<br>
+<a class="time" name="t800.71" href="#t800.71">13:20</a> entire object or nothing deal so you wouldn't have to enable this for an entire source file uh so there's a<br>
+<a class="time" name="t807.269" href="#t807.269">13:27</a> little bit of uh ergonomic cost there to uh to doing that but i thought it just mentioned that that there is there is a way to get rid of that stuff that we saw<br>
+<a class="time" name="t816.069" href="#t816.069">13:36</a> um so yeah cool that's it uh<br>
+<a class="time" name="t823.269" href="#t823.269">13:43</a> oh yeah one one more thing i've started just doing a little thinking around uh how constants could<br>
+<a class="time" name="t831.35" href="#t831.35">13:51</a> be represented in the actual program it's a little tricky since the<br>
+<a class="time" name="t836.23" href="#t836.23">13:56</a> the instruction coding that we have looks like this um has a fixed size<br>
+<a class="time" name="t843.35" href="#t843.35">14:03</a> and the the address space is you know<br>
+<a class="time" name="t848.629" href="#t848.629">14:08</a> large even a 32-bit machine it would be much larger than even the biggest possible slot which is 24 bits<br>
+<a class="time" name="t855.35" href="#t855.35">14:15</a> and in the case of like loading a constant we we really have just 19 bits<br>
+<a class="time" name="t859.59" href="#t859.59">14:19</a> to deal with since we need a target register number and 19 bits doesn't give us much it gives us about 500 kilobytes of uh addressable<br>
+<a class="time" name="t872.069" href="#t872.069">14:32</a> space if we adjust things and bites um so that that is a challenge<br>
+<a class="time" name="t879.35" href="#t879.35">14:39</a> since you you might want to have more than 500 kilobytes of constants<br>
+<a class="time" name="t884.55" href="#t884.55">14:44</a> imagine that you would embed i don't know a little um a little database<br>
+<a class="time" name="t891.43" href="#t891.43">14:51</a> some images or something like that you might scratch up on against us 500k um<br>
+<a class="time" name="t897.59" href="#t897.59">14:57</a> so you started doing a little bit of thinking this file is in the source<br>
+<a class="time" name="t901.509" href="#t901.509">15:01</a> repository if you want to have a look at it as opposed to the the twitter thread<br>
+<a class="time" name="t905.91" href="#t905.91">15:05</a> which is linked in the in the videos and on the if you're watching this on the webpage at the top of the webpage<br>
+<a class="time" name="t914.069" href="#t914.069">15:14</a> yeah it's it's an interesting it's a really interesting problem<br>
+<a class="time" name="t919.43" href="#t919.43">15:19</a> how to how to squish these together i was thinking about at least three different things i think that there's a there's a fourth here now um so one is just to say you know that's just the limit of this thing i mean it<br>
+<a class="time" name="t932.629" href="#t932.629">15:32</a> is um it is not i'm not hoping to use this for any industry<br>
+<a class="time" name="t938.15" href="#t938.15">15:38</a> strength like huge things you know i'm gonna use this for for smaller programs<br>
+<a class="time" name="t942.069" href="#t942.069">15:42</a> so this could be okay um and for large images and stuff you might be able to sort of just load those<br>
+<a class="time" name="t948.31" href="#t948.31">15:48</a> from a separate file could use some sort of fancy compression<br>
+<a class="time" name="t956.87" href="#t956.87">15:56</a> i tried i tried just playing with some of them in my head yesterday but i don't know it's uh i don't think that there's a there it's just like weird uh trade-offs<br>
+<a class="time" name="t969.03" href="#t969.03">16:09</a> there might be so this option is a possibility like to instead of using the<br>
+<a class="time" name="t973.99" href="#t973.99">16:13</a> um the target register right where you say<br>
+<a class="time" name="t977.91" href="#t977.91">16:17</a> you know load a constant into register whatever could you say load a constant at address<br>
+<a class="time" name="t984.069" href="#t984.069">16:24</a> and then 24 bits is probably enough it'll give us two megabytes<br>
+<a class="time" name="t988.47" href="#t988.47">16:28</a> 16 megabytes of addressable space which is probably gonna be enough um but then the reducer must be implicit<br>
+<a class="time" name="t996.069" href="#t996.069">16:36</a> right and then we have to dedicate a register that like you know<br>
+<a class="time" name="t1002.069" href="#t1002.069">16:42</a> now there there will be implicit um sort of effects or side effects that might not be apparent right so so far<br>
+<a class="time" name="t1007.91" href="#t1007.91">16:47</a> all of our instructions uh i name a register so they never<br>
+<a class="time" name="t1011.829" href="#t1011.829">16:51</a> clubber um that's i know that's a weird that's a weird name it's um clubber essentially<br>
+<a class="time" name="t1020.31" href="#t1020.31">17:00</a> it doesn't taint or overwrite any registers unless you explicitly mention them which is kind of nice so if you look at the um a little program like like that we<br>
+<a class="time" name="t1029.429" href="#t1029.429">17:09</a> have here uh you will know that like a register that's on the left side here is going to<br>
+<a class="time" name="t1037.909" href="#t1037.909">17:17</a> be uh or or depends on this one but like you know this is the only one that will be affected if any of the registers right so that's kind of a nice property you can look at this you know what traditions are going to be uh clobbered<br>
+<a class="time" name="t1049.11" href="#t1049.11">17:29</a> aka sort of you know smashed or edited<br>
+<a class="time" name="t1053.43" href="#t1053.43">17:33</a> and adding something like an implicit register would remove that and now you<br>
+<a class="time" name="t1057.75" href="#t1057.75">17:37</a> have to be like you know you have to you have to watch for these little kind of you know<br>
+<a class="time" name="t1067.35" href="#t1067.35">17:47</a> tricky things i was gonna i was gonna so yeah that's a possibility that also<br>
+<a class="time" name="t1077.35" href="#t1077.35">17:57</a> has a trick trade-off the fourth one is to use a table like a lookup<br>
+<a class="time" name="t1082.789" href="#t1082.789">18:02</a> table address constants<br>
+<a class="time" name="t1090.63" href="#t1090.63">18:10</a> by uh index so could look something like this where<br>
+<a class="time" name="t1094.95" href="#t1094.95">18:14</a> there is a you know here's like all the the constant data so there will be you know this just compact as possible you<br>
+<a class="time" name="t1101.19" href="#t1101.19">18:21</a> know shanka shankar data<br>
+<a class="time" name="t1105.59" href="#t1105.59">18:25</a> and then there is essentially is a level of interaction in between i guess like all problems in computer science can be solved by a level of indirection<br>
+<a class="time" name="t1113.029" href="#t1113.029">18:33</a> where each constant in a function or a program<br>
+<a class="time" name="t1119.669" href="#t1119.669">18:39</a> has like just an entry in this table and i guess this would be you know eu<br>
+<a class="time" name="t1123.27" href="#t1123.27">18:43</a> size or something like that doesn't really matter what this is uh this is just the you know the index into this table the opposite and then<br>
+<a class="time" name="t1133.51" href="#t1133.51">18:53</a> now we have 500 500 000 constants like the count the<br>
+<a class="time" name="t1138.71" href="#t1138.71">18:58</a> total number of them not the size of them uh which would be enough<br>
+<a class="time" name="t1143.43" href="#t1143.43">19:03</a> i think at least for for the majority of cases where you could just say hey<br>
+<a class="time" name="t1149.59" href="#t1149.59">19:09</a> each of these things has both an offset and a size component and the size might be imaginary but um that would be enough the challenge with that though is that<br>
+<a class="time" name="t1161.029" href="#t1161.029">19:21</a> you know you'll you'll have again a left limit direction yeah fun fun fun challenge is<br>
+<a class="time" name="t1168.07" href="#t1168.07">19:28</a> constants are not important to implement now so i got a punt on that but it was just something else they're thinking okay so uh<br>
+<a class="time" name="t1178.07" href="#t1178.07">19:38</a> that's that's the end of this try try this out if you want to<br>
+<a class="time" name="t1181.669" href="#t1181.669">19:41</a> and check back for the next part a little<br>
+<a class="time" name="t1185.11" href="#t1185.11">19:45</a> later see ya<br>
+</p>

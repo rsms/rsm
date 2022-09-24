@@ -1,0 +1,293 @@
+---
+layout: simple2
+title: "Transcript of RSM Episode 8"
+---
+
+<h1>{{page.title}}</h1>
+<p><a href="./">RSM project page</a></p>
+<p>
+<a class="time" name="t7.349" href="#t7.349">00:07</a> hello and welcome back<br>
+<a class="time" name="t11.99" href="#t11.99">00:11</a> so i was up really late last night way past 2 am working on this um posher<br>
+<a class="time" name="t19.75" href="#t19.75">00:19</a> and it does a lot a lot more now it's not ready but it's pretty close<br>
+<a class="time" name="t25.189" href="#t25.189">00:25</a> so where we left off left off in the uh previous part was um we started working<br>
+<a class="time" name="t30.47" href="#t30.47">00:30</a> on the parser with done the scanner and we started working on the parser we could get some some some basic stuff<br>
+<a class="time" name="t37.51" href="#t37.51">00:37</a> parsed and now actually parsing most of the i think actually the complete example function that we have here let's move these parse<br>
+<a class="time" name="t46.229" href="#t46.229">00:46</a> test data to the end here so we can look at it um so here's the here's the input that we're parsing a couple of changes since the last time<br>
+<a class="time" name="t56.15" href="#t56.15">00:56</a> first off comments i'm not just skipping comments that's advanced let's see<br>
+<a class="time" name="t67.27" href="#t67.27">01:07</a> so as we're as we're scanning the input for tokens and tokenizing it<br>
+<a class="time" name="t73.59" href="#t73.59">01:13</a> when we are scanning comments um i am at this point just<br>
+<a class="time" name="t77.59" href="#t77.59">01:17</a> kind of ignoring that comment not producing any um any token for it but then just like re-run like just<br>
+<a class="time" name="t85.429" href="#t85.429">01:25</a> going ahead and parsing the next token right which might be another comment and it keeps going so uh essentially we can we can uh swap<br>
+<a class="time" name="t93.10900000000001" href="#t93.10900000000001">01:33</a> these two lines here and now this is probably not gonna work but yeah it's gonna complain but now we're getting uh<br>
+<a class="time" name="t99.749" href="#t99.749">01:39</a> comment tokens as well so that allows us to we still you know that allows us to<br>
+<a class="time" name="t103.19" href="#t103.19">01:43</a> in the future do things like using the parser just to<br>
+<a class="time" name="t107.19" href="#t107.19">01:47</a> do pretty printing and formatting and stuff like that so we're going to need to scan the<br>
+<a class="time" name="t114.069" href="#t114.069">01:54</a> comment anyways to know where it ends and it's the same amount of work as producing a token for it so anyhow<br>
+<a class="time" name="t121.19" href="#t121.19">02:01</a> that's kind of neat a couple of other things uh i cleaned up<br>
+<a class="time" name="t129.109" href="#t129.109">02:09</a> the naming so the other day when we were putting this together uh we just used<br>
+<a class="time" name="t134.15" href="#t134.15">02:14</a> some names just to get going since since uh a person like this at<br>
+<a class="time" name="t139.19" href="#t139.19">02:19</a> least this person gets a little bit long in terms of there's a lot of functions a lot of lines of code and stuff like that it's kind of nice to have some sort of naming scheme going so what i've said along for now at least is that a prefix s is for for scanning<br>
+<a class="time" name="t153.91" href="#t153.91">02:33</a> the tokens tokenizing so s advanced advances to the scanning<br>
+<a class="time" name="t157.27" href="#t157.27">02:37</a> state uh s reg means that we're scanning a<br>
+<a class="time" name="t160.869" href="#t160.869">02:40</a> register uh token and so on<br>
+<a class="time" name="t165.82999999999998" href="#t165.82999999999998">02:45</a> s name is getting a name and then p is for parse functions<br>
+<a class="time" name="t172.309" href="#t172.309">02:52</a> so parse e statements uh there are a couple of things that don't follow this that are just sort of<br>
+<a class="time" name="t178.22899999999998" href="#t178.22899999999998">02:58</a> just so common and nice that you know they don't have it but generally speaking there's a uh there's there's this sort of like naming thing going on<br>
+<a class="time" name="t187.19" href="#t187.19">03:07</a> so and then we have a couple functions called that starts with make or mk<br>
+<a class="time" name="t192.22899999999998" href="#t192.22899999999998">03:12</a> for just creating nodes right now there are three versions of these there's make note that just creates whatever no whatever token is currently out there there's one that that creates<br>
+<a class="time" name="t203.589" href="#t203.589">03:23</a> a list so explicitly sets the no matter what the token is explicitly sets it to the type of node<br>
+<a class="time" name="t210.869" href="#t210.869">03:30</a> to be a list and i use the l paren left parentheses for that<br>
+<a class="time" name="t215.91" href="#t215.91">03:35</a> we get a nil node<br>
+<a class="time" name="t221.27" href="#t221.27">03:41</a> this is what we called bad or bad node in the previous<br>
+<a class="time" name="t225.27" href="#t225.27">03:45</a> part in some cases it might be useful to represent nil as well as bad so kind of<br>
+<a class="time" name="t232.22899999999998" href="#t232.22899999999998">03:52</a> use it for both things and tn is just zero and so you know<br>
+<a class="time" name="t236.789" href="#t236.789">03:56</a> that's that now we're we don't have that going on<br>
+<a class="time" name="t242.07" href="#t242.07">04:02</a> here but i think let's see is it if the params are empty let's try it<br>
+<a class="time" name="t246.55" href="#t246.55">04:06</a> there's some condition oh i guess we have a bug we can fix that<br>
+<a class="time" name="t251.35" href="#t251.35">04:11</a> um there's some condition where i will just do no maybe in this case<br>
+<a class="time" name="t255.35" href="#t255.35">04:15</a> yeah and so we can see here if i toggle this back on so let's look at what we've been parsing here so first off here we're still just printing out as with the previous part the older tokens that we're scanning of the source and there's quite a lot now<br>
+<a class="time" name="t271.35" href="#t271.35">04:31</a> since we're part of the full function you know so we get the the function token and then a name and then parenthesis and so on<br>
+<a class="time" name="t280.15" href="#t280.15">04:40</a> and those we interpret those and assign meaning to those that's what the parser does and so the the little parentheses here<br>
+<a class="time" name="t286.469" href="#t286.469">04:46</a> um denotes sort of like a a logical grouping like it's an s expression kind of thing then the the first thing in in it unless there's a space uh is the<br>
+<a class="time" name="t297.749" href="#t297.749">04:57</a> type of this group so like this tempo group is a function so this is a token<br>
+<a class="time" name="t304.07" href="#t304.07">05:04</a> and then comes a a set of fields so the first field is just the name of the function then we have and so parenthesis we use<br>
+<a class="time" name="t312.31" href="#t312.31">05:12</a> the space after is just a list and then we have a list of parameters<br>
+<a class="time" name="t317.59" href="#t317.59">05:17</a> so we have n and j they have types here<br>
+<a class="time" name="t322.71" href="#t322.71">05:22</a> it also allows us to do things like not naming it and then it we have first<br>
+<a class="time" name="t329.43" href="#t329.43">05:29</a> here a um a named parameter and it's type i32 and then we an unnamed one<br>
+<a class="time" name="t333.11" href="#t333.11">05:33</a> and then we just used type we don't<br>
+<a class="time" name="t337.029" href="#t337.029">05:37</a> uh we don't create this sort of like little tuple of name and type<br>
+<a class="time" name="t342.629" href="#t342.629">05:42</a> and the next thing i'm just getting back to the the nil<br>
+<a class="time" name="t346.87" href="#t346.87">05:46</a> insertion here and then the the next thing that we parse here is the results<br>
+<a class="time" name="t352.07" href="#t352.07">05:52</a> which can be a list of things it can be several results right since in our isa<br>
+<a class="time" name="t364.79" href="#t364.79">06:04</a> input parameters and output results are kind of treated the same way<br>
+<a class="time" name="t369.83" href="#t369.83">06:09</a> at least for now so same thing here really it's the same syntax it's just a parenthesis missing<br>
+<a class="time" name="t376.87" href="#t376.87">06:16</a> uh or absent from the result here it's just to make this not ambiguous or anything like that<br>
+<a class="time" name="t383.83" href="#t383.83">06:23</a> and what happens if a function doesn't return anything right we could just do<br>
+<a class="time" name="t389.51" href="#t389.51">06:29</a> this right kind of like c like what not and say the result type of this function is like nothing i've always found that a<br>
+<a class="time" name="t395.909" href="#t395.909">06:35</a> little bit weird and i understand why why void is needed in ac function i<br>
+<a class="time" name="t400.55" href="#t400.55">06:40</a> guess this is the main function but let's see so like<br>
+<a class="time" name="t404.87" href="#t404.87">06:44</a> you know if we remove this like parsing this and see would be tricky right since<br>
+<a class="time" name="t409.27" href="#t409.27">06:49</a> is this like a type or whatever so void can observe that purpose and other<br>
+<a class="time" name="t412.87" href="#t412.87">06:52</a> purposes but since we have this trailing style<br>
+<a class="time" name="t417.35" href="#t417.35">06:57</a> we don't really need this we can just like leave it out to say that this function doesn't doesn't return any values<br>
+<a class="time" name="t426.15" href="#t426.15">07:06</a> and when the parser gets to this point here right here we will see if if we have anything<br>
+<a class="time" name="t433.189" href="#t433.189">07:13</a> before this either the the line end or the start of<br>
+<a class="time" name="t438.95" href="#t438.95">07:18</a> a block if we have anything here it'll parse it like we just did here right and<br>
+<a class="time" name="t443.909" href="#t443.909">07:23</a> we'll create this list of result types in this case it's just a single one a<br>
+<a class="time" name="t447.909" href="#t447.909">07:27</a> and if nothing is in there we'll insert nil and this is gonna make things like much easier for us later another option here would be to just leave that out right and so<br>
+<a class="time" name="t457.83" href="#t457.83">07:37</a> uh the the tricky thing with doing that is that we would have a variable length<br>
+<a class="time" name="t463.11" href="#t463.11">07:43</a> of this uh function list right so then when we do things later like generate code from this to do analysis on this we would have to every time like go and count the length of the function list to know<br>
+<a class="time" name="t474.71" href="#t474.71">07:54</a> if it has any results um and so this way we just keep it simple for ourselves if the if uh item number two in its list<br>
+<a class="time" name="t484.629" href="#t484.629">08:04</a> here is uh is nil we know that there are no results and if it's not we know that there are results and and all the offsets are the<br>
+<a class="time" name="t490.469" href="#t490.469">08:10</a> same and yeah so that's what we can make use of now anyhow the rest is kind of self-explanatory i think the difference is from the other day<br>
+<a class="time" name="t507.189" href="#t507.189">08:27</a> okay so the next thing i want to talk about is um how this is kind of different from<br>
+<a class="time" name="t514.87" href="#t514.87">08:34</a> usually the purses i'll work on uh in this case we have<br>
+<a class="time" name="t520.87" href="#t520.87">08:40</a> we have this let's see how should we um let's let's grab this and put it into a<br>
+<a class="time" name="t525.829" href="#t525.829">08:45</a> new file uh we'll do this okay this would be good um<br>
+<a class="time" name="t531.79" href="#t531.79">08:51</a> that's the syntax co2 or something like that it'll<br>
+<a class="time" name="t539.11" href="#t539.11">08:59</a> match pretty well okay so in uh and actually our simplex change a<br>
+<a class="time" name="t543.35" href="#t543.35">09:03</a> little bit we now have these credit braces to to tell where the function starts being and yeah so in many cases we might have some sort of um<br>
+<a class="time" name="t555.509" href="#t555.509">09:15</a> you know nested things structures in here right<br>
+<a class="time" name="t560.79" href="#t560.79">09:20</a> so we might have like a block and you know a block and so on right<br>
+<a class="time" name="t565.269" href="#t565.269">09:25</a> and these might be statements or they might not be and uh we might have labels<br>
+<a class="time" name="t569.11" href="#t569.11">09:29</a> or not however in our simple little syntax here<br>
+<a class="time" name="t574.31" href="#t574.31">09:34</a> we've made it we've we've really constrained the the the problem space or<br>
+<a class="time" name="t578.71" href="#t578.71">09:38</a> the syntax here um and we're also at the level where<br>
+<a class="time" name="t583.67" href="#t583.67">09:43</a> we're just dealing with these essentially logical blocks of a function right so this function has three blocks here's the first block here's the second one and here's the<br>
+<a class="time" name="t597.43" href="#t597.43">09:57</a> and if we just leave out this label right we have an implicit first block here if we leave out this label we just have two blocks now right<br>
+<a class="time" name="t605.03" href="#t605.03">10:05</a> and what's kind of neat about this and i was i was going back and forth last night about you know should<br>
+<a class="time" name="t611.19" href="#t611.19">10:11</a> uh should i try to just go straight to some sort of ssa form which makes things<br>
+<a class="time" name="t615.91" href="#t615.91">10:15</a> like uh code generation and radish allocation maybe a little somewhere um<br>
+<a class="time" name="t621.91" href="#t621.91">10:21</a> and i sketch out some things and this is why i have something to it and i sketch out some things um<br>
+<a class="time" name="t630.389" href="#t630.389">10:30</a> and realize that it will probably a bit of overkill maybe one day<br>
+<a class="time" name="t634.23" href="#t634.23">10:34</a> it would be neat to streamline the parser just go straight to some sort of uh ssa form and then ssa<br>
+<a class="time" name="t640.63" href="#t640.63">10:40</a> part we talked about this in a previous part um so<br>
+<a class="time" name="t650.71" href="#t650.71">10:50</a> let's see we have so early on this might actually be in<br>
+<a class="time" name="t663.829" href="#t663.829">11:03</a> the first part yeah i think this is in part one if if you want to go back and and and listen to like the the thinking around this and<br>
+<a class="time" name="t671.11" href="#t671.11">11:11</a> uh and stuff like that anyhow so one of the<br>
+<a class="time" name="t676.31" href="#t676.31">11:16</a> forms we considered for this like assembly language um was ssa style and i<br>
+<a class="time" name="t682.23" href="#t682.23">11:22</a> wrote that up pretty quickly essence you have to deal with with five notes so<br>
+<a class="time" name="t687.75" href="#t687.75">11:27</a> kind of fusing different paths together and stuff like that this is great for machines but kind of awkward for humans<br>
+<a class="time" name="t694.31" href="#t694.31">11:34</a> and he also has a safe form also like you you only assigned to something once<br>
+<a class="time" name="t697.269" href="#t697.269">11:37</a> right um or bind rather<br>
+<a class="time" name="t702.71" href="#t702.71">11:42</a> so this is kind of what has to say the ssa form of the function will look like i guess we can just copy that into our<br>
+<a class="time" name="t711.11" href="#t711.11">11:51</a> um sketch file here okay this is the ssa style of it<br>
+<a class="time" name="t715.99" href="#t715.99">11:55</a> and realized that a middle ground here is<br>
+<a class="time" name="t719.99" href="#t719.99">11:59</a> just to say that a function like whenever we're parsing<br>
+<a class="time" name="t724.389" href="#t724.389">12:04</a> this function the structure of this is not a set of statements but it is a set<br>
+<a class="time" name="t728.55" href="#t728.55">12:08</a> of blocks so a function is not a list of statements is the list of blocks<br>
+<a class="time" name="t736.55" href="#t736.55">12:16</a> and if you leave out that first block i synthesize the first block sort of like an implicit<br>
+<a class="time" name="t741.99" href="#t741.99">12:21</a> first block rather than you know saying that you know you can do<br>
+<a class="time" name="t747.59" href="#t747.59">12:27</a> this or that and that greatly simplify the parser first off i didn't do that any you know i was scratching my head a lot like oh how should i handle this right like this kind of case where you get statements and then you get a block right which is kind of logically this<br>
+<a class="time" name="t760.55" href="#t760.55">12:40</a> um at least that's what i want it to be it's going to be i think it will make things easier later down<br>
+<a class="time" name="t766.23" href="#t766.23">12:46</a> so now this the function now is always um<br>
+<a class="time" name="t771.99" href="#t771.99">12:51</a> so this box let's see i have a oh i have a next here so i sketched out the syntax a little<br>
+<a class="time" name="t780.55" href="#t780.55">13:00</a> bit this i guess is a boring ass bnf um ish but<br>
+<a class="time" name="t787.19" href="#t787.19">13:07</a> the the point here is having some sort of like formal<br>
+<a class="time" name="t790.79" href="#t790.79">13:10</a> expression of what the syntax is supposed to to be is i think going to be helpful at least it was for me last night but then again i was kind of tired at the end so i don't know if it's useful anymore but i keep this so my screen obviously it's<br>
+<a class="time" name="t804.71" href="#t804.71">13:24</a> much bigger than what i'm uh recording here so i'm keeping this in a different part of my screen that's outside of the recording but uh as a little reference to myself<br>
+<a class="time" name="t814.069" href="#t814.069">13:34</a> and so what we have here is uh the function definition you know we've looked at that the function body here starts with the curly braces ends with curly braces and then it has a block and this is kind of what i was talking about so a function is not<br>
+<a class="time" name="t830.629" href="#t830.629">13:50</a> a function's body is not like a list of like just some statements it's more<br>
+<a class="time" name="t834.23" href="#t834.23">13:54</a> structured than that it's a list of blocks and a block<br>
+<a class="time" name="t839.189" href="#t839.189">13:59</a> is either anonymous or um<br>
+<a class="time" name="t844.23" href="#t844.23">14:04</a> or not so anonymous block will be is the first block there's no other block can be anonymous or really i think at this point might<br>
+<a class="time" name="t851.75" href="#t851.75">14:11</a> actually remove this and simplify this so i'll show you in a minute what i ended up doing and a label block right is as we as we<br>
+<a class="time" name="t860.389" href="#t860.389">14:20</a> looked at is what we have here um a block that we call something like b0<br>
+<a class="time" name="t864.15" href="#t864.15">14:24</a> right b1 and a block itself contains<br>
+<a class="time" name="t871.91" href="#t871.91">14:31</a> some name excuse me um<br>
+<a class="time" name="t875.509" href="#t875.509">14:35</a> some name i haven't come up with a good name here just call it like statement one<br>
+<a class="time" name="t882.829" href="#t882.829">14:42</a> it's a block statement maybe lock statement since it's like not any<br>
+<a class="time" name="t889.269" href="#t889.269">14:49</a> statement uh since you know anything could be a statement like a function efficient um it's a block statement it's at least one<br>
+<a class="time" name="t897.99" href="#t897.99">14:57</a> of them since like a block just two labels following each other i think should be valid but if you want to make the valid we can just do that because it's uh zero more this is one or more of<br>
+<a class="time" name="t906.47" href="#t906.47">15:06</a> these it's and it's either an operation or an<br>
+<a class="time" name="t910.55" href="#t910.55">15:10</a> assignment and i think that's it actually<br>
+<a class="time" name="t914.23" href="#t914.23">15:14</a> i think that's it uh an assignment will look something like this uh register three is you know<br>
+<a class="time" name="t924.15" href="#t924.15">15:24</a> add register one and register<br>
+<a class="time" name="t934.31" href="#t934.31">15:34</a> or it can be a local name once we implement locals<br>
+<a class="time" name="t939.189" href="#t939.189">15:39</a> right you can do know x<br>
+<a class="time" name="t942.23" href="#t942.23">15:42</a> y y and z<br>
+<a class="time" name="t947.269" href="#t947.269">15:47</a> and the operation is something that doesn't have the equal<br>
+<a class="time" name="t950.79" href="#t950.79">15:50</a> sign in between and that is specifically a<br>
+<a class="time" name="t954.71" href="#t954.71">15:54</a> name so it would not be registered so something like uh<br>
+<a class="time" name="t960.23" href="#t960.23">16:00</a> branch if zero it's that let's just make sure i'm not<br>
+<a class="time" name="t973.67" href="#t973.67">16:13</a> so it's really simple uh and then the<br>
+<a class="time" name="t977.43" href="#t977.43">16:17</a> arguments you know it's an example right it's like<br>
+<a class="time" name="t984.23" href="#t984.23">16:24</a> it's it's what we see here you know i needed to write a check okay<br>
+<a class="time" name="t987.43" href="#t987.43">16:27</a> so these are arguments right it's either a register or a name local like y here um<br>
+<a class="time" name="t995.67" href="#t995.67">16:35</a> or a literal and a literal<br>
+<a class="time" name="t1003.45" href="#t1003.45">16:43</a> uh [Music]<br>
+<a class="time" name="t1009.43" href="#t1009.43">16:49</a> should define that so there are uh it's yes it looked<br>
+<a class="time" name="t1016.629" href="#t1016.629">16:56</a> it lit so it's like a something funny<br>
+<a class="time" name="t1023.509" href="#t1023.509">17:03</a> um so it's either a decimal one let's see so we either have<br>
+<a class="time" name="t1037.429" href="#t1037.429">17:17</a> and then zero two nine<br>
+<a class="time" name="t1042.39" href="#t1042.39">17:22</a> a two f right<br>
+<a class="time" name="t1080.71" href="#t1080.71">18:00</a> we have a decimal literal and hex petrol so the uh the builder girl starts with the b<br>
+<a class="time" name="t1094.549" href="#t1094.549">18:14</a> one more of zero and and the decimal literal does not begin<br>
+<a class="time" name="t1107.83" href="#t1107.83">18:27</a> with any of those does that it actually says here tonight<br>
+<a class="time" name="t1114.789" href="#t1114.789">18:34</a> yeah i know this is not like some valid vnf or whatever but it's not for a<br>
+<a class="time" name="t1118.47" href="#t1118.47">18:38</a> machine um okay i think that's it and then maybe<br>
+<a class="time" name="t1123.909" href="#t1123.909">18:43</a> one day we'll have string literals but no no it's just integrals maybe floating<br>
+<a class="time" name="t1128.549" href="#t1128.549">18:48</a> pointless drops at some point so i think that's this is pretty much the the simplex<br>
+<a class="time" name="t1137.75" href="#t1137.75">18:57</a> let's move the outside of the screen okay so the implicit block so let's go back here<br>
+<a class="time" name="t1144.63" href="#t1144.63">19:04</a> and yes try it out so now we have a name block here block zero right so we're talking about a function is<br>
+<a class="time" name="t1151.19" href="#t1151.19">19:11</a> strictly a list of blocks not just random statements so what happens if we do this right like<br>
+<a class="time" name="t1156.87" href="#t1156.87">19:16</a> how do we handle this you're going to see that we still get b zero here there's still a block here<br>
+<a class="time" name="t1163.35" href="#t1163.35">19:23</a> so we have here's a block b zero here's a block one and here we have the final block<br>
+<a class="time" name="t1169.75" href="#t1169.75">19:29</a> right and the correspond to this um and i think it's kind of i think it ended up being catapult again<br>
+<a class="time" name="t1182.47" href="#t1182.47">19:42</a> so we have a function here for parsing and this let me just show you so this is<br>
+<a class="time" name="t1190.39" href="#t1190.39">19:50</a> triggered when we find a fun token right so f um token<br>
+<a class="time" name="t1195.75" href="#t1195.75">19:55</a> and it does kind of what you would expect right it uh it<br>
+<a class="time" name="t1201.029" href="#t1201.029">20:01</a> it grabs a name as the last one you know and it reports an error if it doesn't<br>
+<a class="time" name="t1206.149" href="#t1206.149">20:06</a> get a name and it reads the parameters that are enclosed in parentheses<br>
+<a class="time" name="t1213.83" href="#t1213.83">20:13</a> and then it reads an optional list of results<br>
+<a class="time" name="t1218.71" href="#t1218.71">20:18</a> and we reuse the same function here as the parameters because they have the same format and then comes the body<br>
+<a class="time" name="t1227.11" href="#t1227.11">20:27</a> and so we begin with we we always want a and you know we what we could do here actually we could do if<br>
+<a class="time" name="t1233.029" href="#t1233.029">20:33</a> um so we can do this if we wanted to allow<br>
+<a class="time" name="t1247.029" href="#t1247.029">20:47</a> us function definitions without a body so this allows us to do this<br>
+<a class="time" name="t1251.59" href="#t1251.59">20:51</a> um so now we're gonna get a let's see oh<br>
+<a class="time" name="t1256.87" href="#t1256.87">20:56</a> did i make a mistake here oh no i didn't we're just printing this out in a weird way um well actually let me silence these<br>
+<a class="time" name="t1264.39" href="#t1264.39">21:04</a> token token printing things<br>
+<a class="time" name="t1269.43" href="#t1269.43">21:09</a> i think we have what is that advanced oh yeah we have this macro<br>
+<a class="time" name="t1275.59" href="#t1275.59">21:15</a> so let's just uncomment that since every top level thing we that's when we print out that's why we didn't see them so now we get a uh now we allow<br>
+<a class="time" name="t1283.35" href="#t1283.35">21:23</a> sort of forward declarations if you will or like<br>
+<a class="time" name="t1286.87" href="#t1286.87">21:26</a> external declarations whatever you want to call them sort of a a declaration of<br>
+<a class="time" name="t1291.75" href="#t1291.75">21:31</a> a function existing it's only its signature but not its implementation<br>
+<a class="time" name="t1295.669" href="#t1295.669">21:35</a> if you wanted to um let's say you could put<br>
+<a class="time" name="t1300.07" href="#t1300.07">21:40</a> source code in multiple files it might be useful to do this some some popular irs like have this<br>
+<a class="time" name="t1306.23" href="#t1306.23">21:46</a> like llvms ir for example does this rather than using includes or anything like that you just kind of you just kind of punch in the signature of a function that's defined somewhere else um and then you can use that somewhere<br>
+<a class="time" name="t1319.669" href="#t1319.669">21:59</a> like this and the uh it's little parser can then<br>
+<a class="time" name="t1324.23" href="#t1324.23">22:04</a> tell you that like oh you're you're giving it the right or the wrong arguments<br>
+<a class="time" name="t1330.39" href="#t1330.39">22:10</a> so as he says that if we wanted to support support that prefix<br>
+<a class="time" name="t1345.029" href="#t1345.029">22:25</a> see here's the function and here's the implicit here's how that<br>
+<a class="time" name="t1349.75" href="#t1349.75">22:29</a> the implicit first block thing so the first thing we do is we just make sure that we get a um left left brace<br>
+<a class="time" name="t1356.789" href="#t1356.789">22:36</a> select the oh the opening left brace here but we don't consume it just yet<br>
+<a class="time" name="t1361.35" href="#t1361.35">22:41</a> so the first thing we do is to create a node uh to represent an implicit block zero<br>
+<a class="time" name="t1368.63" href="#t1368.63">22:48</a> and we might use that we might not and then we also allocate the body node uh which is going to be a list node which is it's just the same as just sets the token remember um<br>
+<a class="time" name="t1381.59" href="#t1381.59">23:01</a> and why we do it here and then we do advance is because the implementation of<br>
+<a class="time" name="t1388.07" href="#t1388.07">23:08</a> our uh make node function here takes the the uh<br>
+<a class="time" name="t1393.029" href="#t1393.029">23:13</a> you know creates a node structure for us and it sets it to the current token<br>
+<a class="time" name="t1397.35" href="#t1397.35">23:17</a> in our case that's less interesting and then it sets its source position to the<br>
+<a class="time" name="t1402.31" href="#t1402.31">23:22</a> current source position from our scan state and this is kind of like the<br>
+<a class="time" name="t1406.47" href="#t1406.47">23:26</a> the the key reason we're doing things this way so jumping back<br>
+<a class="time" name="t1411.27" href="#t1411.27">23:31</a> that means that the source position of our implicitly zero and body will be<br>
+<a class="time" name="t1416.63" href="#t1416.63">23:36</a> you know this the start of this which semantically i think makes sense right<br>
+<a class="time" name="t1421.029" href="#t1421.029">23:41</a> so that like when we think about you know where in the source is the is the<br>
+<a class="time" name="t1424.149" href="#t1424.149">23:44</a> body where does it start to begin it's here<br>
+<a class="time" name="t1429.59" href="#t1429.59">23:49</a> this is the body right rather than like this or some some abstract notion of<br>
+<a class="time" name="t1434.71" href="#t1434.71">23:54</a> things and when it comes to the block similarly right if there's an implicit block where does that implicit block start does it start here or like at this<br>
+<a class="time" name="t1443.269" href="#t1443.269">24:03</a> token probably not right i think it kind of starts up here in a place of block<br>
+<a class="time" name="t1447.99" href="#t1447.99">24:07</a> so um that's what's going on so both of these will get the source position set to this<br>
+<a class="time" name="t1455.51" href="#t1455.51">24:15</a> and our block zero will will be used down here right so the next thing we do so then we just consume that<br>
+<a class="time" name="t1461.83" href="#t1461.83">24:21</a> uh brace and if we immediately get a<br>
+<a class="time" name="t1467.99" href="#t1467.99">24:27</a> uh uh right hand side brace then we're just done that's just an empty function right so if it looks like<br>
+<a class="time" name="t1473.669" href="#t1473.669">24:33</a> this then we just get a function without any<br>
+<a class="time" name="t1487.59" href="#t1487.59">24:47</a> and so if you do have a body so if the next token is not the um<br>
+<a class="time" name="t1494.07" href="#t1494.07">24:54</a> the ending brace there then we see is does the function start with a label<br>
+<a class="time" name="t1500.07" href="#t1500.07">25:00</a> if it does not we essentially just insert this block zero and we call this<br>
+<a class="time" name="t1505.83" href="#t1505.83">25:05</a> function that the um go look at it let's see what is this called uh i think this actually is like pre-page label yeah there we go<br>
+<a class="time" name="t1515.51" href="#t1515.51">25:15</a> so here we have our parslet that is triggered for um the the label<br>
+<a class="time" name="t1522.47" href="#t1522.47">25:22</a> and so whenever we encounter a label then<br>
+<a class="time" name="t1528.39" href="#t1528.39">25:28</a> this is called we read the label's name and then we just trim off the trailing colon here with a needle and label name<br>
+<a class="time" name="t1534.31" href="#t1534.31">25:34</a> and then what we do we use this uh breakout function here this assist<br>
+<a class="time" name="t1538.07" href="#t1538.07">25:38</a> function we that we're going to use down here an implicit block<br>
+<a class="time" name="t1542.87" href="#t1542.87">25:42</a> which essentially is reads a list of operations and assignments if you remember what we have in our<br>
+<a class="time" name="t1551.43" href="#t1551.43">25:51</a> syntax here so we have a a block<br>
+<a class="time" name="t1556.149" href="#t1556.149">25:56</a> right oh i guess we call it block a block statement yeah so reads monomer<br>
+<a class="time" name="t1560.31" href="#t1560.31">26:00</a> block statements let's just lift that in here i keep clicking on this let me do this<br>
+<a class="time" name="t1575.11" href="#t1575.11">26:15</a> and we actually define this as zero or more so maybe we should update our syntax like that<br>
+<a class="time" name="t1582.789" href="#t1582.789">26:22</a> okay so this just reads<br>
+<a class="time" name="t1586.87" href="#t1586.87">26:26</a> zero more block statements that is correct yeah it reads zero more um so pretty straightforward what this is doing and it appends it to<br>
+<a class="time" name="t1597.11" href="#t1597.11">26:37</a> to this node that we pass in here right so it it calls this like list the pen<br>
+<a class="time" name="t1601.59" href="#t1601.59">26:41</a> function to just add things that it's parsing so it just keeps adding things until it uh it encounters either a<br>
+<a class="time" name="t1609.19" href="#t1609.19">26:49</a> right hand brace the end of the input stream which that would be an error later on or<br>
+<a class="time" name="t1615.19" href="#t1615.19">26:55</a> another label which would be a start of another block so just keeps going until<br>
+<a class="time" name="t1620.47" href="#t1620.47">27:00</a> any of those conditions are true and and then we use it so we we make use<br>
+<a class="time" name="t1625.11" href="#t1625.11">27:05</a> of that down here right so we synthesize the the starting label here and we have<br>
+<a class="time" name="t1629.669" href="#t1629.669">27:09</a> a constant for the first block which is b0 uh oops and no matter if we did have an explicit<br>
+<a class="time" name="t1640.47" href="#t1640.47">27:20</a> opening block or if we synthesize spawn<br>
+<a class="time" name="t1644.71" href="#t1644.71">27:24</a> beyond this point it doesn't matter anymore now we're just parsing<br>
+<a class="time" name="t1648.71" href="#t1648.71">27:28</a> um more blocks right which might be<br>
+<a class="time" name="t1653.029" href="#t1653.029">27:33</a> no more we might be done it might just be a single block or if at this point we have another<br>
+<a class="time" name="t1658.549" href="#t1658.549">27:38</a> label scanned kind of line up for us<br>
+<a class="time" name="t1663.35" href="#t1663.35">27:43</a> by the scanner then we'll just do the same thing we'll<br>
+<a class="time" name="t1667.35" href="#t1667.35">27:47</a> just call our block function that we looked at for<br>
+<a class="time" name="t1671.269" href="#t1671.269">27:51</a> scanning a block and we're done at this point the body now has a list of<br>
+<a class="time" name="t1678.149" href="#t1678.149">27:58</a> blocks uh another detail is that now since we<br>
+<a class="time" name="t1687.35" href="#t1687.35">28:07</a> have this implicit block name users are going to be or we're going to be able to reference that so we're going<br>
+<a class="time" name="t1693.269" href="#t1693.269">28:13</a> to be able to do things like do we have b0 here sometimes somewhere<br>
+<a class="time" name="t1698.71" href="#t1698.71">28:18</a> i guess we don't but like let's say that we had b zero in a reference trade like you're<br>
+<a class="time" name="t1703.51" href="#t1703.51">28:23</a> going to be able to reference this block zero here as the implicit block which<br>
+<a class="time" name="t1709.19" href="#t1709.19">28:29</a> i think for simplicity's sake we should just allow this otherwise it's going to be a special case to like remember if<br>
+<a class="time" name="t1714.549" href="#t1714.549">28:34</a> it's like entered or not anyhow since we can do this we also cannot allow<br>
+<a class="time" name="t1720.31" href="#t1720.31">28:40</a> uh any any block that is not the first<br>
+<a class="time" name="t1723.909" href="#t1723.909">28:43</a> block to be called block zero because like if we now do this right like this<br>
+<a class="time" name="t1729.029" href="#t1729.029">28:49</a> is ambiguous which block doesn't mention this one or like the implicit block zero here right um i'm sure that there are fancy ways to<br>
+<a class="time" name="t1737.51" href="#t1737.51">28:57</a> solve this like with you know orientated name up here and then you know we can we<br>
+<a class="time" name="t1741.99" href="#t1741.99">29:01</a> try to be clever but i think in practice it will be just bad<br>
+<a class="time" name="t1747.59" href="#t1747.59">29:07</a> practice to allow a label to be called b0<br>
+<a class="time" name="t1753.669" href="#t1753.669">29:13</a> um yes as a convention so ideas decided to disallow that so that's what what this little code does so if uh if the<br>
+<a class="time" name="t1760.23" href="#t1760.23">29:20</a> block we is parsed here is the very first block in the function so it's the<br>
+<a class="time" name="t1765.029" href="#t1765.029">29:25</a> um sorry if it is not the first right so if<br>
+<a class="time" name="t1769.269" href="#t1769.269">29:29</a> the if the list already has at least one item so head is not null uh<br>
+<a class="time" name="t1778.23" href="#t1778.23">29:38</a> let's go oh my keyword so if this is not null it's clear<br>
+<a class="time" name="t1782.389" href="#t1782.389">29:42</a> and the the name of the block that we just<br>
+<a class="time" name="t1786.149" href="#t1786.149">29:46</a> parsed is the b0 name and i broke this out into<br>
+<a class="time" name="t1791.909" href="#t1791.909">29:51</a> a constant so i could shift it later and see the reference uh then that's an error i'm<br>
+<a class="time" name="t1797.99" href="#t1797.99">29:57</a> gonna get an error message it's gonna call this block zero this is gonna complain it's gonna say uh on line nine here a block name bcr<br>
+<a class="time" name="t1807.59" href="#t1807.59">30:07</a> must be the first block so i thought it was kind of neat<br>
+<a class="time" name="t1822.789" href="#t1822.789">30:22</a> so i think this is it for for this part<br>
+<a class="time" name="t1828.63" href="#t1828.63">30:28</a> what is next is to i need to do a little bit of cleanup this code is a little bit it's a little bit inconsistent a little bit messy for example<br>
+<a class="time" name="t1838.07" href="#t1838.07">30:38</a> there is this uh looking at this syntax again right<br>
+<a class="time" name="t1842.149" href="#t1842.149">30:42</a> there is a concept of an operation an assignment with arguments the parser<br>
+<a class="time" name="t1846.149" href="#t1846.149">30:46</a> right now does not is not structured as nicely it's looser<br>
+<a class="time" name="t1850.47" href="#t1850.47">30:50</a> than this and so i'm gonna clean that up and just<br>
+<a class="time" name="t1855.269" href="#t1855.269">30:55</a> straighten out the parser to part exactly that and nothing else and issue an error if it gets anything else<br>
+<a class="time" name="t1862.23" href="#t1862.23">31:02</a> and after that point i think what we will do it will be moving on to uh code<br>
+<a class="time" name="t1865.75" href="#t1865.75">31:05</a> generation which will be kind of exciting we're getting one step closer down to our second big milestone of having a a<br>
+<a class="time" name="t1873.99" href="#t1873.99">31:13</a> ready-made little sort of interpretive program that we can just toss these little source files on zoom<br>
+<a class="time" name="t1880.789" href="#t1880.789">31:20</a> so we'll be generating these uh virtual machine instructions<br>
+<a class="time" name="t1885.669" href="#t1885.669">31:25</a> at that point cool i hope you enjoyed this one um<br>
+<a class="time" name="t1892.149" href="#t1892.149">31:32</a> you know chime in on twitter or reach out some other way if you're if there any questions or anything like that and<br>
+<a class="time" name="t1897.75" href="#t1897.75">31:37</a> i hope to catch you in the next part<br>
+</p>

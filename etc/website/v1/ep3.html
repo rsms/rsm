@@ -1,0 +1,300 @@
+---
+layout: simple2
+title: "Transcript of RSM Episode 3"
+---
+
+<h1>{{page.title}}</h1>
+<p><a href="./">RSM project page</a></p>
+<p>
+<a class="time" name="t3.669" href="#t3.669">00:03</a> a little quick update again i um uh [Music] in the previous video if you watched that um i was struggling a little bit to<br>
+<a class="time" name="t12.23" href="#t12.23">00:12</a> get um the the sign of assignment here to sort<br>
+<a class="time" name="t15.509" href="#t15.509">00:15</a> of carry over and carry through with the arguments and so the example that i was<br>
+<a class="time" name="t22.47" href="#t22.47">00:22</a> looking at was this branch instruction that takes this<br>
+<a class="time" name="t27.109" href="#t27.109">00:27</a> this negative number here sign number it's also used up here but you know here it's got negative value and we will get a you know we will not get the right value out in the end um anyhow so i worked through that and<br>
+<a class="time" name="t41.03" href="#t41.03">00:41</a> uh one thing that i did was say is wrapped up this little sort of uh help<br>
+<a class="time" name="t45.67" href="#t45.67">00:45</a> function that we made i cannot comment down here<br>
+<a class="time" name="t51.029" href="#t51.029">00:51</a> into a separate function it could be useful just have keep that around<br>
+<a class="time" name="t62.709" href="#t62.709">01:02</a> and uh another change that i made well a couple of changes i've made here first off i fixed up these macros to have a<br>
+<a class="time" name="t70.55" href="#t70.55">01:10</a> prefix and not just be get so eventually and maybe we can do that now<br>
+<a class="time" name="t75.27" href="#t75.27">01:15</a> move this into just a separate file so we can use this for from different source files<br>
+<a class="time" name="t80.55" href="#t80.55">01:20</a> and i also devised an update to this kind of<br>
+<a class="time" name="t86.39" href="#t86.39">01:26</a> instruction encoding naming schema here<br>
+<a class="time" name="t90.55" href="#t90.55">01:30</a> so looking at grab this table it's almost like should have this on the screen it's pretty useful so i'm gonna paste this up here as i'm talking through it's real brief<br>
+<a class="time" name="t103.19" href="#t103.19">01:43</a> okay so so here's a quick refresher right this what the um instruction<br>
+<a class="time" name="t109.50999999999999" href="#t109.50999999999999">01:49</a> layout looks like it's a fixed 32 bits per instruction the uh the first eight bits is the<br>
+<a class="time" name="t116.709" href="#t116.709">01:56</a> operation code and then the reminding bits are divided<br>
+<a class="time" name="t120.87" href="#t120.87">02:00</a> into arguments so a b c and d argument<br>
+<a class="time" name="t126.149" href="#t126.149">02:06</a> and if d is not needed there's more space for c and c is nothing more space<br>
+<a class="time" name="t130.869" href="#t130.869">02:10</a> for b and so on and when when accessing these uh like accessing c as 14 bits or five bits<br>
+<a class="time" name="t139.75" href="#t139.75">02:19</a> obviously there's going to be a difference there if you're dealing with sign integers or not so the updated uh encoding<br>
+<a class="time" name="t151.03" href="#t151.03">02:31</a> sort of naming schema here is just a letter means that it's a register<br>
+<a class="time" name="t156.15" href="#t156.15">02:36</a> uh origin you know the value in their names a register<br>
+<a class="time" name="t162.07" href="#t162.07">02:42</a> right so here we have a b and that means that that b a and b b<br>
+<a class="time" name="t166.79" href="#t166.79">02:46</a> here um names the the register so like one first<br>
+<a class="time" name="t173.03" href="#t173.03">02:53</a> one and two first two and so on um okay this is unchanged since previous<br>
+<a class="time" name="t180.07" href="#t180.07">03:00</a> videos that means that b contains uh the number like the<br>
+<a class="time" name="t185.03" href="#t185.03">03:05</a> yeah the number of a constant tbt what that means uh and here are the changes uh<br>
+<a class="time" name="t193.50900000000001" href="#t193.50900000000001">03:13</a> so so bu means that it's an immediate and unsigned integer<br>
+<a class="time" name="t198.309" href="#t198.309">03:18</a> this is what i previously called w for white and that means that in in this example<br>
+<a class="time" name="t204.55" href="#t204.55">03:24</a> here with a b u is that this b value here is the entire<br>
+<a class="time" name="t211.27" href="#t211.27">03:31</a> uh is the entire 19 bits as an unsigned integer in that case you know we could just read this value if you want it would it would still work however<br>
+<a class="time" name="t222.39" href="#t222.39">03:42</a> there is a sibling here called a uh like bs for signed and it means that b is an immediate<br>
+<a class="time" name="t230.309" href="#t230.309">03:50</a> signed integer and now we care about this this bit over here that's kind of and so to<br>
+<a class="time" name="t239.91" href="#t239.91">03:59</a> make the forwarding functions that we have in the in the implementation file<br>
+<a class="time" name="t243.83" href="#t243.83">04:03</a> here still still work nicely these instruction encoding<br>
+<a class="time" name="t249.429" href="#t249.429">04:09</a> little schema thingies here have been updated<br>
+<a class="time" name="t253.83" href="#t253.83">04:13</a> so looking at the two the instructions that i've been looking at or mainly this one let's just look at this one they're the same pretty much um it now it now says here a b s that<br>
+<a class="time" name="t266.39" href="#t266.39">04:26</a> means that b in this case is a signed immediate value<br>
+<a class="time" name="t272.23" href="#t272.23">04:32</a> which for this instruction is a a relative number of instructions to jump backwards or forwards too so it's a number that is added on to<br>
+<a class="time" name="t280.79" href="#t280.79">04:40</a> the uh the program counter when this is a curse<br>
+<a class="time" name="t286.23" href="#t286.23">04:46</a> okay i want to show you<br>
+<a class="time" name="t303.59" href="#t303.59">05:03</a> where i ended up so first off just hashed out these uh max values for the<br>
+<a class="time" name="t310.71" href="#t310.71">05:10</a> wide fields i still put a white up here because at this you know at this granularity so<br>
+<a class="time" name="t315.83" href="#t315.83">05:15</a> to speak there's no this doesn't deal with sinus at all so it's called white<br>
+<a class="time" name="t319.749" href="#t319.749">05:19</a> here but the reminder of the code has been updated too to say either register unsigned or signed<br>
+<a class="time" name="t327.189" href="#t327.189">05:27</a> so ar register au unsigned<br>
+<a class="time" name="t338.71" href="#t338.71">05:38</a> for the new stuff right so what did you stuff the solution to the problem that i was working on before so this is essentially where we left off<br>
+<a class="time" name="t348.55" href="#t348.55">05:48</a> at the end um i used to have been making a little mistake but i found it pretty quickly and clean<br>
+<a class="time" name="t353.27" href="#t353.27">05:53</a> things up um so now and and then i've just sort of<br>
+<a class="time" name="t360.07" href="#t360.07">06:00</a> copy pasted this over here so what uh what what i do here to get the<br>
+<a class="time" name="t365.27" href="#t365.27">06:05</a> uh sign value is first just load it as the unsigned values you know just access the field load bits<br>
+<a class="time" name="t371.83" href="#t371.83">06:11</a> it's the same stuff and then treating the so this is an unsigned number at this point because it's a u here an arg n up here<br>
+<a class="time" name="t381.51" href="#t381.51">06:21</a> it's an unsigned integer okay so then we<br>
+<a class="time" name="t387.27" href="#t387.27">06:27</a> subtract from that half of and then<br>
+<a class="time" name="t399.27" href="#t399.27">06:39</a> reinterpret that as a as a signed integer and similarly there are<br>
+<a class="time" name="t408.71" href="#t408.71">06:48</a> i haven't made these the set operations yet<br>
+<a class="time" name="t412.87" href="#t412.87">06:52</a> because i don't use them but they should be the same as here so<br>
+<a class="time" name="t417.189" href="#t417.189">06:57</a> here we have the equivalent of of setting one of<br>
+<a class="time" name="t420.309" href="#t420.309">07:00</a> these um so let's say we want to set the uh the<br>
+<a class="time" name="t426.39" href="#t426.39">07:06</a> unsigned value of a then we just use this<br>
+<a class="time" name="t431.99" href="#t431.99">07:11</a> make a nothing no qualifier if we want to set a sine integer we use<br>
+<a class="time" name="t440.39" href="#t440.39">07:20</a> the the a s macro here and how this works is essentially the inverse of what what this function up here does<br>
+<a class="time" name="t451.909" href="#t451.909">07:31</a> or function this code does here right so this takes half of the maximum value and subtracts that right and here we take<br>
+<a class="time" name="t458.55" href="#t458.55">07:38</a> half of the maximum value same same okay so that works and<br>
+<a class="time" name="t467.589" href="#t467.589">07:47</a> the rest here is just unchanged i just updated these names here for the new macro names uh these are still the same formula code<br>
+<a class="time" name="t476.55" href="#t476.55">07:56</a> uh this is still completely unchanged and then down here<br>
+<a class="time" name="t482.23" href="#t482.23">08:02</a> i've updated these two to use this new um these two new macros right to make something with a signed immediate value<br>
+<a class="time" name="t490.79" href="#t490.79">08:10</a> so three this is totally unchanged in previous video we fixed a little bug here off by one bug there<br>
+<a class="time" name="t495.67" href="#t495.67">08:15</a> and now when we get down here and call the<br>
+<a class="time" name="t503.27" href="#t503.27">08:23</a> formatting function from the proc let's just run it a few times here<br>
+<a class="time" name="t508.23" href="#t508.23">08:28</a> um we see that we now correctly get negative three out instead of an<br>
+<a class="time" name="t513.269" href="#t513.269">08:33</a> unexpected number as we were getting for so that's cool uh that you know this is<br>
+<a class="time" name="t518.55" href="#t518.55">08:38</a> i think this is your sometimes how it is i don't know how many hours it took<br>
+<a class="time" name="t526.31" href="#t526.31">08:46</a> three hours i don't know i was working through processing the video and stuff like that maybe it took maybe it took me two hours or so until to<br>
+<a class="time" name="t534.15" href="#t534.15">08:54</a> to work through this this tiny seemingly tiny thing but that's just how it is sometimes and that's good<br>
+<a class="time" name="t542.23" href="#t542.23">09:02</a> um but you know now we got that um so let's see what could be a useful thing to do uh it's getting kind of late here in the day and i i think i'm going to just wrap<br>
+<a class="time" name="t552.55" href="#t552.55">09:12</a> it up pretty soon uh and call it a day and keep working on it tomorrow um or maybe tonight if i<br>
+<a class="time" name="t558.87" href="#t558.87">09:18</a> find a fun energy but who knows<br>
+<a class="time" name="t564.15" href="#t564.15">09:24</a> okay so one thing i want to do is to wrap this up that defines the we've been<br>
+<a class="time" name="t568.07" href="#t568.07">09:28</a> looking at this so much and i think this is going to be useful to access and notice those files so to wrap this up<br>
+<a class="time" name="t573.509" href="#t573.509">09:33</a> into a separate file it's got to be a separate header file um so it's not going to be including the format stuff and that's the second step<br>
+<a class="time" name="t583.75" href="#t583.75">09:43</a> we're going to move that to but we're going to start with all of these instruction kind of helpers<br>
+<a class="time" name="t592.07" href="#t592.07">09:52</a> and we'll bring this table with us so let's um okay let's just let's just cut this out<br>
+<a class="time" name="t603.19" href="#t603.19">10:03</a> i'm gonna make a new file we have our n string here<br>
+<a class="time" name="t618.389" href="#t618.389">10:18</a> and our up so this is just this sort of project<br>
+<a class="time" name="t625.11" href="#t625.11">10:25</a> level header file here rsm the h oh it could be nice to like put everything that has to do with the with<br>
+<a class="time" name="t632.389" href="#t632.389">10:32</a> the uh instructions into one place right i think that could be nice<br>
+<a class="time" name="t635.59" href="#t635.59">10:35</a> so so we're going to lift this definition into where do we have it<br>
+<a class="time" name="t643.269" href="#t643.269">10:43</a> oh and then let's see that was not my we want to grab these things too<br>
+<a class="time" name="t664.15" href="#t664.15">11:04</a> um let's keep it until i know if i use it okay<br>
+<a class="time" name="t680.069" href="#t680.069">11:20</a> and actually the ordering here might be might be a little off i prefer to put<br>
+<a class="time" name="t687.03" href="#t687.03">11:27</a> like i prefer to organize my um c header files or or if it's a single c<br>
+<a class="time" name="t691.75" href="#t691.75">11:31</a> file or whatever but with you know includes obviously at the beginning um so yeah we we're actually gonna make this and stuff so steroid<br>
+<a class="time" name="t703.99" href="#t703.99">11:43</a> includes sunday age um that's the project file and then i like to do is to have<br>
+<a class="time" name="t711.19" href="#t711.19">11:51</a> any uh type defs if i can spell<br>
+<a class="time" name="t715.67" href="#t715.67">11:55</a> uh and after that so like if there are structs and stuff right so<br>
+<a class="time" name="t728.629" href="#t728.629">12:08</a> um i prefer to do it this way and then define the the you know in this example<br>
+<a class="time" name="t732.949" href="#t732.949">12:12</a> the little struct like down here so there's a couple of stripes a couple of type depths and i'm not yeah i don't have a strong opinion where i put little macros like what we have here now but<br>
+<a class="time" name="t744.389" href="#t744.389">12:24</a> um probably after the definitions [Applause]<br>
+<a class="time" name="t754.47" href="#t754.47">12:34</a> and let's put this table at the these things<br>
+<a class="time" name="t765.59" href="#t765.59">12:45</a> here where the instructions start and simplify things a little bit<br>
+<a class="time" name="t771.19" href="#t771.19">12:51</a> okay and the instruction is like it feels<br>
+<a class="time" name="t777.59" href="#t777.59">12:57</a> more sensible for that to be at the top like code is just code and there's no magic to it you know like calling things but a consistent name<br>
+<a class="time" name="t785.269" href="#t785.269">13:05</a> makes it so that you know when i come back to this this is fine i'm minus so<br>
+<a class="time" name="t789.59" href="#t789.59">13:09</a> when i come back to this in six months like i'll find my own things you know<br>
+<a class="time" name="t795.35" href="#t795.35">13:15</a> obviously you forget about stuff um and if anyone else would be crazy enough to<br>
+<a class="time" name="t799.43" href="#t799.43">13:19</a> dig through this code it's like also higher likelihood that you'll understand things if like you know wherever it says<br>
+<a class="time" name="t806.15" href="#t806.15">13:26</a> are ins that's the file you go to this is the type you look for um so i just like to keep it kind of so we're gonna go in here so this is<br>
+<a class="time" name="t819.03" href="#t819.03">13:39</a> where we cut things out from now this is you know our build here is<br>
+<a class="time" name="t823.509" href="#t823.509">13:43</a> just gonna go a little bonkers bananas because you know it doesn't<br>
+<a class="time" name="t828.31" href="#t828.31">13:48</a> it doesn't know what's happening anymore so we have to pull that in and say you know there's a um<br>
+<a class="time" name="t835.75" href="#t835.75">13:55</a> there's stuff here that you need to grab are we going to say this is not why it's<br>
+<a class="time" name="t841.189" href="#t841.189">14:01</a> airing out but yeah yeah i know if you're pure purist you'll be like oh you gotta do like if<br>
+<a class="time" name="t847.269" href="#t847.269">14:07</a> not tough and stuff like pragma ones that's supported by the composition i care about and i like it that's good<br>
+<a class="time" name="t855.43" href="#t855.43">14:15</a> and i also have this little thing<br>
+<a class="time" name="t861.189" href="#t861.189">14:21</a> so this really only has an effect if you use a compiler that um has like<br>
+<a class="time" name="t867.03" href="#t867.03">14:27</a> nullability checks and stuff i'm using clang right now and it does so this doesn't affect it's kind of neat um<br>
+<a class="time" name="t873.35" href="#t873.35">14:33</a> now we don't have any function definitions in this header file but<br>
+<a class="time" name="t877.99" href="#t877.99">14:37</a> we're doing this one um and so what this does let's just jump and look at it<br>
+<a class="time" name="t881.269" href="#t881.269">14:41</a> um is that it says assume that pointer types<br>
+<a class="time" name="t888.47" href="#t888.47">14:48</a> are non-null as in if you try to personal value to it that is an expected thing um it has two<br>
+<a class="time" name="t898.629" href="#t898.629">14:58</a> effects so actually let me just sketch this out to explain what it means so let's say we have a function foo here<br>
+<a class="time" name="t907.75" href="#t907.75">15:07</a> and it takes some uh lol cat because what has a cool rate as<br>
+<a class="time" name="t912.949" href="#t912.949">15:12</a> an argument right so now if we cold food here with null like somewhere else right like is this valid<br>
+<a class="time" name="t927.67" href="#t927.67">15:27</a> does is is food prepared to deal with a uh non-pointer right maybe it is maybe it's<br>
+<a class="time" name="t933.35" href="#t933.35">15:33</a> not um and so let's say we have two one and two<br>
+<a class="time" name="t938.71" href="#t938.71">15:38</a> two right and through one here just assumes you know c is<br>
+<a class="time" name="t942.949" href="#t942.949">15:42</a> is a valid pointer and just goes about his business and does stuff and food too here does some some check in its implementation and see if the c is null and maybe it<br>
+<a class="time" name="t952.71" href="#t952.71">15:52</a> just does nothing in that case you know and so the nullability sort of decorators uh allows you to say you know<br>
+<a class="time" name="t959.749" href="#t959.749">15:59</a> no if<br>
+<a class="time" name="t965.59" href="#t965.59">16:05</a> see if if this fu one does not handle a null pointer and for things to do at all pointer you and now when we call<br>
+<a class="time" name="t975.35" href="#t975.35">16:15</a> if you want with the code for one here the compiler can be like no that's not<br>
+<a class="time" name="t980.629" href="#t980.629">16:20</a> that's not gonna work right it's gonna say hey you're trying to you're passing a null pointer to something that doesn't<br>
+<a class="time" name="t986.31" href="#t986.31">16:26</a> handle now and uh and similarly<br>
+<a class="time" name="t992.47" href="#t992.47">16:32</a> uh if we do this the compiler can sort of uh say<br>
+<a class="time" name="t996.79" href="#t996.79">16:36</a> uh that this this is totally okay i guess it wouldn't say that it would just like not complain i guess so this is the this is the example and this the second thing is if you um<br>
+<a class="time" name="t1008.55" href="#t1008.55">16:48</a> i don't know if if you if you run clang with the undefined uh sanitizer<br>
+<a class="time" name="t1014.15" href="#t1014.15">16:54</a> which i have enabled in this project uh i'm not sure if if gcc has anything<br>
+<a class="time" name="t1019.11" href="#t1019.11">16:59</a> like that but i think that's super helpful catch a lot of little little dumb mistakes that make um it can also<br>
+<a class="time" name="t1025.189" href="#t1025.189">17:05</a> catch these things like nullibility stuff at run time which is kind of neat<br>
+<a class="time" name="t1029.429" href="#t1029.429">17:09</a> um so in this in this build script which generates the<br>
+<a class="time" name="t1036.47" href="#t1036.47">17:16</a> uh let's grab my mouse the generates the the the build file like i see if like if<br>
+<a class="time" name="t1041.829" href="#t1041.829">17:21</a> the if the compiler is clang then enable a couple of flags that enable these in in debug mode um so we have the uh the<br>
+<a class="time" name="t1051.51" href="#t1051.51">17:31</a> the nullability sense the sanitize you know uh nullability which i i'm pretty sure<br>
+<a class="time" name="t1057.99" href="#t1057.99">17:37</a> it's part of the undefined sanitizer rather than the address sanitizer<br>
+<a class="time" name="t1062.789" href="#t1062.789">17:42</a> um since this is more like a memory sanitizer than address sanitizer i suppose but so a couple of couple of flags this kind of kicks that in uh and what's neat<br>
+<a class="time" name="t1072.95" href="#t1072.95">17:52</a> about that is that at run time even if you do some like cast or whatever right<br>
+<a class="time" name="t1077.51" href="#t1077.51">17:57</a> if you just like you say you know foo is like um<br>
+<a class="time" name="t1084.39" href="#t1084.39">18:04</a> let's see you would cast this to a parenthesis right here like<br>
+<a class="time" name="t1093.27" href="#t1093.27">18:13</a> right like this then the compiler wouldn't be complaining it would just be like oh well you know i guess you can<br>
+<a class="time" name="t1099.11" href="#t1099.11">18:19</a> you can personal to this because you haven't said anything about it right and even if you do you do nullable right now you just think<br>
+<a class="time" name="t1107.029" href="#t1107.029">18:27</a> it's totally fine right another runtime it wouldn't be and um<br>
+<a class="time" name="t1111.19" href="#t1111.19">18:31</a> and then i'll build the features of the undefined sanitizer we'll just cache that for you which is kind of cool i brought that super neat it comes a<br>
+<a class="time" name="t1117.83" href="#t1117.83">18:37</a> little bit about runtime cost but you know the debug build i care about that<br>
+<a class="time" name="t1123.11" href="#t1123.11">18:43</a> so that's what this guy does so plug those in here uh just make that<br>
+<a class="time" name="t1128.31" href="#t1128.31">18:48</a> habit to you know make sure that this header file if it's included multiple times doesn't get you know uh re-populating code<br>
+<a class="time" name="t1137.11" href="#t1137.11">18:57</a> and uh that any function definitions beyond<br>
+<a class="time" name="t1140.95" href="#t1140.95">19:00</a> this point and you know before this point which is the end of the file um<br>
+<a class="time" name="t1147.029" href="#t1147.029">19:07</a> makes it so that if you don't say if you don't say which nullability is for a<br>
+<a class="time" name="t1151.99" href="#t1151.99">19:11</a> pointer it defaults to that it does not accept null<br>
+<a class="time" name="t1157.27" href="#t1157.27">19:17</a> which in admirative cases i think is is what functions do and so on and so forth which means that stuff to do the<br>
+<a class="time" name="t1165.43" href="#t1165.43">19:25</a> deuce except null so like the memory allocator stuff let's see so we have nullable here right so you can use this both for return values and for arguments so for<br>
+<a class="time" name="t1175.43" href="#t1175.43">19:35</a> example if this function might fail so this function goes to the os and it says<br>
+<a class="time" name="t1179.51" href="#t1179.51">19:39</a> hey give me you know um some amount of virtual memory um<br>
+<a class="time" name="t1184.71" href="#t1184.71">19:44</a> and it the os might just say like no or like<br>
+<a class="time" name="t1189.59" href="#t1189.59">19:49</a> if i failed or like whatever right you get an all back this function however just just initializes the uh the rmm<br>
+<a class="time" name="t1198.95" href="#t1198.95">19:58</a> structure inside a buffer that usage provided so this can never fail this just returns a pointer and so in this<br>
+<a class="time" name="t1206.07" href="#t1206.07">20:06</a> case the compiler can insert instrumentation here to make sure but that compile time you<br>
+<a class="time" name="t1211.27" href="#t1211.27">20:11</a> can do some checks on the runtime then can do some some some analysis here and<br>
+<a class="time" name="t1215.35" href="#t1215.35">20:15</a> make sure that like this never returns null and if it does it would just like it would you know it would um uh<br>
+<a class="time" name="t1224.789" href="#t1224.789">20:24</a> abort essentially like trap whatever print little message print little stack trace if you enable that<br>
+<a class="time" name="t1230.63" href="#t1230.63">20:30</a> and uh and in this case it wouldn't right if this returns null it would like not do that it would be defined<br>
+<a class="time" name="t1237.43" href="#t1237.43">20:37</a> here as being expected so now let's see what uh what i'm up<br>
+<a class="time" name="t1245.43" href="#t1245.43">20:45</a> what i'm messing up here okay so this no longer of course makes any sense because<br>
+<a class="time" name="t1249.35" href="#t1249.35">20:49</a> the uh this this uh type we move this type<br>
+<a class="time" name="t1256.31" href="#t1256.31">20:56</a> definition so let's move that over so over here so now we do have a function here so i guess that was useful<br>
+<a class="time" name="t1262.87" href="#t1262.87">21:02</a> this is a function to support this i'm going to put the functions after the<br>
+<a class="time" name="t1267.83" href="#t1267.83">21:07</a> macros here so we have that of a<br>
+<a class="time" name="t1281.83" href="#t1281.83">21:21</a> [Music] constant i think we understand what this is don't<br>
+<a class="time" name="t1291.029" href="#t1291.029">21:31</a> need that okay i'm just going to clear this and rebuild just make sure i can scroll up here so<br>
+<a class="time" name="t1298.149" href="#t1298.149">21:38</a> unknown type name all right so here we're missing the<br>
+<a class="time" name="t1303.75" href="#t1303.75">21:43</a> instruction and then oh yeah this so this<br>
+<a class="time" name="t1315.669" href="#t1315.669">21:55</a> enum definition relies on these macros so we have to put<br>
+<a class="time" name="t1322.149" href="#t1322.149">22:02</a> those afterwards so let's just do that i'm going to cut those out that too i can't do that use that so i guess there's a compromise and you know you do what you gotta do<br>
+<a class="time" name="t1333.75" href="#t1333.75">22:13</a> um and we can go back just a little bit and just squish these techniques together [Applause]<br>
+<a class="time" name="t1341.029" href="#t1341.029">22:21</a> okay and it works so now we've separated that in set of instructions<br>
+<a class="time" name="t1348.07" href="#t1348.07">22:28</a> into separate headers we can use that in different places so the next thing we can do is to put the formatting code yes into this um<br>
+<a class="time" name="t1357.669" href="#t1357.669">22:37</a> string formatting file just keep that stuff separate<br>
+<a class="time" name="t1362.31" href="#t1362.31">22:42</a> um and then we can you know in the in the next video we'll start with a virtual machine to evaluate this program<br>
+<a class="time" name="t1370.47" href="#t1370.47">22:50</a> here and then we can use the space here and there in our main in our main program it's sort of like a<br>
+<a class="time" name="t1376.549" href="#t1376.549">22:56</a> this is kind of the working area where we're we're building things out and as<br>
+<a class="time" name="t1381.35" href="#t1381.35">23:01</a> things are kind of stabilizing and kind of working we can move them out into a separate source file i think it's very easy to um<br>
+<a class="time" name="t1390.549" href="#t1390.549">23:10</a> it probably doesn't seem like it i probably seem like a total noob on this stuff but you know i've been programming for decades at this point several decades<br>
+<a class="time" name="t1399.11" href="#t1399.11">23:19</a> and um you know i'm still learning a lot uh<br>
+<a class="time" name="t1403.83" href="#t1403.83">23:23</a> just doing this i think you've you've seen me learn some stuff but uh<br>
+<a class="time" name="t1407.83" href="#t1407.83">23:27</a> but i've also learned some stuff that i've been able to um to memorize<br>
+<a class="time" name="t1413.35" href="#t1413.35">23:33</a> uh or or truly learn from i think um and one of them is to<br>
+<a class="time" name="t1421.43" href="#t1421.43">23:41</a> try to not optimize like anything too early<br>
+<a class="time" name="t1425.83" href="#t1425.83">23:45</a> and i'm not talking about like performance here necessarily although that's maybe obvious but you're sort of like structure for example right if we go over here<br>
+<a class="time" name="t1435.35" href="#t1435.35">23:55</a> uh i see my my like camera is like struggling a little bit is it because there's like a sunspot<br>
+<a class="time" name="t1442.549" href="#t1442.549">24:02</a> there or something i don't know well i guess you're you're<br>
+<a class="time" name="t1448.71" href="#t1448.71">24:08</a> not looking at my face too much anyways maybe i can is this a manual focus<br>
+<a class="time" name="t1457.51" href="#t1457.51">24:17</a> no no it doesn't it doesn't care about what i'm asking it to do um well okay well we'll leave the camera as it<br>
+<a class="time" name="t1480.71" href="#t1480.71">24:40</a> is okay so so back to one of the things<br>
+<a class="time" name="t1484.71" href="#t1484.71">24:44</a> that i think is kind of important or at least very useful when it comes to organization is um just keep things like very you know if you look at you just do this<br>
+<a class="time" name="t1498.149" href="#t1498.149">24:58</a> you can see all the files right um this and the source director here has<br>
+<a class="time" name="t1503.11" href="#t1503.11">25:03</a> like fairly few files the files that are here are files that are contained stuff that is kind of done<br>
+<a class="time" name="t1509.43" href="#t1509.43">25:09</a> and i think this is kind of my point that i'm doing a poor job of explaining<br>
+<a class="time" name="t1514.789" href="#t1514.789">25:14</a> you start out like um just<br>
+<a class="time" name="t1518.95" href="#t1518.95">25:18</a> kind of in a kind of a in a workspace almost like in<br>
+<a class="time" name="t1522.95" href="#t1522.95">25:22</a> a single file just like do make come up with stuff like make it<br>
+<a class="time" name="t1528.07" href="#t1528.07">25:28</a> work uh find the groove you know find sort of like the the shape of the the<br>
+<a class="time" name="t1532.149" href="#t1532.149">25:32</a> types and the functions and arguments and stuff like that and start using them<br>
+<a class="time" name="t1535.669" href="#t1535.669">25:35</a> and after a couple of times you've used them and you haven't needed to change them like at that point i think that's when they can like move into their own little unit<br>
+<a class="time" name="t1545.19" href="#t1545.19">25:45</a> um like a separate source file and and also coincidentally that's usually when they have some at least that when i have some sense of<br>
+<a class="time" name="t1553.99" href="#t1553.99">25:53</a> what the name for it should be you know in this case like yeah format kind of works you know i just try that for a while it kind of works for this stuff this is a better example<br>
+<a class="time" name="t1562.63" href="#t1562.63">26:02</a> like started out by us calling this like r<br>
+<a class="time" name="t1567.029" href="#t1567.029">26:07</a> off and orange and uh you know there were a couple of different um different<br>
+<a class="time" name="t1572.47" href="#t1572.47">26:12</a> names going around and at this point with with uh uh with the with the time<br>
+<a class="time" name="t1577.35" href="#t1577.35">26:17</a> spent on this i think it's pretty obvious that this should just be called like instructions right or our ins whatever<br>
+<a class="time" name="t1586.39" href="#t1586.39">26:26</a> so uh start you know starting out by like<br>
+<a class="time" name="t1591.59" href="#t1591.59">26:31</a> trying to be like hmm let's like whiteboard this and see we gonna need like this module and that thing and like<br>
+<a class="time" name="t1597.71" href="#t1597.71">26:37</a> this source file and you make subdirectories so you make a bunch of<br>
+<a class="time" name="t1602.07" href="#t1602.07">26:42</a> header files ahead of time for things that you will need and try to structure<br>
+<a class="time" name="t1605.75" href="#t1605.75">26:45</a> things up ahead which i've done like so many times and it never really works out at least it is incredibly<br>
+<a class="time" name="t1612.47" href="#t1612.47">26:52</a> inefficient and i always end up moving things back and forth and depending on the programming language you use there's higher or lower cost to it right if you use go as a very low cost for doing that which i think is is a really neat property of go if you use<br>
+<a class="time" name="t1625.75" href="#t1625.75">27:05</a> something like c as in this case the cost is like can be somewhat high<br>
+<a class="time" name="t1629.269" href="#t1629.269">27:09</a> um especially if you use a lot of header files right you might have to go and rewire a lot of includes and stuff like that if you use something like javascript like every file is gonna have<br>
+<a class="time" name="t1638.63" href="#t1638.63">27:18</a> to change it imports and exports and stuff or imports at least<br>
+<a class="time" name="t1643.029" href="#t1643.029">27:23</a> anyhow it's a little fun a little fun thing so i guess we've we've seen me<br>
+<a class="time" name="t1647.19" href="#t1647.19">27:27</a> doing that here a little bit where we've just been working out of this main file here that contains you know the main function and we've just been spending like trainings on and messing with things and then wrapping them up into functions like this logged in function and these<br>
+<a class="time" name="t1662.149" href="#t1662.149">27:42</a> markers here and when that works we're now moving it into its own little<br>
+<a class="time" name="t1669.029" href="#t1669.029">27:49</a> source file so let's uh let's do this with the formatting code as well<br>
+<a class="time" name="t1674.23" href="#t1674.23">27:54</a> so let's move that into um into this file i'm going to keep this at the bottom these are generated code anyways<br>
+<a class="time" name="t1678.87" href="#t1678.87">27:58</a> right by the by the macros here so probably<br>
+<a class="time" name="t1684.63" href="#t1684.63">28:04</a> use that at the top also this way since this is just an internal like an implementation file right if we<br>
+<a class="time" name="t1695.029" href="#t1695.029">28:15</a> were ever to want to use this rsm for a different project you know in a library style or something like that um we we want to keep the header file like<br>
+<a class="time" name="t1705.35" href="#t1705.35">28:25</a> small and we want it to be name spaced um and there's a balance there between<br>
+<a class="time" name="t1709.269" href="#t1709.269">28:29</a> you know if you if we prefix all of these right with um with a namespace then we're taking that cost in like everywhere right including<br>
+<a class="time" name="t1718.549" href="#t1718.549">28:38</a> here but this doesn't need to be part of any sort of you know um top level api so we just toss them in here use a short name it's very nice<br>
+<a class="time" name="t1727.43" href="#t1727.43">28:47</a> um we're gonna have to we're gonna have to declare this in a header file somewhere so i'm gonna take that so we're gonna save this save this and let me<br>
+<a class="time" name="t1739.75" href="#t1739.75">28:59</a> run this this build script again so yeah now we can't find that right so we're calling that here and it's like i don't know this is i'm not gonna continue um and just add<br>
+<a class="time" name="t1756.23" href="#t1756.23">29:16</a> this uh function prototype and explain what it does<br>
+<a class="time" name="t1761.11" href="#t1761.11">29:21</a> uh formats uh a an array<br>
+<a class="time" name="t1768.07" href="#t1768.07">29:28</a> of instructions ip um some play<br>
+<a class="time" name="t1778.549" href="#t1778.549">29:38</a> text to buff all right and then since we're<br>
+<a class="time" name="t1783.269" href="#t1783.269">29:43</a> using this r8 buff that i've talked about before i actually have since i've<br>
+<a class="time" name="t1787.029" href="#t1787.029">29:47</a> used this so many times i've made a little template that i can use with<br>
+<a class="time" name="t1791.19" href="#t1791.19">29:51</a> functions that just it's going to be dropped in here<br>
+<a class="time" name="t1796.31" href="#t1796.31">29:56</a> it's a double competent so it writes the most buff cap blah blah blah this is just essentially<br>
+<a class="time" name="t1802.389" href="#t1802.389">30:02</a> what we talked in the previous video i was talking a little bit about<br>
+<a class="time" name="t1808.47" href="#t1808.47">30:08</a> uh sdn print def from libercy so this just it has the same paper as a printf essentially okay<br>
+<a class="time" name="t1815.51" href="#t1815.51">30:15</a> save that it will now find it but now it will be angry but because this<br>
+<a class="time" name="t1822.549" href="#t1822.549">30:22</a> oh gosh oh this is tricky so now this right our ins is a type defined in here<br>
+<a class="time" name="t1826.63" href="#t1826.63">30:26</a> an orange so i think what i have to do actually is<br>
+<a class="time" name="t1832.389" href="#t1832.389">30:32</a> to uh to undo this move to move rn stripe def into this header file and instead move<br>
+<a class="time" name="t1837.269" href="#t1837.269">30:37</a> this back here um let's move that to the top<br>
+<a class="time" name="t1849.51" href="#t1849.51">30:49</a> and do c [Music] martins.h for details so to future me who will be confused<br>
+<a class="time" name="t1862.47" href="#t1862.47">31:02</a> okay now we have that and we can also our up<br>
+<a class="time" name="t1869.35" href="#t1869.35">31:09</a> is down here since we have someone typed up why not okay<br>
+<a class="time" name="t1879.83" href="#t1879.83">31:19</a> generally the closer related information is the better<br>
+<a class="time" name="t1885.909" href="#t1885.909">31:25</a> and that goes for things like comments and what they're about to great big<br>
+<a class="time" name="t1890.389" href="#t1890.389">31:30</a> things like unit tests and the coded tests i think is the the closer things<br>
+<a class="time" name="t1894.549" href="#t1894.549">31:34</a> the closer you can get these things together is the the better chance of them like<br>
+<a class="time" name="t1899.43" href="#t1899.43">31:39</a> working out when it comes to other people and your future shelf it is so<br>
+<a class="time" name="t1903.59" href="#t1903.59">31:43</a> great rule like as short distance as possible between related things<br>
+<a class="time" name="t1910.389" href="#t1910.389">31:50</a> okay so now we kind of uh separated that so if we if and when we need to expand<br>
+<a class="time" name="t1915.269" href="#t1915.269">31:55</a> on our formatter we can just do that in here it's a nice little self-contained<br>
+<a class="time" name="t1918.789" href="#t1918.789">31:58</a> thing um as we're expanding instructions uh we<br>
+<a class="time" name="t1925.669" href="#t1925.669">32:05</a> can just do that in this file and it'll be easy to find but like you know sort<br>
+<a class="time" name="t1930.71" href="#t1930.71">32:10</a> of a type of thing and our working area here has been<br>
+<a class="time" name="t1934.87" href="#t1934.87">32:14</a> cleaned up a little bit and logged in this is kind of a helper function let's move this<br>
+<a class="time" name="t1940.63" href="#t1940.63">32:20</a> uh yeah let's just move this into format<br>
+<a class="time" name="t1944.23" href="#t1944.23">32:24</a> for now this is probably not the right place but um you know this is one of the nice things with c i suppose we can just kind<br>
+<a class="time" name="t1951.99" href="#t1951.99">32:31</a> of put this in any implementation file and the link here we just figured out for us and since we're only using it in this file<br>
+<a class="time" name="t1961.43" href="#t1961.43">32:41</a> is put the prototype um c fmt let's see<br>
+<a class="time" name="t1965.99" href="#t1965.99">32:45</a> okay actually my editor can't find that for<br>
+<a class="time" name="t1970.31" href="#t1970.31">32:50</a> me so i can just do that and i can find it for me so i'll just understand that<br>
+<a class="time" name="t1976.47" href="#t1976.47">32:56</a> okay i think we're gonna stop there um we've cleaned things up a bit<br>
+<a class="time" name="t1982.549" href="#t1982.549">33:02</a> uh earlier we solved this issue with the assigned immediate values<br>
+<a class="time" name="t1991.269" href="#t1991.269">33:11</a> we've looked at some uh ways by which we could or i talked<br>
+<a class="time" name="t1996.31" href="#t1996.31">33:16</a> about at least in some ways we can um start by<br>
+<a class="time" name="t1999.59" href="#t1999.59">33:19</a> um exploring stuff in kind of a workspace and start with a single file<br>
+<a class="time" name="t2006.389" href="#t2006.389">33:26</a> as things gradually expand then put them into functions like lift the code put it<br>
+<a class="time" name="t2011.669" href="#t2011.669">33:31</a> into a function or a macro whatever and as the function stabilizes you use that a couple of times right still in your working space move that function into its own dedicated or set of functions into its own dedicated source file um and that's kind of like one two three<br>
+<a class="time" name="t2024.549" href="#t2024.549">33:44</a> is kind of step step process like that um<br>
+<a class="time" name="t2030.71" href="#t2030.71">33:50</a> reduces a lot of thrash from trying to just like figure out good names before you even know like what<br>
+<a class="time" name="t2036.47" href="#t2036.47">33:56</a> good names are and what the groupings are um cool yeah and tomorrow i'm gonna<br>
+<a class="time" name="t2043.35" href="#t2043.35">34:03</a> put together a little uh virtual machine to actually execute this give it some inputs see what the outputs are and that's gonna be fun so<br>
+<a class="time" name="t2049.359" href="#t2049.359">34:09</a> catch you later<br>
+</p>

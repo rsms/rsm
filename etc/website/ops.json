@@ -1,0 +1,373 @@
+[
+	{
+		"id": "COPY",
+		"args": "ABu",
+		"result": "reg",
+		"name": "copy",
+		"semantics": "RA = Bu -- aka \"move\""
+	},
+	{
+		"id": "COPYV",
+		"args": "ABv",
+		"result": "reg",
+		"name": "copyv",
+		"semantics": "RA = instr[...]; PC+=Bu"
+	},
+	{
+		"id": "LOAD",
+		"args": "ABCs",
+		"result": "reg",
+		"name": "load",
+		"semantics": "RA = mem[RB + Cs : 8]"
+	},
+	{
+		"id": "LOAD4U",
+		"args": "ABCs",
+		"result": "reg",
+		"name": "load4u",
+		"semantics": "RA = mem[RB + Cs : 4] -- zero-extend i32 to i64"
+	},
+	{
+		"id": "LOAD4S",
+		"args": "ABCs",
+		"result": "reg",
+		"name": "load4s",
+		"semantics": "RA = mem[RB + Cs : 4] -- sign-extend i32 to i64"
+	},
+	{
+		"id": "LOAD2U",
+		"args": "ABCs",
+		"result": "reg",
+		"name": "load2u",
+		"semantics": "RA = mem[RB + Cs : 2] -- zero-extend i16 to i64"
+	},
+	{
+		"id": "LOAD2S",
+		"args": "ABCs",
+		"result": "reg",
+		"name": "load2s",
+		"semantics": "RA = mem[RB + Cs : 2] -- sign-extend i16 to i64"
+	},
+	{
+		"id": "LOAD1U",
+		"args": "ABCs",
+		"result": "reg",
+		"name": "load1u",
+		"semantics": "RA = mem[RB + Cs : 1] -- zero-extend i8 to i64"
+	},
+	{
+		"id": "LOAD1S",
+		"args": "ABCs",
+		"result": "reg",
+		"name": "load1s",
+		"semantics": "RA = mem[RB + Cs : 1] -- sign-extend i8 to i64"
+	},
+	{
+		"id": "STORE",
+		"args": "ABCs",
+		"result": "mem",
+		"name": "store",
+		"semantics": "mem[RB + Cs : 8] = RA"
+	},
+	{
+		"id": "STORE4",
+		"args": "ABCs",
+		"result": "mem",
+		"name": "store4",
+		"semantics": "mem[RB + Cs : 4] = RA -- wrap i64 to i32"
+	},
+	{
+		"id": "STORE2",
+		"args": "ABCs",
+		"result": "mem",
+		"name": "store2",
+		"semantics": "mem[RB + Cs : 2] = RA -- wrap i64 to i16"
+	},
+	{
+		"id": "STORE1",
+		"args": "ABCs",
+		"result": "mem",
+		"name": "store1",
+		"semantics": "mem[RB + Cs : 1] = RA -- wrap i64 to i8"
+	},
+	{
+		"id": "PUSH",
+		"args": "Au",
+		"result": "mem",
+		"name": "push",
+		"semantics": "SP -= 8; mem[SP] = Au"
+	},
+	{
+		"id": "POP",
+		"args": "A",
+		"result": "reg",
+		"name": "pop",
+		"semantics": "A = mem[SP]; SP += 8"
+	},
+	{
+		"id": "ADD",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "add",
+		"semantics": "RA = RB + Cu -- wrap on overflow"
+	},
+	{
+		"id": "SUB",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "sub",
+		"semantics": "RA = RB - Cu -- wrap on overflow"
+	},
+	{
+		"id": "MUL",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "mul",
+		"semantics": "RA = RB * Cu -- wrap on overflow"
+	},
+	{
+		"id": "ADDS",
+		"args": "ABCs",
+		"result": "reg",
+		"name": "adds",
+		"semantics": "RA = RB + Cs -- panic on overflow"
+	},
+	{
+		"id": "SUBS",
+		"args": "ABCs",
+		"result": "reg",
+		"name": "subs",
+		"semantics": "RA = RB - Cs -- panic on overflow"
+	},
+	{
+		"id": "MULS",
+		"args": "ABCs",
+		"result": "reg",
+		"name": "muls",
+		"semantics": "RA = RB * Cs -- panic on overflow"
+	},
+	{
+		"id": "DIV",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "div",
+		"semantics": "RA = RB / Cu"
+	},
+	{
+		"id": "MOD",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "mod",
+		"semantics": "RA = RB % Cu"
+	},
+	{
+		"id": "AND",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "and",
+		"semantics": "RA = RB & Cu"
+	},
+	{
+		"id": "OR",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "or",
+		"semantics": "RA = RB | Cu"
+	},
+	{
+		"id": "XOR",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "xor",
+		"semantics": "RA = RB ^ Cu"
+	},
+	{
+		"id": "SHL",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "shl",
+		"semantics": "RA = RB << Cu"
+	},
+	{
+		"id": "SHRS",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "shrs",
+		"semantics": "RA = RB >> Cu -- sign-replicating (arithmetic)"
+	},
+	{
+		"id": "SHRU",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "shru",
+		"semantics": "RA = RB >> Cu -- zero-replicating (logical)"
+	},
+	{
+		"id": "BINV",
+		"args": "ABu",
+		"result": "reg",
+		"name": "binv",
+		"semantics": "RA = ~Bu      -- bitwise complement, invert bits"
+	},
+	{
+		"id": "NOT",
+		"args": "ABu",
+		"result": "reg",
+		"name": "not",
+		"semantics": "RA = !Bu      -- boolean negation"
+	},
+	{
+		"id": "EQ",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "eq",
+		"semantics": "RA = RB == Cu"
+	},
+	{
+		"id": "NEQ",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "neq",
+		"semantics": "RA = RB != Cu"
+	},
+	{
+		"id": "LTU",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "ltu",
+		"semantics": "RA = RB <  Cu"
+	},
+	{
+		"id": "LTS",
+		"args": "ABCs",
+		"result": "reg",
+		"name": "lts",
+		"semantics": "RA = RB <  Cs"
+	},
+	{
+		"id": "LTEU",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "lteu",
+		"semantics": "RA = RB <= Cu"
+	},
+	{
+		"id": "LTES",
+		"args": "ABCs",
+		"result": "reg",
+		"name": "ltes",
+		"semantics": "RA = RB <= Cs"
+	},
+	{
+		"id": "GTU",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "gtu",
+		"semantics": "RA = RB >  Cu"
+	},
+	{
+		"id": "GTS",
+		"args": "ABCs",
+		"result": "reg",
+		"name": "gts",
+		"semantics": "RA = RB >  Cs"
+	},
+	{
+		"id": "GTEU",
+		"args": "ABCu",
+		"result": "reg",
+		"name": "gteu",
+		"semantics": "RA = RB >= Cu"
+	},
+	{
+		"id": "GTES",
+		"args": "ABCs",
+		"result": "reg",
+		"name": "gtes",
+		"semantics": "RA = RB >= Cs"
+	},
+	{
+		"id": "IF",
+		"args": "ABs",
+		"result": "nil",
+		"name": "if",
+		"semantics": "if RA!=0 PC += Bs"
+	},
+	{
+		"id": "IFZ",
+		"args": "ABs",
+		"result": "nil",
+		"name": "ifz",
+		"semantics": "if RA==0 PC += Bs"
+	},
+	{
+		"id": "CALL",
+		"args": "Au",
+		"result": "nil",
+		"name": "call",
+		"semantics": "R0...R7 = push(PC); PC=Au"
+	},
+	{
+		"id": "JUMP",
+		"args": "Au",
+		"result": "nil",
+		"name": "jump",
+		"semantics": "PC = Au"
+	},
+	{
+		"id": "RET",
+		"args": "_",
+		"result": "nil",
+		"name": "ret",
+		"semantics": "PC = pop()"
+	},
+	{
+		"id": "TSPAWN",
+		"args": "Au",
+		"result": "nil",
+		"name": "tspawn",
+		"semantics": "R0 = spawn_task(pc=Au, args=R0...R7)"
+	},
+	{
+		"id": "SYSCALL",
+		"args": "Au",
+		"result": "nil",
+		"name": "syscall",
+		"semantics": "R0...R7 = syscall(code=Au, args=R0...R18)"
+	},
+	{
+		"id": "WRITE",
+		"args": "ABCDu",
+		"result": "reg",
+		"name": "write",
+		"semantics": "RA = write dstaddr=RB size=RC fd=Du"
+	},
+	{
+		"id": "READ",
+		"args": "ABCDu",
+		"result": "reg",
+		"name": "read",
+		"semantics": "RA = read  srcaddr=RB size=RC fd=Du"
+	},
+	{
+		"id": "MCOPY",
+		"args": "ABCu",
+		"result": "mem",
+		"name": "mcopy",
+		"semantics": "mem[RA:Cu] = mem[RB:Cu]"
+	},
+	{
+		"id": "MCMP",
+		"args": "ABCDu",
+		"result": "reg",
+		"name": "mcmp",
+		"semantics": "RA = mem[RB:Du] <> mem[RC:Du]"
+	},
+	{
+		"id": "STKMEM",
+		"args": "As",
+		"result": "nil",
+		"name": "stkmem",
+		"semantics": "SP = maybe_split_or_join_stack(); SP += As"
+	}
+]

@@ -1,0 +1,45 @@
+<!DOCTYPE HTML>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ page.title }} • RSM instructions</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="shortcut icon" href="/favicon.ico">
+  <link rel="stylesheet" type="text/css" href="{{
+    cacheBustFileURL(site.baseURL + 'style.css') }}">
+  <style type="text/css">
+.oplist { margin-left:-4px }
+.oplist > a { padding: 2px 4px }
+.oplist > a.selected {
+  font-weight: bold;
+  color: var(--background-color);
+  background: var(--link-color);
+  text-decoration: none;
+}
+  </style>
+</head>
+<body>
+<a href="{{ site.baseURL }}"><img src="{{ site.baseURL }}rsm.svg" alt="RSM" class="logo" width=96 height=96></a>
+
+<!-- <a href="{{ site.baseURL }}isa/#instructions">RSM instructions</a> -->
+
+<h1>{{title}}</h1>
+
+{{! page.body }}
+
+<hr>
+
+<h3><a href="{{ site.baseURL }}isa/#instructions">RSM instructions</a></h3>
+<p style="column-width: 5em" class="oplist">
+{{!
+for (let op of site.rsm_ops) {
+  let clsattr = op.name == page.title ? 'class="selected"' : ''
+  print(`<a href="op.${op.name}.html" ${clsattr}>${op.name}</a><br>`)
+}
+}}
+</p>
+
+
+</body>
+</html>

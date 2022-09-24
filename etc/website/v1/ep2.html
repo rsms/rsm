@@ -1,0 +1,545 @@
+---
+layout: simple2
+title: "Transcript of RSM Episode 2"
+---
+
+<h1>{{page.title}}</h1>
+<p><a href="./">RSM project page</a></p>
+<p>
+<a class="time" name="t2.47" href="#t2.47">00:00:02</a> okay um video number two day number two um<br>
+<a class="time" name="t9.99" href="#t9.99">00:00:09</a> so uh yesterday uh evening<br>
+<a class="time" name="t15.27" href="#t15.27">00:00:15</a> i um after spending a lot of time trying to get the video just uploaded it's amazing actually i spent at this point i spent a lot more<br>
+<a class="time" name="t23.509" href="#t23.509">00:00:23</a> time i was trying to get the video shared on the interwebs than actually<br>
+<a class="time" name="t27.269" href="#t27.269">00:00:27</a> building and working on this project which is kind of ridiculous<br>
+<a class="time" name="t37.75" href="#t37.75">00:00:37</a> technology is hard anyhow um so yesterday evening i started<br>
+<a class="time" name="t47.99" href="#t47.99">00:00:47</a> um with the little like formatting thing uh<br>
+<a class="time" name="t51.83" href="#t51.83">00:00:51</a> so the formatting thing i mentioned yesterday<br>
+<a class="time" name="t55.67" href="#t55.67">00:00:55</a> it is not a lot of code this is it<br>
+<a class="time" name="t62.869" href="#t62.869">00:01:02</a> it um let me run it here so what it does is that it allows us to see<br>
+<a class="time" name="t67.67" href="#t67.67">00:01:07</a> um what we actually ended up encoding into<br>
+<a class="time" name="t73.51" href="#t73.51">00:01:13</a> this little um you know homemade bytecode thingy right<br>
+<a class="time" name="t80.23" href="#t80.23">00:01:20</a> uh these instructions um<br>
+<a class="time" name="t84.95" href="#t84.95">00:01:24</a> so it's really straightforward uh what i'm doing here is take the ip thing here which is the array of instructions we've gathered up and there are<br>
+<a class="time" name="t96.149" href="#t96.149">00:01:36</a> seven of them um and<br>
+<a class="time" name="t101.27000000000001" href="#t101.27000000000001">00:01:41</a> then i yes that'll get a little bit of a little bit of a buffer here yes on the stack for um it creates this output maybe i should<br>
+<a class="time" name="t108.149" href="#t108.149">00:01:48</a> make a little bigger um and then i pass that buffer and this<br>
+<a class="time" name="t116.63" href="#t116.63">00:01:56</a> the you know the limit of it to a function that i've named form with<br>
+<a class="time" name="t122.149" href="#t122.149">00:02:02</a> program uh along with the list of instructions and pc here is just the the number of<br>
+<a class="time" name="t128.55" href="#t128.55">00:02:08</a> instructions since since we're increasing pc here at<br>
+<a class="time" name="t134.55" href="#t134.55">00:02:14</a> the at the end it's it's going to be um the count the number of instructions<br>
+<a class="time" name="t139.75" href="#t139.75">00:02:19</a> could use a better name but yeah yolo<br>
+<a class="time" name="t143.43" href="#t143.43">00:02:23</a> okay so so this one<br>
+<a class="time" name="t146.47" href="#t146.47">00:02:26</a> um is a um it's a very simple little<br>
+<a class="time" name="t150.79" href="#t150.79">00:02:30</a> function what it does is that it uses this uh little pen buff we can jump around and look at what that is it's very straightforward um<br>
+<a class="time" name="t161.27" href="#t161.27">00:02:41</a> there's a little bit of uh structure that has a pointer to where we are currently like the<br>
+<a class="time" name="t167.589" href="#t167.589">00:02:47</a> the current byte that we're writing to which is also um<br>
+<a class="time" name="t172.47" href="#t172.47">00:02:52</a> the the zero terminator null byte this is kind of for c c strings<br>
+<a class="time" name="t175.82999999999998" href="#t175.82999999999998">00:02:55</a> um and then this thing is just something that the the init function here sets up<br>
+<a class="time" name="t182.229" href="#t182.229">00:03:02</a> to be the the last byte that we can write to<br>
+<a class="time" name="t186.229" href="#t186.229">00:03:06</a> um and that's sort of like the the capacity of the the input buffer that the this<br>
+<a class="time" name="t193.75" href="#t193.75">00:03:13</a> pen buffer is writing to and and length here is a separate member rather than you know subtracting<br>
+<a class="time" name="t198.39" href="#t198.39">00:03:18</a> these two simply so that we can get this um<br>
+<a class="time" name="t205.11" href="#t205.11">00:03:25</a> uh s and printf behavior if you're familiar with that lib c function<br>
+<a class="time" name="t209.50900000000001" href="#t209.50900000000001">00:03:29</a> essentially what what what um not create print enough we can just look it up in the manual um [Applause] okay<br>
+<a class="time" name="t229.99" href="#t229.99">00:03:49</a> so um let's say here so the<br>
+<a class="time" name="t235.589" href="#t235.589">00:03:55</a> the sm printout function on similar functions will write at most size<br>
+<a class="time" name="t240.869" href="#t240.869">00:04:00</a> and less than one of the characters printed into the output stream<br>
+<a class="time" name="t246.309" href="#t246.309">00:04:06</a> if the return value is greater than on this kind of the key or equal to the size argument the string was too short and some of the<br>
+<a class="time" name="t254.07" href="#t254.07">00:04:14</a> printed characters were discarded the output is always not terminated unless the size is zero yeah um so what's kind of neat about this type of interface is that you can um<br>
+<a class="time" name="t264.31" href="#t264.31">00:04:24</a> uh you can do something akin to like dynamic memory allocation<br>
+<a class="time" name="t272.55" href="#t272.55">00:04:32</a> without involving any um heap allocators you get back the number of bytes that it<br>
+<a class="time" name="t281.189" href="#t281.189">00:04:41</a> would have written if the buffer was infinitely large so that means that for any function that<br>
+<a class="time" name="t286.87" href="#t286.87">00:04:46</a> you know that implements this this type of behavior what you can do is<br>
+<a class="time" name="t290.71" href="#t290.71">00:04:50</a> jumping back to us actually let me just like with this and restart this build thingy<br>
+<a class="time" name="t295.749" href="#t295.749">00:04:55</a> so what you can do with these types of functions is uh when we're making use of<br>
+<a class="time" name="t301.59" href="#t301.59">00:05:01</a> uh a form pro here right so uh if this was like a real program and i<br>
+<a class="time" name="t307.51" href="#t307.51">00:05:07</a> guess eventually this this might be more robust we can do u size and uh and let's say that this is you know<br>
+<a class="time" name="t315.35" href="#t315.35">00:05:15</a> 60 i don't know 64 maybe that would be too small<br>
+<a class="time" name="t319.11" href="#t319.11">00:05:19</a> um i think yeah so so n is going to say 250 over here we<br>
+<a class="time" name="t333.27" href="#t333.27">00:05:33</a> can say it says 250 and that's how many bytes would have been written if um buffer here was<br>
+<a class="time" name="t340.79" href="#t340.79">00:05:40</a> inverted large and now we know so we could do this like we could do if you know if m is the you know the size of<br>
+<a class="time" name="t347.11" href="#t347.11">00:05:47</a> our buffer then we have to retry<br>
+<a class="time" name="t352.39" href="#t352.39">00:05:52</a> then we have to you know do um i guess we would do something like this buff is malloc i'm not gonna actually write this<br>
+<a class="time" name="t359.909" href="#t359.909">00:05:59</a> for real but if we had malloc we would do malloc and we would do n<br>
+<a class="time" name="t364.71" href="#t364.71">00:06:04</a> um plus one for the null terminating byte and now we can put this in and we do plus one and uh would be good right<br>
+<a class="time" name="t375.27" href="#t375.27">00:06:15</a> or we can use alert if we have you know a couple of these like pre-allocated buffers we can use a larger one anyhow it allows you to do a best guess and uh if you're wrong you can correct<br>
+<a class="time" name="t386.39" href="#t386.39">00:06:26</a> it in one go without having to sort of like incrementally like is this a good<br>
+<a class="time" name="t390.39" href="#t390.39">00:06:30</a> size is this a good size this is a good um and yeah<br>
+<a class="time" name="t397.51" href="#t397.51">00:06:37</a> that is sort of beyond the the scope of what i'm doing here but oh<br>
+<a class="time" name="t403.189" href="#t403.189">00:06:43</a> um but i thought it would be worthwhile to explain what that uh what this<br>
+<a class="time" name="t408.87" href="#t408.87">00:06:48</a> what this sort of what this sort of buffer thing is doing so uh that's why it has a len counter and and length here this is just incremented every time anything is um<br>
+<a class="time" name="t419.83" href="#t419.83">00:06:59</a> is changed in this buffer uh but p is only advanced and written to<br>
+<a class="time" name="t424.55" href="#t424.55">00:07:04</a> as long as there's still space in it and that allows us to use um uh ts7 if you let me just jump back here<br>
+<a class="time" name="t433.67" href="#t433.67">00:07:13</a> so that allows me to just do this like append just depend the pen and then have<br>
+<a class="time" name="t439.029" href="#t439.029">00:07:19</a> to do checks and see if like if if we reach the capacity of the buffer<br>
+<a class="time" name="t442.95" href="#t442.95">00:07:22</a> and at the end uh terminate it's just a helper function<br>
+<a class="time" name="t446.23" href="#t446.23">00:07:26</a> that uh let's see<br>
+<a class="time" name="t452.07" href="#t452.07">00:07:32</a> is it just sets the the current position to now so like the terminating now and<br>
+<a class="time" name="t457.11" href="#t457.11">00:07:37</a> then it returns the the length as it would have been would pv infinitely<br>
+<a class="time" name="t461.51" href="#t461.51">00:07:41</a> large and then he is just a min operation while it's actually like writing things to make sure that it's not writing beyond the uh the valid memory region of the the buffer pass then it's uh it's<br>
+<a class="time" name="t474.469" href="#t474.469">00:07:54</a> it's pretty neat straightforward way to do this at least i think so<br>
+<a class="time" name="t478.629" href="#t478.629">00:07:58</a> um so jumping back so we've set up this um<br>
+<a class="time" name="t490.07" href="#t490.07">00:08:10</a> this buffer and the next we do is loop through the<br>
+<a class="time" name="t493.909" href="#t493.909">00:08:13</a> instructions and uh<br>
+<a class="time" name="t501.43" href="#t501.43">00:08:21</a> we print it out i started out with something like this i'm just printing out the the name of it<br>
+<a class="time" name="t511.589" href="#t511.589">00:08:31</a> and get up here is like a macro we looked at that yesterday um that just<br>
+<a class="time" name="t516.389" href="#t516.389">00:08:36</a> extracts the it just kind of extracts the bits um the most significant bits i<br>
+<a class="time" name="t521.35" href="#t521.35">00:08:41</a> like that um of the instruction which is the<br>
+<a class="time" name="t525.03" href="#t525.03">00:08:45</a> op code and then it calls this<br>
+<a class="time" name="t529.99" href="#t529.99">00:08:49</a> up name function where gs returns a sort of compile time<br>
+<a class="time" name="t536.87" href="#t536.87">00:08:56</a> like you know string of the of the operation just makes the output<br>
+<a class="time" name="t540.949" href="#t540.949">00:09:00</a> here on the on the right side makes a little easier to to see move load i and<br>
+<a class="time" name="t546.07" href="#t546.07">00:09:06</a> so on rather than a um just you know an enumeration kind of<br>
+<a class="time" name="t551.35" href="#t551.35">00:09:11</a> offset um anyhow<br>
+<a class="time" name="t555.67" href="#t555.67">00:09:15</a> uh but i ended up adding this uh this offset as<br>
+<a class="time" name="t561.509" href="#t561.509">00:09:21</a> well since when there are instructions like<br>
+<a class="time" name="t565.67" href="#t565.67">00:09:25</a> the branch instruction that jumps forward three it's going to be useful<br>
+<a class="time" name="t570.15" href="#t570.15">00:09:30</a> and i found it useful looking at this yesterday to to see is this actually<br>
+<a class="time" name="t575.91" href="#t575.91">00:09:35</a> correct you know it's it's six you know uh is is that six minus three is that gonna<br>
+<a class="time" name="t582.31" href="#t582.31">00:09:42</a> end up in the right place um and the next thing is just it's just a<br>
+<a class="time" name="t587.509" href="#t587.509">00:09:47</a> switch it's just generating a switch condition here with the all the um the up codes that<br>
+<a class="time" name="t597.03" href="#t597.03">00:09:57</a> and i made a change to this yesterday um and uh i think this is something maybe i've done in the past but anyhow it ended up being pretty neat so in the uh in the definition here of<br>
+<a class="time" name="t609.75" href="#t609.75">00:10:09</a> uh can you scroll down a little bit let's see where's my<br>
+<a class="time" name="t613.509" href="#t613.509">00:10:13</a> um so in the definition of instructions<br>
+<a class="time" name="t617.35" href="#t617.35">00:10:17</a> here um i've added another field maybe i had<br>
+<a class="time" name="t622.069" href="#t622.069">00:10:22</a> this in yesterday anyway i wasn't using it if i had this yesterday but<br>
+<a class="time" name="t625.03" href="#t625.03">00:10:25</a> this uh declares like what this uh operation<br>
+<a class="time" name="t631.11" href="#t631.11">00:10:31</a> this instruction which arguments it's using and it's<br>
+<a class="time" name="t634.87" href="#t634.87">00:10:34</a> encoding and so a b i<br>
+<a class="time" name="t638.71" href="#t638.71">00:10:38</a> i mean i just made this up there's there's no it doesn't have any any<br>
+<a class="time" name="t644.15" href="#t644.15">00:10:44</a> meaning beyond my name here so a b i means it uses the argument a and the<br>
+<a class="time" name="t648.069" href="#t648.069">00:10:48</a> argument b and the argument b is an immediate value<br>
+<a class="time" name="t653.43" href="#t653.43">00:10:53</a> it's not it doesn't name a register so contrast that to this one this one a<br>
+<a class="time" name="t658.389" href="#t658.389">00:10:58</a> b without the i means that a and b both name registers and a be a bi i guess we<br>
+<a class="time" name="t664.069" href="#t664.069">00:11:04</a> can read like this a and then bi names an immediate value in inside a b<br>
+<a class="time" name="t672.55" href="#t672.55">00:11:12</a> slot rather than a register number and similarly another thing is k and k<br>
+<a class="time" name="t677.19" href="#t677.19">00:11:17</a> would name a uh constant i haven't implemented constants yet but you know assuming that there's a uh as<br>
+<a class="time" name="t683.59" href="#t683.59">00:11:23</a> your token by yesterday there is really just these two concepts there are there's global constant data you can you<br>
+<a class="time" name="t690.069" href="#t690.069">00:11:30</a> bake into your program it's kind of you know just read on memory um<br>
+<a class="time" name="t695.67" href="#t695.67">00:11:35</a> and then you have uh mutable locals right so input arguments<br>
+<a class="time" name="t702.15" href="#t702.15">00:11:42</a> output results and any sort of like temporary aka variables that you might<br>
+<a class="time" name="t707.43" href="#t707.43">00:11:47</a> need inside a function um yeah so that's it so the so the constant a numerical value of a constant in the<br>
+<a class="time" name="t717.19" href="#t717.19">00:11:57</a> program right so if you have constant one constant two constant three uh this<br>
+<a class="time" name="t721.91" href="#t721.91">00:12:01</a> would name a particular constant now i haven't gotten around to this and i just tossed this in here to play around with things and this might not actually be like the right thing it might be better to either to have a you know indirection<br>
+<a class="time" name="t733.59" href="#t733.59">00:12:13</a> table of um here's like a number of addresses to<br>
+<a class="time" name="t738.79" href="#t738.79">00:12:18</a> constant data along with like their alignment and since you know a constant might be of<br>
+<a class="time" name="t748.55" href="#t748.55">00:12:28</a> any size right it could be a five byte string or it could be you know a 64 bit<br>
+<a class="time" name="t754.15" href="#t754.15">00:12:34</a> or a eight byte integer right or it can be sort of like really anything you can imagine and some constants will want to<br>
+<a class="time" name="t760.47" href="#t760.47">00:12:40</a> have a certain alignment and memory and stuff like that so they will have you know you it's they're not kind of like you just have a fixed size in memory so there's got there's there's got to be some need for<br>
+<a class="time" name="t771.43" href="#t771.43">00:12:51</a> um memory addresses when it comes to the<br>
+<a class="time" name="t775.67" href="#t775.67">00:12:55</a> constants at least at some point but you know i'm not bothered by that yet don't need that to um to move along<br>
+<a class="time" name="t782.629" href="#t782.629">00:13:02</a> so that's what that means so i ended up here you can see a couple more eyes here<br>
+<a class="time" name="t787.59" href="#t787.59">00:13:07</a> so branch and i changed the branch ops too from from the ones we looked at yesterday so this one is branch if zero<br>
+<a class="time" name="t793.99" href="#t793.99">00:13:13</a> um so if instruction uh why did i write that<br>
+<a class="time" name="t801.43" href="#t801.43">00:13:21</a> how long um oh yes this is an absolute brush<br>
+<a class="time" name="t805.509" href="#t805.509">00:13:25</a> that's that's why um so yum to instruction number<br>
+<a class="time" name="t812.23" href="#t812.23">00:13:32</a> load register that is the register c right so<br>
+<a class="time" name="t818.069" href="#t818.069">00:13:38</a> grab the c argument let's say it's four then load the value in register four uh<br>
+<a class="time" name="t823.91" href="#t823.91">00:13:43</a> and that value is going to be the um the absolute instruction offset in the<br>
+<a class="time" name="t829.43" href="#t829.43">00:13:49</a> program to jump to if the value of register a register given<br>
+<a class="time" name="t835.67" href="#t835.67">00:13:55</a> in argument a is zero and similarly there's a there's sort of like a sibling instruction here that is not<br>
+<a class="time" name="t843.829" href="#t843.829">00:14:03</a> zero right so i think that sometimes what you do is like you have a instruction called compare um<br>
+<a class="time" name="t850.87" href="#t850.87">00:14:10</a> you'll still need that i think in this case but you sort of like end up doing something like this uh so you say uh<br>
+<a class="time" name="t858.55" href="#t858.55">00:14:18</a> you know compare uh register one to register two right<br>
+<a class="time" name="t864.79" href="#t864.79">00:14:24</a> you store that in register three or whatever and then you do sort of like<br>
+<a class="time" name="t872.15" href="#t872.15">00:14:32</a> a branch on your easter three um to you know some label<br>
+<a class="time" name="t877.11" href="#t877.11">00:14:37</a> um i think this is super common right so you end up with this this is essentially a a single bit like integral really you<br>
+<a class="time" name="t884.87" href="#t884.87">00:14:44</a> just care about one bit it's like a boolean right um rd is equal let's say<br>
+<a class="time" name="t889.43" href="#t889.43">00:14:49</a> it's very cool are these equal or not it's gonna be one and zero uh super<br>
+<a class="time" name="t893.509" href="#t893.509">00:14:53</a> common thing to do right like any if case in in a programming language right<br>
+<a class="time" name="t898.87" href="#t898.87">00:14:58</a> is at least in almost all programming languages will be<br>
+<a class="time" name="t904.069" href="#t904.069">00:15:04</a> a boolean condition right if true then do this else do that right or just<br>
+<a class="time" name="t908.23" href="#t908.23">00:15:08</a> password um so in the spirit of just keeping it kind of<br>
+<a class="time" name="t915.189" href="#t915.189">00:15:15</a> simple and straightforward there's just an instruction called you know that combines those two things that's just you know if um<br>
+<a class="time" name="t923.189" href="#t923.189">00:15:23</a> this thing is zero you just do the young i'll stop studio okay so that's what<br>
+<a class="time" name="t934.389" href="#t934.389">00:15:34</a> also i put up my maybe i'll post a photo of my<br>
+<a class="time" name="t939.59" href="#t939.59">00:15:39</a> amazing sort of duct tape it's literally the octave or electric type setup of<br>
+<a class="time" name="t943.99" href="#t943.99">00:15:43</a> this camera here um i hope it's a little bit better on this camera that's built into my display that i was using yesterday um<br>
+<a class="time" name="t955.03" href="#t955.03">00:15:55</a> so with having the instruction encoding added to this definition of operations<br>
+<a class="time" name="t960.31" href="#t960.31">00:16:00</a> here that uh allows us to<br>
+<a class="time" name="t965.269" href="#t965.269">00:16:05</a> to write this formatting code like really compactly and really small as therefore so this is like all the code<br>
+<a class="time" name="t973.35" href="#t973.35">00:16:13</a> this is all the good needed um to you know manage the buffering stuff and all of that and to to produce this<br>
+<a class="time" name="t979.67" href="#t979.67">00:16:19</a> formatting that was on the right side here the little colors that is just you know i'm just picking the<br>
+<a class="time" name="t987.35" href="#t987.35">00:16:27</a> um the uh the six colors the ansi colors there we<br>
+<a class="time" name="t993.67" href="#t993.67">00:16:33</a> go i wrote it out there the ansi codes for just the um the four bit colors that<br>
+<a class="time" name="t998.55" href="#t998.55">00:16:38</a> pretty much every terminal supports this one i just wanted some colors i thought is useful since like if we<br>
+<a class="time" name="t1007.59" href="#t1007.59">00:16:47</a> okay so we're gonna say is let's write the register<br>
+<a class="time" name="t1013.829" href="#t1013.829">00:16:53</a> number so fmtr is being used here<br>
+<a class="time" name="t1018.389" href="#t1018.389">00:16:58</a> to write out the registered number right so<br>
+<a class="time" name="t1028.47" href="#t1028.47">00:17:08</a> now it gets in since most most or many redistricting numbers will be like uh you know one digit long like eight and<br>
+<a class="time" name="t1034.71" href="#t1034.71">00:17:14</a> zero at least i find it kind of hard to add a glance just spot if like is this a<br>
+<a class="time" name="t1038.39" href="#t1038.39">00:17:18</a> different register than this or are these the same and so adding the volume too far so adding the little<br>
+<a class="time" name="t1046.39" href="#t1046.39">00:17:26</a> colors here like just i found it really helpful to uh to see that like oh this<br>
+<a class="time" name="t1050.63" href="#t1050.63">00:17:30</a> is the same as this uh and this is different um<br>
+<a class="time" name="t1056.87" href="#t1056.87">00:17:36</a> it's kind of neat so it's a small little hack i kind of like that um so we have just three macros and maybe i'm using or maybe you're watching this here like oh my god like here like preprocessor like weirdo you know what the hell are you<br>
+<a class="time" name="t1075.27" href="#t1075.27">00:17:55</a> doing i don't know i think if the code can get easier to read i'm<br>
+<a class="time" name="t1080.07" href="#t1080.07">00:18:00</a> not like all for macros i think it's awesome um obviously it can be really<br>
+<a class="time" name="t1085.19" href="#t1085.19">00:18:05</a> useful like for things like generators like this um but also in this case<br>
+<a class="time" name="t1091.19" href="#t1091.19">00:18:11</a> what's happening here and why this is kind of like small is that there's a<br>
+<a class="time" name="t1096.549" href="#t1096.549">00:18:16</a> macro down here so one when i generate the switch case right with all the switch statement<br>
+<a class="time" name="t1101.35" href="#t1101.35">00:18:21</a> all those cases um which happens so this this line here<br>
+<a class="time" name="t1108.549" href="#t1108.549">00:18:28</a> that we see this line here is um executed expanded applied for each of the instructions that uh we<br>
+<a class="time" name="t1120.07" href="#t1120.07">00:18:40</a> specify here so for move and then for low enough load k and so on<br>
+<a class="time" name="t1125.99" href="#t1125.99">00:18:45</a> and along with that comes the name right i wish bring these next to but i'm trying to keep my my recording really small so the texas is<br>
+<a class="time" name="t1134.87" href="#t1134.87">00:18:54</a> is large enough for you to see um so we get the name and now we got this<br>
+<a class="time" name="t1140.47" href="#t1140.47">00:19:00</a> instruction encoding we're going to use that a second and this is just a description i'm not<br>
+<a class="time" name="t1145.75" href="#t1145.75">00:19:05</a> using it for anything now rather than just referencing them myself<br>
+<a class="time" name="t1150.87" href="#t1150.87">00:19:10</a> so we get the name and then we get the instruction encoding here you just call it args and then this delta dot means you know<br>
+<a class="time" name="t1164.23" href="#t1164.23">00:19:24</a> and we glue this together so it's prefix string which you can find up here like all these functions here have the prefix string right and then i glue yes the arcs together so<br>
+<a class="time" name="t1173.59" href="#t1173.59">00:19:33</a> essentially like that glues together this thing so a b i<br>
+<a class="time" name="t1177.59" href="#t1177.59">00:19:37</a> right or you know branch if zero with an immediate c value<br>
+<a class="time" name="t1186.95" href="#t1186.95">00:19:46</a> right so let's look at that a b c and i so that comes in here if you see an i so that becomes right a b c i<br>
+<a class="time" name="t1199.75" href="#t1199.75">00:19:59</a> and since maybe she quickly revisit the<br>
+<a class="time" name="t1205.35" href="#t1205.35">00:20:05</a> instruction encoding here we looked at this in the first video<br>
+<a class="time" name="t1209.11" href="#t1209.11">00:20:09</a> since each of these arguments<br>
+<a class="time" name="t1212.47" href="#t1212.47">00:20:12</a> are starting at the same place<br>
+<a class="time" name="t1216.71" href="#t1216.71">00:20:16</a> and you know so a in the a b<br>
+<a class="time" name="t1222.07" href="#t1222.07">00:20:22</a> you know w in the a b case right starts at the same place as a in the a b c d case and in all these cases right so b always starts in the same place and so on um that simplifies a bunch of stuff and<br>
+<a class="time" name="t1231.75" href="#t1231.75">00:20:31</a> it simplifies this too so like a function that will print out<br>
+<a class="time" name="t1237.029" href="#t1237.029">00:20:37</a> four different arguments on the screen doesn't have to you know i don't have to call things four times since you know you just say abc right and abc in this<br>
+<a class="time" name="t1246.07" href="#t1246.07">00:20:46</a> case says just a b and so on this is probably super obvious to you so maybe i should just move on but uh so so that's what's going on um<br>
+<a class="time" name="t1254.47" href="#t1254.47">00:20:54</a> okay so now we got a little now we got a little um<br>
+<a class="time" name="t1260.789" href="#t1260.789">00:21:00</a> formatting thing and we can actually see what's uh what we're doing here so if we<br>
+<a class="time" name="t1264.23" href="#t1264.23">00:21:04</a> make a mistake uh that'll be much easier to spot right so if i put in<br>
+<a class="time" name="t1271.35" href="#t1271.35">00:21:11</a> a one here or let's say i mix these up right so i thought it was like this<br>
+<a class="time" name="t1278.31" href="#t1278.31">00:21:18</a> then we can spot that uh what the computer actually sees is like multiply r by r zero<br>
+<a class="time" name="t1285.43" href="#t1285.43">00:21:25</a> sorry by r zero by r zero right and put it in r8 that's not right so<br>
+<a class="time" name="t1297.83" href="#t1297.83">00:21:37</a> okay um for now i think this is going to be just<br>
+<a class="time" name="t1303.11" href="#t1303.11">00:21:43</a> fine for the formatter for the little it lacks there there are two things that<br>
+<a class="time" name="t1312.71" href="#t1312.71">00:21:52</a> it lacks like first off it doesn't express the the labels and again the<br>
+<a class="time" name="t1317.669" href="#t1317.669">00:21:57</a> labels are really just you know for the programmer right so a label here is this<br>
+<a class="time" name="t1321.75" href="#t1321.75">00:22:01</a> b value here it's it's really just like any name that<br>
+<a class="time" name="t1327.83" href="#t1327.83">00:22:07</a> you want you know it can be a little cat or whatnot but<br>
+<a class="time" name="t1333.27" href="#t1333.27">00:22:13</a> this label is for the mixed instruction right so this is going to be a label for<br>
+<a class="time" name="t1337.35" href="#t1337.35">00:22:17</a> instruction number three so that's the multiplication instruction we have it over here it's instruction number three um so a label is not something that is you<br>
+<a class="time" name="t1348.47" href="#t1348.47">00:22:28</a> know concretely part of the program at least it's it isn't in in any of the<br>
+<a class="time" name="t1352.23" href="#t1352.23">00:22:32</a> major um architectures as far as i know<br>
+<a class="time" name="t1359.99" href="#t1359.99">00:22:39</a> and it certainly isn't in this little r7 hobby um instruction set<br>
+<a class="time" name="t1366.549" href="#t1366.549">00:22:46</a> so either either will just like include<br>
+<a class="time" name="t1371.83" href="#t1371.83">00:22:51</a> a label as like an instruction i don't even know how that would work because that would you know change the meaning of the label so that's kind of weird or more likely like just the first thing so just give labels like names like b0 b1<br>
+<a class="time" name="t1383.669" href="#t1383.669">00:23:03</a> block or block like or label maybe all l0 l1 and so on um<br>
+<a class="time" name="t1390.47" href="#t1390.47">00:23:10</a> but to do that would make the formatter a little bit more complicated and i'm sure i'll get to that eventually but essentially when<br>
+<a class="time" name="t1397.43" href="#t1397.43">00:23:17</a> um when you get to something like this right any instruction that would name<br>
+<a class="time" name="t1405.43" href="#t1405.43">00:23:25</a> an instruction offset so that includes the these two branch<br>
+<a class="time" name="t1410.549" href="#t1410.549">00:23:30</a> instructions if it's zero if it's not zero branch instructions so this name is<br>
+<a class="time" name="t1416.31" href="#t1416.31">00:23:36</a> an offset a positive offset of three right to jump down here<br>
+<a class="time" name="t1424.07" href="#t1424.07">00:23:44</a> we'd have to encode that into the program so that<br>
+<a class="time" name="t1428.39" href="#t1428.39">00:23:48</a> might be another argument in this definition list here that is like you<br>
+<a class="time" name="t1432.63" href="#t1432.63">00:23:52</a> know flags maybe and maybe one of the flags that can occur in here could be um<br>
+<a class="time" name="t1438.71" href="#t1438.71">00:23:58</a> you know argument c names and instruction of that<br>
+<a class="time" name="t1442.71" href="#t1442.71">00:24:02</a> and then the formatting function could use that so when it's going through and<br>
+<a class="time" name="t1447.029" href="#t1447.029">00:24:07</a> and printing or formatting a given instruction you can see does this have the flag argument c is a<br>
+<a class="time" name="t1455.43" href="#t1455.43">00:24:15</a> an instruction offset and if it does it can uh it can then like manufacture a<br>
+<a class="time" name="t1459.99" href="#t1459.99">00:24:19</a> label you know three instructions for work or whatever the the offset is right<br>
+<a class="time" name="t1464.23" href="#t1464.23">00:24:24</a> so something like that could create labels so labels are still missing the other thing that's missing is that uh my little macros for<br>
+<a class="time" name="t1472.549" href="#t1472.549">00:24:32</a> uh for managing um retrieval of arguments here doesn't deal<br>
+<a class="time" name="t1478.87" href="#t1478.87">00:24:38</a> with sign integers and so<br>
+<a class="time" name="t1482.63" href="#t1482.63">00:24:42</a> when you have a surface calling smart<br>
+<a class="time" name="t1486.87" href="#t1486.87">00:24:46</a> so if we look at this thing this instruction here this is branch if<br>
+<a class="time" name="t1494.71" href="#t1494.71">00:24:54</a> not zero with an immediate value of instruction offsets so it looks at yeah this the instruction of coding here<br>
+<a class="time" name="t1517.909" href="#t1517.909">00:25:17</a> so let's change that okay so what's happening here what the mistake i've made is that the um brand shift not zero<br>
+<a class="time" name="t1523.669" href="#t1523.669">00:25:23</a> right i thought it was it was accepting um two<br>
+<a class="time" name="t1529.75" href="#t1529.75">00:25:29</a> arguments right it's not it's it accepts just one argument right it reduced your argument and then the the immediate right<br>
+<a class="time" name="t1538.95" href="#t1538.95">00:25:38</a> so zero like register syria doesn't use that so let's change this<br>
+<a class="time" name="t1543.83" href="#t1543.83">00:25:43</a> and now we're gonna just get some random number here which might or might not be the same<br>
+<a class="time" name="t1549.35" href="#t1549.35">00:25:49</a> next time around it who knows um yeah oh there we have the number<br>
+<a class="time" name="t1556.95" href="#t1556.95">00:25:56</a> okay so um that's because the formatting function is not you know it's it's based<br>
+<a class="time" name="t1560.95" href="#t1560.95">00:26:00</a> on these things so we need to go here so this thing it<br>
+<a class="time" name="t1565.269" href="#t1565.269">00:26:05</a> says like no it doesn't it doesn't use the the b value or the the c argument there<br>
+<a class="time" name="t1572.23" href="#t1572.23">00:26:12</a> um and the the same is true for this one and i should go and update this right oops<br>
+<a class="time" name="t1580.23" href="#t1580.23">00:26:20</a> so this is going to be b so um this is going to be b2 i think<br>
+<a class="time" name="t1585.51" href="#t1585.51">00:26:25</a> actually all of these are going to be b um and then we drop the c<br>
+<a class="time" name="t1590.71" href="#t1590.71">00:26:30</a> and just going to clean up the orientation<br>
+<a class="time" name="t1598.39" href="#t1598.39">00:26:38</a> rerun that okay now we're good that's the power of macro right there<br>
+<a class="time" name="t1604.39" href="#t1604.39">00:26:44</a> we didn't have to make any other changes if the formatting functions now are routed to a different function right<br>
+<a class="time" name="t1609.75" href="#t1609.75">00:26:49</a> when a case statement here for that instruction hits we're just going to go to this one and before we went to this one<br>
+<a class="time" name="t1617.19" href="#t1617.19">00:26:57</a> which is why i tried to print um the value of an argument that we didn't set which you just gonna have some random stuff from memory<br>
+<a class="time" name="t1626.07" href="#t1626.07">00:27:06</a> so uh okay that would fix that that was good that's a little annotation for<br>
+<a class="time" name="t1629.59" href="#t1629.59">00:27:09</a> cleaning us okay so back to the uh the issue here is<br>
+<a class="time" name="t1634.47" href="#t1634.47">00:27:14</a> that this is a negative value right<br>
+<a class="time" name="t1638.23" href="#t1638.23">00:27:18</a> so the the instruction offset here is<br>
+<a class="time" name="t1643.11" href="#t1643.11">00:27:23</a> negative to the distance to this label right so this is actually a loop right<br>
+<a class="time" name="t1647.11" href="#t1647.11">00:27:27</a> so what we're building here is if we're looking at this kind of um<br>
+<a class="time" name="t1652.63" href="#t1652.63">00:27:32</a> to be assembly we define a label at this instruction that's that is the the start<br>
+<a class="time" name="t1656.71" href="#t1656.71">00:27:36</a> of a loop so we go down here to two and we come here we do we multiply these things we<br>
+<a class="time" name="t1664.23" href="#t1664.23">00:27:44</a> put in zero and then we subtract one from eight and we look and see if uh if eight is<br>
+<a class="time" name="t1672.63" href="#t1672.63">00:27:52</a> not zero and if it's not zero which is sort of like the common condition until you know the function is done we just go back to b1 and we we do this<br>
+<a class="time" name="t1682.47" href="#t1682.47">00:28:02</a> again right so we multiply uh and then we subtract and then we check and multiply subtract and check and eventually we'll check here and it'll be like no it's not zero meaning that it is zero<br>
+<a class="time" name="t1693.35" href="#t1693.35">00:28:13</a> and it will not branch and we'll fall so that means that the register offset<br>
+<a class="time" name="t1703.19" href="#t1703.19">00:28:23</a> here is negative it's going to be negative three since the<br>
+<a class="time" name="t1706.95" href="#t1706.95">00:28:26</a> the programming counter will increase one after here well depends on how we implement a little evaluator later but<br>
+<a class="time" name="t1713.669" href="#t1713.669">00:28:33</a> um yeah let's say that it's three um and so we need minus three and i'm not<br>
+<a class="time" name="t1719.11" href="#t1719.11">00:28:39</a> really expressing that so here yeah sure this is gonna be a negative number<br>
+<a class="time" name="t1723.909" href="#t1723.909">00:28:43</a> uh that we store in here but you know the way two's complement integers are stored<br>
+<a class="time" name="t1731.029" href="#t1731.029">00:28:51</a> is you use one bit to say is this negative or positive and you use the<br>
+<a class="time" name="t1735.59" href="#t1735.59">00:28:55</a> remaining bits to say you know what expressing what number it is right<br>
+<a class="time" name="t1740.389" href="#t1740.389">00:29:00</a> but the the way we we store things like we<br>
+<a class="time" name="t1745.669" href="#t1745.669">00:29:05</a> don't really say the specific bit is the sign bit we say you know just toss it in<br>
+<a class="time" name="t1749.11" href="#t1749.11">00:29:09</a> there um and so we're gonna have to figure out how to get this this out as assigned uh as a<br>
+<a class="time" name="t1760.07" href="#t1760.07">00:29:20</a> signed number when we extract it uh and for that we're just gonna i think<br>
+<a class="time" name="t1764.71" href="#t1764.71">00:29:24</a> what we're gonna need is a uh it's an instruction encoding actually<br>
+<a class="time" name="t1769.11" href="#t1769.11">00:29:29</a> to express an instruction encoding so first let's just see if we can get that working um so we're going to jump to the formatter i think now let's just let's just see if we can just print it out here<br>
+<a class="time" name="t1783.75" href="#t1783.75">00:29:43</a> um so we're just gonna see if we can lock this mia's gonna grab this<br>
+<a class="time" name="t1792.71" href="#t1792.71">00:29:52</a> this instruction here let's just make a copy so we can easily let's look at it<br>
+<a class="time" name="t1799.75" href="#t1799.75">00:29:59</a> let's just do this so i'll make a copy of that we can look<br>
+<a class="time" name="t1809.029" href="#t1809.029">00:30:09</a> at and then in here we want to get a negative value that's got i think it's going to be three um<br>
+<a class="time" name="t1817.269" href="#t1817.269">00:30:17</a> of x uh and we want to<br>
+<a class="time" name="t1832.47" href="#t1832.47">00:30:32</a> um so that's some you know weird number we're getting right five two four two<br>
+<a class="time" name="t1839.19" href="#t1839.19">00:30:39</a> eight um i really wish that that the c libsy standard library had a printf<br>
+<a class="time" name="t1848.87" href="#t1848.87">00:30:48</a> function with like binary output options i think that would be really useful sometimes to see what you know what are the bits like you know we can do hexadecimal formatting or you know<br>
+<a class="time" name="t1859.029" href="#t1859.029">00:30:59</a> decimal formatting um but you can't do like you know this<br>
+<a class="time" name="t1863.509" href="#t1863.509">00:31:03</a> it'll just crash i'm running this program like you know with address sensation stuff that's why<br>
+<a class="time" name="t1869.029" href="#t1869.029">00:31:09</a> um but i do have a function that i can use<br>
+<a class="time" name="t1876.47" href="#t1876.47">00:31:16</a> to get along here not spend too much time trying to fix things<br>
+<a class="time" name="t1881.19" href="#t1881.19">00:31:21</a> so this little thing will just uh maybe i'll just copy this what i<br>
+<a class="time" name="t1886.149" href="#t1886.149">00:31:26</a> gotta do okay i can break this out like simplify this a little bit so yes let's string fmt 64.<br>
+<a class="time" name="t1902.149" href="#t1902.149">00:31:42</a> [Music] capacity this is some sort of destination buffer actually we got we gotta know exactly what size it is now<br>
+<a class="time" name="t1910.71" href="#t1910.71">00:31:50</a> this this doesn't actually mean much in c but it's it's mostly for the programmers for most of you so we have some value<br>
+<a class="time" name="t1920.789" href="#t1920.789">00:32:00</a> and we say the base and it can be you know no more than 64. base 2 is the<br>
+<a class="time" name="t1925.11" href="#t1925.11">00:32:05</a> smallest base right um i guess to make this like nicer we can do<br>
+<a class="time" name="t1934.47" href="#t1934.47">00:32:14</a> base 2 as the it's the smallest possible base so we just clamp that value there in case we would ever happen to give it like one or zero or something like that and otherwise it would just sort of explode i think or never finish<br>
+<a class="time" name="t1947.43" href="#t1947.43">00:32:27</a> um okay and we simplify this and we can just do this and then use this thing in<br>
+<a class="time" name="t1961.31" href="#t1961.31">00:32:41</a> peace [Applause] i'm sure you can write this function in a more efficient way but this this works for me i'm gonna yep it's a destination buffalo<br>
+<a class="time" name="t1971.99" href="#t1971.99">00:32:51</a> i think this is good nope i'm not stopping you oh<br>
+<a class="time" name="t1976.549" href="#t1976.549">00:32:56</a> um i have a length value<br>
+<a class="time" name="t2006.07" href="#t2006.07">00:33:26</a> this list of functions i'm gonna end it to the end here because this is not really like an r a buff<br>
+<a class="time" name="t2013.99" href="#t2013.99">00:33:33</a> function this is just some string function but you know i'll do okay back to this guy<br>
+<a class="time" name="t2021.509" href="#t2021.509">00:33:41</a> so now we can have a little how we just release this buffer so now we can pass this [Music]<br>
+<a class="time" name="t2028.71" href="#t2028.71">00:33:48</a> so the goal here right is to put this in um in binary so we can inspect the value<br>
+<a class="time" name="t2035.029" href="#t2035.029">00:33:55</a> so we're going to take the the the the action limit update is printed and<br>
+<a class="time" name="t2040.71" href="#t2040.71">00:34:00</a> then we'll take our value which we want and the base we're going<br>
+<a class="time" name="t2047.75" href="#t2047.75">00:34:07</a> binary base two and we want to print this buffer<br>
+<a class="time" name="t2051.43" href="#t2051.43">00:34:11</a> and yeah we can just save ourselves some is<br>
+<a class="time" name="t2061.43" href="#t2061.43">00:34:21</a> okay now we see that when looking at this<br>
+<a class="time" name="t2065.589" href="#t2065.589">00:34:25</a> value up here like the oh the least in significant byte<br>
+<a class="time" name="t2069.19" href="#t2069.19">00:34:29</a> here um let's see let's count it three one two<br>
+<a class="time" name="t2075.43" href="#t2075.43">00:34:35</a> three four it's all once and then we have another one uh and now we have our actual value<br>
+<a class="time" name="t2081.03" href="#t2081.03">00:34:41</a> over here all right four<br>
+<a class="time" name="t2093.27" href="#t2093.27">00:34:53</a> eight now you can all see how how like rusty i<br>
+<a class="time" name="t2106.23" href="#t2106.23">00:35:06</a> am at the stuff a very long time ago i<br>
+<a class="time" name="t2111.109" href="#t2111.109">00:35:11</a> a friend of mine had a a pc the dos on it and had basic we would<br>
+<a class="time" name="t2115.67" href="#t2115.67">00:35:15</a> write or in um basic programs in his basement and we<br>
+<a class="time" name="t2119.91" href="#t2119.91">00:35:19</a> have no idea what we're doing and it's still true today i guess<br>
+<a class="time" name="t2123.27" href="#t2123.27">00:35:23</a> um so let's just look at this little macro and see what i'm doing here<br>
+<a class="time" name="t2131.589" href="#t2131.589">00:35:31</a> maybe i made a mistake here so let's just break this down and mask one<br>
+<a class="time" name="t2145.03" href="#t2145.03">00:35:45</a> too right so that's just called x<br>
+<a class="time" name="t2150.15" href="#t2150.15">00:35:50</a> uh so we have our instruction here passing along<br>
+<a class="time" name="t2154.39" href="#t2154.39">00:35:54</a> and the position right so for excuse me so we have argument<br>
+<a class="time" name="t2167.99" href="#t2167.99">00:36:07</a> no yeah we're still getting the same result<br>
+<a class="time" name="t2183.67" href="#t2183.67">00:36:23</a> right it's good again let's double check and make sure that there's let me say something here<br>
+<a class="time" name="t2191.349" href="#t2191.349">00:36:31</a> just have this little space to separate it from the rest of the print out<br>
+<a class="time" name="t2195.91" href="#t2195.91">00:36:35</a> just a different function it doesn't have that stuff um so let's see what this mask is<br>
+<a class="time" name="t2225.19" href="#t2225.19">00:37:05</a> so i'm looking at as what i've done before i kind of left that in so this is<br>
+<a class="time" name="t2230.47" href="#t2230.47">00:37:10</a> what i've done for this other old project tab called soul<br>
+<a class="time" name="t2235.91" href="#t2235.91">00:37:15</a> so this is for extracting a um or building a uh cyan digger<br>
+<a class="time" name="t2248.95" href="#t2248.95">00:37:28</a> i think i can probably just do the inverse<br>
+<a class="time" name="t2252.55" href="#t2252.55">00:37:32</a> oops um let's try it okay so<br>
+<a class="time" name="t2262.87" href="#t2262.87">00:37:42</a> um and max here i'm guessing what that is is<br>
+<a class="time" name="t2268.15" href="#t2268.15">00:37:48</a> the maximum possible value<br>
+<a class="time" name="t2272.39" href="#t2272.39">00:37:52</a> i have used the the source file over here it's just one browsing from the solid product let's read the instruction and then we<br>
+<a class="time" name="t2295.91" href="#t2295.91">00:38:15</a> just start out by just upsetting to the<br>
+<a class="time" name="t2301.75" href="#t2301.75">00:38:21</a> position right so position for b um<br>
+<a class="time" name="t2307.03" href="#t2307.03">00:38:27</a> is the a position plus the size of a<br>
+<a class="time" name="t2312.31" href="#t2312.31">00:38:32</a> so five let's say so so it's uh eight plus five<br>
+<a class="time" name="t2327.109" href="#t2327.109">00:38:47</a> right should i spell right yeah so we're just shifting off thirteen and now we are at<br>
+<a class="time" name="t2337.91" href="#t2337.91">00:38:57</a> so um this little guy here brings us from<br>
+<a class="time" name="t2344.15" href="#t2344.15">00:39:04</a> this place to here<br>
+<a class="time" name="t2350.71" href="#t2350.71">00:39:10</a> this number right there so now right here<br>
+<a class="time" name="t2361.27" href="#t2361.27">00:39:21</a> and we have now a remaining 19 19 bits um and so that's this mask is is gonna<br>
+<a class="time" name="t2367.75" href="#t2367.75">00:39:27</a> you know make us a number essentially that represents uh these bits<br>
+<a class="time" name="t2372.069" href="#t2372.069">00:39:32</a> sounds these set um<br>
+<a class="time" name="t2382.39" href="#t2382.39">00:39:42</a> actually i wonder i should be shifting no wait wait yeah no no we are<br>
+<a class="time" name="t2386.23" href="#t2386.23">00:39:46</a> essentially we have essentially done this<br>
+<a class="time" name="t2405.589" href="#t2405.589">00:40:05</a> so we just make sure that we have the right type it's a u32 so we could<br>
+<a class="time" name="t2410.63" href="#t2410.63">00:40:10</a> probably also do that if we wanted to but you know this makes it a little bit more portable um and down but what we do is we shift the uh<br>
+<a class="time" name="t2420.63" href="#t2420.63">00:40:20</a> ship this guy over gosh i should have documented this<br>
+<a class="time" name="t2428.47" href="#t2428.47">00:40:28</a> butter um just look at the<br>
+<a class="time" name="t2454.15" href="#t2454.15">00:40:54</a> this uh might be useful to have a reference here<br>
+<a class="time" name="t2459.349" href="#t2459.349">00:40:59</a> so we have the bit count<br>
+<a class="time" name="t2500.309" href="#t2500.309">00:41:40</a> so now it's here um and actually<br>
+<a class="time" name="t2507.75" href="#t2507.75">00:41:47</a> this is our formula function it's not going to<br>
+<a class="time" name="t2513.349" href="#t2513.349">00:41:53</a> add spaces for us and then we want to pad this out so we<br>
+<a class="time" name="t2517.87" href="#t2517.87">00:41:57</a> want to be saying that this should be straight straight over there<br>
+<a class="time" name="t2536.39" href="#t2536.39">00:42:16</a> um okay yeah that'll be good enough we can zero padded two if we want uh there we go<br>
+<a class="time" name="t2547.91" href="#t2547.91">00:42:27</a> so now we see we have<br>
+<a class="time" name="t2553.91" href="#t2553.91">00:42:33</a> 18 19 uh 19 bits right that we get and that should be the total value stored<br>
+<a class="time" name="t2558.39" href="#t2558.39">00:42:38</a> the next thing we want to do yeah so that's the master yes we're not that interested but let's look at our value again and we<br>
+<a class="time" name="t2568.55" href="#t2568.55">00:42:48</a> know this is the those those bits right see in here i guess i can't do column selection that's terminal but um so that's the value we stored now it kind of looks that looks totally wrong to me that looks like it's like a huge number right<br>
+<a class="time" name="t2583.27" href="#t2583.27">00:43:03</a> so maybe the issue we're having here is in the uh the way this is being stored here<br>
+<a class="time" name="t2589.75" href="#t2589.75">00:43:09</a> so maybe x here<br>
+<a class="time" name="t2606.87" href="#t2606.87">00:43:26</a> let's start by breaking this down so x equals<br>
+<a class="time" name="t2617.27" href="#t2617.27">00:43:37</a> construction of this separation right so this is just going to be some small so it will be number<br>
+<a class="time" name="t2629.109" href="#t2629.109">00:43:49</a> zero one two three four five six seven this guy<br>
+<a class="time" name="t2639.91" href="#t2639.91">00:43:59</a> and um just add a little meditation here for ourselves don't take the position of eight<br>
+<a class="time" name="t2674.63" href="#t2674.63">00:44:34</a> there and we shift this over by the position<br>
+<a class="time" name="t2678.55" href="#t2678.55">00:44:38</a> right so the value for a so the value and then finally this is kind of like<br>
+<a class="time" name="t2687.99" href="#t2687.99">00:44:47</a> the the number really care about so first off let's just use zero here to make sure that that we're gonna have an issue that goes through here actually first let's just stop this just to make sure we get the same output<br>
+<a class="time" name="t2700.39" href="#t2700.39">00:45:00</a> um and this value will be stored in argument b this pc also maybe i may be interested<br>
+<a class="time" name="t2712.71" href="#t2712.71">00:45:12</a> let's just print this out if i'll do the oldest work because they realize this is where i'm wrong<br>
+<a class="time" name="t2729.109" href="#t2729.109">00:45:29</a> minus eight you're watching this now and you're like<br>
+<a class="time" name="t2750.39" href="#t2750.39">00:45:50</a> wishing you can just tell me what i'm doing wrong but i'm sorry i can't hear you something obvious i'm sure<br>
+<a class="time" name="t2762.39" href="#t2762.39">00:46:02</a> five minus three oh yeah i've been looking by this before<br>
+<a class="time" name="t2774.79" href="#t2774.79">00:46:14</a> oh it's still it's still wrong but at least now we have the right number okay<br>
+<a class="time" name="t2779.19" href="#t2779.19">00:46:19</a> um [Music]<br>
+<a class="time" name="t2792.55" href="#t2792.55">00:46:32</a> so now i'm gonna we got the right number we're gonna start out so that's it's actually minus two which i think is is<br>
+<a class="time" name="t2799.75" href="#t2799.75">00:46:39</a> going to be incorrect um since we don't increase the pc here<br>
+<a class="time" name="t2806.95" href="#t2806.95">00:46:46</a> and the compiler is going to be it's going to be angry here because i i'm not<br>
+<a class="time" name="t2810.15" href="#t2810.15">00:46:50</a> sure if this this might be undefined here<br>
+<a class="time" name="t2813.51" href="#t2813.51">00:46:53</a> i'm sure let's see what it says it'll be angry yeah yeah and sequence might be i am<br>
+<a class="time" name="t2821.67" href="#t2821.67">00:47:01</a> um let's just go back to this i'm actually gonna have to find a better way to actually write this<br>
+<a class="time" name="t2829.03" href="#t2829.03">00:47:09</a> so this is super comfortable bad ergonomics here right so<br>
+<a class="time" name="t2833.27" href="#t2833.27">00:47:13</a> this is essentially like um well there's got to be a plus here now<br>
+<a class="time" name="t2837.67" href="#t2837.67">00:47:17</a> yes um so 3 is the correct answer here so after<br>
+<a class="time" name="t2843.91" href="#t2843.91">00:47:23</a> this instruction we want to go back three so minus minus minus<br>
+<a class="time" name="t2849.43" href="#t2849.43">00:47:29</a> back here and we so now we should have three<br>
+<a class="time" name="t2863.03" href="#t2863.03">00:47:43</a> so well then when we solve this we can just go back to everywhere okay so<br>
+<a class="time" name="t2874.23" href="#t2874.23">00:47:54</a> so this value is going to be minus three um on the macro<br>
+<a class="time" name="t2888.309" href="#t2888.309">00:48:08</a> what happens if we just essentially cast this<br>
+<a class="time" name="t2893.19" href="#t2893.19">00:48:13</a> signed negative number to use an unsigned number uh we'll see that we get this really kind of large number which looks especially similar to this might<br>
+<a class="time" name="t2902.39" href="#t2902.39">00:48:22</a> actually be a number right so let's confirm first expression<br>
+<a class="time" name="t2908.87" href="#t2908.87">00:48:28</a> plug this into our printing function on here for printing out a binary number<br>
+<a class="time" name="t2918.069" href="#t2918.069">00:48:38</a> no that's much oh i think it's because i'm not<br>
+<a class="time" name="t2923.589" href="#t2923.589">00:48:43</a> masculine that's yeah that's probably what's happening but i think i think what's size that's the<br>
+<a class="time" name="t2937.51" href="#t2937.51">00:48:57</a> size of b which should be established and i forgot what it was uh let's just do slice of b up here<br>
+<a class="time" name="t2944.309" href="#t2944.309">00:49:04</a> because it's all five no no i'm totally wrong that's the size<br>
+<a class="time" name="t2947.43" href="#t2947.43">00:49:07</a> of the b the wide sort of thing right so that's 19 i think<br>
+<a class="time" name="t2966.79" href="#t2966.79">00:49:26</a> okay uh yep that's totally different not at<br>
+<a class="time" name="t2976.95" href="#t2976.95">00:49:36</a> all the same thing but it's interesting oh no that is the same thing oh look at that so<br>
+<a class="time" name="t2986.069" href="#t2986.069">00:49:46</a> what we got was this result right<br>
+<a class="time" name="t2989.67" href="#t2989.67">00:49:49</a> i'm just putting it here so you can see that it's the same thing<br>
+<a class="time" name="t2998.47" href="#t2998.47">00:49:58</a> so that's what's going on right so um and that is what we expected to<br>
+<a class="time" name="t3003.589" href="#t3003.589">00:50:03</a> happen right that is fine uh we cast this number and they are we are masking out to remove the um the<br>
+<a class="time" name="t3010.87" href="#t3010.87">00:50:10</a> bits over here or yeah the bits over here that we didn't care about it was and maybe that's maybe that's where i'm<br>
+<a class="time" name="t3024.23" href="#t3024.23">00:50:24</a> so this is a function that i use or micro they used<br>
+<a class="time" name="t3028.71" href="#t3028.71">00:50:28</a> uh in this other project uh and i don't know maybe i figured out maybe i learned it from someone else<br>
+<a class="time" name="t3034.309" href="#t3034.309">00:50:34</a> but let's see what happens if we use this instead so we're casting us that's the same thing going on right and then instead we're um<br>
+<a class="time" name="t3057.829" href="#t3057.829">00:50:57</a> let's just put out the definition of okay<br>
+<a class="time" name="t3076.309" href="#t3076.309">00:51:16</a> so we have the max value of that of that number which is like this in all<br>
+<a class="time" name="t3083.109" href="#t3083.109">00:51:23</a> ones right um so oops 19<br>
+<a class="time" name="t3100.79" href="#t3100.79">00:51:40</a> so that's what we're going to put in here there's you know operator precedence<br>
+<a class="time" name="t3116.71" href="#t3116.71">00:51:56</a> obviously in different programming languages like you know which<br>
+<a class="time" name="t3120.23" href="#t3120.23">00:52:00</a> which thing happens first right is like this thing added to uh to this thing then the<br>
+<a class="time" name="t3129.43" href="#t3129.43">00:52:09</a> result is divided by two or is like this thing divided by two and then added<br>
+<a class="time" name="t3133.67" href="#t3133.67">00:52:13</a> together like in c um this is you know this as the same result<br>
+<a class="time" name="t3139.27" href="#t3139.27">00:52:19</a> like division and multiplication has high precedence happens before like<br>
+<a class="time" name="t3145.829" href="#t3145.829">00:52:25</a> you know subtraction and addition um and then bitwise operators uh and bitwise a lot of different stuff like that has like lower precedence and<br>
+<a class="time" name="t3155.91" href="#t3155.91">00:52:35</a> and in some cases irritating latency and this differs between bringing minors like equality operator has<br>
+<a class="time" name="t3163.19" href="#t3163.19">00:52:43</a> i hope i'm not wrong like um like a higher precedence than like this<br>
+<a class="time" name="t3167.109" href="#t3167.109">00:52:47</a> so if you do like you know if x is like y and<br>
+<a class="time" name="t3171.589" href="#t3171.589">00:52:51</a> flag then what what happens is like this is evaluated x<br>
+<a class="time" name="t3177.43" href="#t3177.43">00:52:57</a> equals y and then the result of that which is you know a<br>
+<a class="time" name="t3182.95" href="#t3182.95">00:53:02</a> one or a zero is that um ended together with the flag right so so you'll you'll see you'll see programs like that written like this but then if you go to like a different programming language like go for example like this you know has higher precedence than the quality operator now<br>
+<a class="time" name="t3196.71" href="#t3196.71">00:53:16</a> aside um i often try to put parentheses around so<br>
+<a class="time" name="t3206.309" href="#t3206.309">00:53:26</a> not always i'm not a great like you see up here i'm just like doing<br>
+<a class="time" name="t3211.03" href="#t3211.03">00:53:31</a> actually there's no other operators going on so maybe i'll give myself an okay for that one okay<br>
+<a class="time" name="t3216.23" href="#t3216.23">00:53:36</a> um enough rambling uh<br>
+<a class="time" name="t3220.79" href="#t3220.79">00:53:40</a> okay so we plug that in here so see where we at uh so we got this weird number where are we<br>
+<a class="time" name="t3234.15" href="#t3234.15">00:53:54</a> okay let's see if we can get this so first we take the<br>
+<a class="time" name="t3242.47" href="#t3242.47">00:54:02</a> um our number negative three all right we convert that to um<br>
+<a class="time" name="t3248.79" href="#t3248.79">00:54:08</a> an unsigned number just recapping here since i it took me a little while to get<br>
+<a class="time" name="t3253.589" href="#t3253.589">00:54:13</a> the uh the camera going here so what we got is is this number over<br>
+<a class="time" name="t3257.19" href="#t3257.19">00:54:17</a> here so that's our first like<br>
+<a class="time" name="t3265.829" href="#t3265.829">00:54:25</a> an unsung integer it's we're just sort of overflowing so if we take this<br>
+<a class="time" name="t3273.589" href="#t3273.589">00:54:33</a> um oh i see what's happening so we add two<br>
+<a class="time" name="t3285.43" href="#t3285.43">00:54:45</a> to it and then we have three to it oh we got zero so that's what's going on right um we have that this is an onsite<br>
+<a class="time" name="t3292.63" href="#t3292.63">00:54:52</a> number now this essentially if we add three to this<br>
+<a class="time" name="t3296.87" href="#t3296.87">00:54:56</a> right the maximum unsigned 32-bit so all bits<br>
+<a class="time" name="t3306.789" href="#t3306.789">00:55:06</a> one is this number so when we take this we take this number this is essentially<br>
+<a class="time" name="t3312.39" href="#t3312.39">00:55:12</a> the same as doing this all right we got this and do all um that<br>
+<a class="time" name="t3322.71" href="#t3322.71">00:55:22</a> the next thing we do is take the maximum value that can be stored in this field<br>
+<a class="time" name="t3328.39" href="#t3328.39">00:55:28</a> um with the half of that and we add it which is i'm just trusting my my old<br>
+<a class="time" name="t3334.789" href="#t3334.789">00:55:34</a> self here so it might be the older wrong um okay so we're doing that<br>
+<a class="time" name="t3343.109" href="#t3343.109">00:55:43</a> let's just skip the mask we definitely need to mask that out but now we have<br>
+<a class="time" name="t3348.95" href="#t3348.95">00:55:48</a> um i have this number up here maybe i should put it's not variable so we can so let's put in uh<br>
+<a class="time" name="t3361.19" href="#t3361.19">00:56:01</a> we already have a variable for this right it's the x-ray of it so you can just use that and so we print it in decimal and then<br>
+<a class="time" name="t3384.7" href="#t3384.7">00:56:24</a> let's print it in binary so we got in decimal<br>
+<a class="time" name="t3425.75" href="#t3425.75">00:57:05</a> inside now we'll also print it as okay so there we go we got it<br>
+<a class="time" name="t3462.63" href="#t3462.63">00:57:42</a> now let's see we have the space and then let's make sure that this is actually a correct value right<br>
+<a class="time" name="t3479.43" href="#t3479.43">00:57:59</a> so we have 19 so let's see we're going so five of those<br>
+<a class="time" name="t3486.63" href="#t3486.63">00:58:06</a> time 20 so that's 19.<br>
+<a class="time" name="t3495.03" href="#t3495.03">00:58:15</a> yeah okay so that's the maximum possible value<br>
+<a class="time" name="t3516.789" href="#t3516.789">00:58:36</a> the mask and that's that doesn't make any sense it should be<br>
+<a class="time" name="t3524.549" href="#t3524.549">00:58:44</a> so now working backwards this other thing so this construction thing right<br>
+<a class="time" name="t3528.47" href="#t3528.47">00:58:48</a> so it takes the operation and everything is smashed together we're not going to do that but we are going to have to shift this over right and then i think it's the final piece of the puzzle here<br>
+<a class="time" name="t3539.349" href="#t3539.349">00:58:59</a> um so let's let's leave the<br>
+<a class="time" name="t3544.39" href="#t3544.39">00:59:04</a> mask alone for a second so we're going to shift this over by<br>
+<a class="time" name="t3548.23" href="#t3548.23">00:59:08</a> um the the the size<br>
+<a class="time" name="t3553.99" href="#t3553.99">00:59:13</a> is that right the position so now we'll put it in the right place<br>
+<a class="time" name="t3562.95" href="#t3562.95">00:59:22</a> for the um in our instruction<br>
+<a class="time" name="t3571.43" href="#t3571.43">00:59:31</a> it'll move it from over here up to here whoops right so we should be seeing if we<br>
+<a class="time" name="t3586.87" href="#t3586.87">00:59:46</a> i'll look at can't do this for me but okay<br>
+<a class="time" name="t3602.15" href="#t3602.15">01:00:02</a> so now<br>
+<a class="time" name="t3608.15" href="#t3608.15">01:00:08</a> [Music] we are going to shift the number there we go yeah that's the same number<br>
+<a class="time" name="t3631.27" href="#t3631.27">01:00:31</a> right and we have shifted over by um<br>
+<a class="time" name="t3636.63" href="#t3636.63">01:00:36</a> by its its position right which is five plus eight so that's what's happening so now we have the value up there so<br>
+<a class="time" name="t3652.39" href="#t3652.39">01:00:52</a> that's what we want eventually and i think debugging this is going to be easier to to do without that because we use round trip and we shift it back right so it<br>
+<a class="time" name="t3661.19" href="#t3661.19">01:01:01</a> wouldn't really matter uh so this is the value we want so now<br>
+<a class="time" name="t3666.23" href="#t3666.23">01:01:06</a> i'm going to do an inverse of this um [Music] okay that looks promising<br>
+<a class="time" name="t3681.91" href="#t3681.91">01:01:21</a> um so this and the other solved thing just<br>
+<a class="time" name="t3686.069" href="#t3686.069">01:01:26</a> extracts this value so that is equivalent to just x like this<br>
+<a class="time" name="t3692.47" href="#t3692.47">01:01:32</a> this again is the max value and now this makes a lot of sense based<br>
+<a class="time" name="t3699.75" href="#t3699.75">01:01:39</a> on there um so if we do x to see where we get the<br>
+<a class="time" name="t3707.91" href="#t3707.91">01:01:47</a> and let's see now maybe we want this to so let me get me my sheet<br>
+<a class="time" name="t3725.43" href="#t3725.43">01:02:05</a> okay so that's cool now we know what to do right first off you're gonna need a<br>
+<a class="time" name="t3729.51" href="#t3729.51">01:02:09</a> max value um and i just gotta plug this in for now but we can be more clever about it uh<br>
+<a class="time" name="t3734.87" href="#t3734.87">01:02:14</a> for the different elements<br>
+<a class="time" name="t3738.069" href="#t3738.069">01:02:18</a> uh uh so let's do max<br>
+<a class="time" name="t3747.91" href="#t3747.91">01:02:27</a> also pardon my like naming here this is like not very convenient naming is it but<br>
+<a class="time" name="t3754.549" href="#t3754.549">01:02:34</a> that's it's which my editor can just be like hey shove it isn't hexadecimal i'm sure it<br>
+<a class="time" name="t3761.43" href="#t3761.43">01:02:41</a> can but i probably just don't know i guess you just<br>
+<a class="time" name="t3793.75" href="#t3793.75">01:03:13</a> max value and we work our way back again to some<br>
+<a class="time" name="t3799.43" href="#t3799.43">01:03:19</a> sort of macro begins right so this is extract<br>
+<a class="time" name="t3829.75" href="#t3829.75">01:03:49</a> so set arg and we can need one of these which does this<br>
+<a class="time" name="t3838.71" href="#t3838.71">01:03:58</a> all right encode um [Music] plus you know we also need to shift it over as we was doing before to get into<br>
+<a class="time" name="t3849.27" href="#t3849.27">01:04:09</a> the the right position in the um in the instruction and we have two of these actually there you see there's a make function here and then there's a<br>
+<a class="time" name="t3856.87" href="#t3856.87">01:04:16</a> set function here um so we're gonna have to a<br>
+<a class="time" name="t3872.63" href="#t3872.63">01:04:32</a> i guess well but i'm thinking about like this<br>
+<a class="time" name="t3880.549" href="#t3880.549">01:04:40</a> qsb a little extra macro we have to use let's just try this uh define s arc<br>
+<a class="time" name="t3894.71" href="#t3894.71">01:04:54</a> i'm just reaching here and i keep hitting like the the wrong key on my keyboard not just like for some reason that<br>
+<a class="time" name="t3907.75" href="#t3907.75">01:05:07</a> let's just see the editor has many ways to i use like<br>
+<a class="time" name="t3912.23" href="#t3912.23">01:05:12</a> different keys now to switch it has like four maybe different key combos to switch and don't know about that so sr you pass like some a science<br>
+<a class="time" name="t3922.069" href="#t3922.069">01:05:22</a> number in here and then this would convert it into just like uh you know<br>
+<a class="time" name="t3926.549" href="#t3926.549">01:05:26</a> an argument that's not signed so we just do this and take the x in there<br>
+<a class="time" name="t3932.15" href="#t3932.15">01:05:32</a> the value we practice using that to make this much more robust<br>
+<a class="time" name="t3937.67" href="#t3937.67">01:05:37</a> and keep these out to make it clear and then we can also have to bring the max<br>
+<a class="time" name="t3942.95" href="#t3942.95">01:05:42</a> value here of that right so maybe we will end up actually with a<br>
+<a class="time" name="t3947.109" href="#t3947.109">01:05:47</a> but a couple of helper macros but max and so what we would do is um to set an<br>
+<a class="time" name="t3959.99" href="#t3959.99">01:05:59</a> argument we would set argument the number of it and b will be you know number uh number one right<br>
+<a class="time" name="t3966.47" href="#t3966.47">01:06:06</a> uh sorry the value of it<br>
+<a class="time" name="t3970.47" href="#t3970.47">01:06:10</a> which in our case is three uh and then the position of the arguments so we have these position<br>
+<a class="time" name="t3976.23" href="#t3976.23">01:06:16</a> which are bit offsets b 13 bits maybe<br>
+<a class="time" name="t3985.75" href="#t3985.75">01:06:25</a> okay it doesn't matter so the offset b um and then we have the the<br>
+<a class="time" name="t3992.63" href="#t3992.63">01:06:32</a> size of b um this would not work right now this is<br>
+<a class="time" name="t4023.43" href="#t4023.43">01:07:03</a> what i was doing right because this is just not going to give us the correct and this would give us the right amount<br>
+<a class="time" name="t4037.51" href="#t4037.51">01:07:17</a> see if we have done nothing<br>
+<a class="time" name="t4042.39" href="#t4042.39">01:07:22</a> so first off we're just gonna um do that for now<br>
+<a class="time" name="t4047.27" href="#t4047.27">01:07:27</a> and make a copy here of the<br>
+<a class="time" name="t4054.87" href="#t4054.87">01:07:34</a> instructions as we modify this you don't want to spend time like writing this code on here and then do um set so b<br>
+<a class="time" name="t4065.91" href="#t4065.91">01:07:45</a> w right on y so we're gonna change that part of x<br>
+<a class="time" name="t4073.91" href="#t4073.91">01:07:53</a> uh we have the position session<br>
+<a class="time" name="t4081.029" href="#t4081.029">01:08:01</a> and we have the size of the w the white one 19 bits and then finally<br>
+<a class="time" name="t4090.25" href="#t4090.25">01:08:10</a> to make [Music]<br>
+<a class="time" name="t4098.309" href="#t4098.309">01:08:18</a> too few arguments oh yeah since we also have to prime the max value here so we have the max pw volume<br>
+<a class="time" name="t4108.07" href="#t4108.07">01:08:28</a> and now if we do still working yeah okay<br>
+<a class="time" name="t4208.63" href="#t4208.63">01:10:08</a> yeah okay good good dumb mistake there so where is the mistake done um<br>
+<a class="time" name="t4222.55" href="#t4222.55">01:10:22</a> now we have to define y first [Applause]<br>
+<a class="time" name="t4250.149" href="#t4250.149">01:10:50</a> see sometimes just like end up in these things i don't know this is<br>
+<a class="time" name="t4255.91" href="#t4255.91">01:10:55</a> might take another hour or two for me to figure this out it's um<br>
+<a class="time" name="t4261.27" href="#t4261.27">01:11:01</a> it's not my strong suit this stuff um it's also incredibly boring but you<br>
+<a class="time" name="t4265.75" href="#t4265.75">01:11:05</a> know you just gotta do it but i think i'm just gonna end it here and i'll<br>
+<a class="time" name="t4270.63" href="#t4270.63">01:11:10</a> loop back later about how um how i went if it's anything<br>
+<a class="time" name="t4274.709" href="#t4274.709">01:11:14</a> of interest and i think beyond this um this is going to get this you know the format and this stuff working i think it's very important to get these like tiny little things that might seem very tedious to like double check everything but like<br>
+<a class="time" name="t4290.47" href="#t4290.47">01:11:30</a> once i'm through with this and i've you know made sure that every 10 little thing is is working as intended i can<br>
+<a class="time" name="t4296.07" href="#t4296.07">01:11:36</a> trust those things right i don't have to re revisit that when there are other<br>
+<a class="time" name="t4300.07" href="#t4300.07">01:11:40</a> bugs in the future i don't have to question these things as being the course of those bugs um and that at<br>
+<a class="time" name="t4306.31" href="#t4306.31">01:11:46</a> least to me is a really nice way of working um it's almost like in a in an<br>
+<a class="time" name="t4311.75" href="#t4311.75">01:11:51</a> analogy a metaphor imagine like building you know a car or a house or a spaceship<br>
+<a class="time" name="t4316.07" href="#t4316.07">01:11:56</a> or something like that um if you test like the screw right you<br>
+<a class="time" name="t4321.99" href="#t4321.99">01:12:01</a> make sure that the screw works and then you test the sheet metal and you make sure that that works and it's the specification and then you put the screw<br>
+<a class="time" name="t4329.43" href="#t4329.43">01:12:09</a> and the sheet metal together and now you test those two together right now you put the the the you know<br>
+<a class="time" name="t4336.07" href="#t4336.07">01:12:16</a> this component with that component together and you test that and so on as soon as like you you test things and you have issues right then you can be fairly<br>
+<a class="time" name="t4344.149" href="#t4344.149">01:12:24</a> certain that it's not the screw because that already tested clearly right so it's probably the combination of the two or maybe one of the other parts and so<br>
+<a class="time" name="t4352.55" href="#t4352.55">01:12:32</a> similarly goes here so that's my maybe it seems like ridiculous to spend so much time trying to get this right and not just going like google it or something like that uh so that's what's happening also you know this project is a is a learning<br>
+<a class="time" name="t4363.99" href="#t4363.99">01:12:43</a> opportunity and and in some aspects like learning about stuff that i don't know and some things to refresh the memory of things that are forgotten so yeah okay well<br>
+<a class="time" name="t4374.87" href="#t4374.87">01:12:54</a> i'll catch up later see ya<br>
+</p>

@@ -1,0 +1,185 @@
+@import url("_css/fonts.css");
+@import url("_css/raster.css");
+@import url("_css/code.css");
+
+:root {
+  --sansFont: Inter_v;
+  --monoFont: ui-monospace, SFMono-Regular, SF Mono,
+              Consolas, Liberation Mono, Menlo, monospace;
+  @supports (font-variation-settings: normal) {
+    --sansFont: Inter_v;
+    --monoFont: jbmono,
+                ui-monospace, SFMono-Regular, SF Mono,
+                Consolas, Liberation Mono, Menlo, monospace;
+  }
+
+  /* base font size */
+  --fontSize: 16px;
+
+  /* heading size */
+  --h1-size: 2.25rem;
+  --h2-size: 1.5rem;
+  --h3-size: 1.25rem;
+  --h4-size: 1.1rem;
+
+  font-weight: 460;
+  font-synthesis: none;
+  color-scheme: light dark;
+
+  --background-color: white;
+  --foreground-color-rgb: 0,0,0;
+  --bgcolor-level1: rgba(0,0,0,0.1);
+  --link-color: var(--blue);
+  --link-underline-color: rgba(var(--foreground-color-rgb), 0.4);
+  --blockquote-bg: #d4ffe1;
+  --blockquote-fg: var(--foreground-color);
+
+  --code-bg: #f6f8fa;
+
+  @media (prefers-color-scheme: dark) {
+    --background-color: rgb(25, 22, 20);
+    --foreground-color-rgb: 217,209,201;
+
+    --bgcolor-level1: rgba(0,0,0,0.3);
+
+    --link-color: #70CAFC;
+    --link-visited-color: #B79EFF;
+    --link-underline-color: rgba(var(--foreground-color-rgb), 0.5);
+    --blockquote-bg: #2a3e3a;
+    --blockquote-fg: #d2ebe6;
+
+    --code-bg: #242120;
+
+    /* or just yolo:
+    filter: invert() hue-rotate(180deg); */
+  }
+}
+
+body {
+  max-width: 800px;
+  min-height: 100vh;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: calc(var(--lineHeight) * 2);
+  padding-top: calc(var(--lineHeight) * 1.4);
+
+  @media only screen and (max-width: 600px) {
+    padding: var(--lineHeight);
+    padding-bottom: calc(var(--lineHeight) * 2);
+  }
+}
+
+ul > li,
+ol > li {
+  margin-bottom: calc(var(--blockSpacingBottom) * 0.25);
+}
+p + ul, p + ol {
+  margin-top: calc(var(--blockSpacingBottom) * -0.75);
+}
+li > p + ul,
+li > p + ol {
+  margin-top: calc(var(--blockSpacingBottom) * -0.75);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  font-variation-settings: 'opsz' 32;
+}
+h1 { font-weight: 650; letter-spacing: -0.02em; }
+h2 { letter-spacing: 0em; }
+h3, h4, h5, h6 { font-family: var(--sansFont); letter-spacing: -0.01em; }
+
+h2, h3, h4, h5, h6 {
+  & > a.anchor {
+    position: relative;
+    opacity: 0;
+    height: 0;
+    outline: none;
+
+    &::after {
+      position: absolute;
+      opacity: 0.3;
+      right: 0.0rem;
+      content: "#";
+      font-weight: 500;
+      padding: 0 0.5em;
+      text-align: center;
+    }
+    &:hover::after {
+      opacity: 1;
+    }
+    /* no hover interaction? disable "hide until hover" */
+    @media (hover: none) { opacity: 1; }
+    /* reduced gutters? put anchor on the right side */
+    @media only screen and (max-width: 600px) { display: block; }
+  }
+  &:hover > a.anchor {
+    opacity: 1;
+  }
+}
+
+em {
+  letter-spacing: 0.01em;
+}
+
+.small, small { font-size: 0.75em } /* 12 @ font-size 16 */
+
+code, tt {
+  font-feature-settings: 'calt' 0, 'kern' 1;
+  font-weight: 400;
+}
+pre, pre > code { line-height: 1.5; }
+
+:not(pre) > code {
+  background:    var(--code-bg);
+  border-radius: 0.2em;
+  padding:       0 0.2em;
+  font-size:     0.9375em;  /* 15dp @ font-size 16 */
+}
+
+h1, h2, h3, h4, h5, h6 {
+  & code {
+    font-weight: inherit;
+    background: none;
+    border-radius: 0;
+  }
+}
+
+blockquote {
+  /* colorful callout */
+  padding: 0.5em 1em;
+  background: var(--blockquote-bg);
+  color: var(--blockquote-fg);
+  border-radius: 0.2em;
+  /* color: rgba(var(--foreground-color-rgb), 0.8); */
+
+  /* github-style indented dimmed */
+/*   --color: rgba(var(--foreground-color-rgb), 0.2);
+  padding-left: 1.0em;
+  border-left: 0.2rem solid var(--color);
+  font-weight: 449;
+  color: rgba(var(--foreground-color-rgb), 0.7); */
+}
+
+table {
+  width: 100%;
+  & td {
+    padding: calc(var(--baseline) * 0.5) 0.75em;
+  }
+  & th {
+    padding: 0 0.75em;
+    padding-top: calc(var(--baseline) * 0.5);
+    padding-bottom: calc(var(--baseline) * 0.65);
+  }
+}
+
+hr:not(:first-child) {
+  margin-top: calc(var(--lineHeight) * 2);
+}
+
+img.logo {
+  margin-left: -9px;
+  margin-bottom: var(--blockSpacingBottom);
+}
+
+.dim { opacity:0.3 }

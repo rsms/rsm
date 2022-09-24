@@ -1,16 +1,9 @@
-// This demonstrates using string data to write a message to the console
-
+// Prints "Hello world" to the console
 const STDOUT = 1
-data hej = "
-  |hello
-  | world
-  |    how
-  |  are\nyou?
-  |"
+data message = "Hello world\n"
 
 fun main(i32) {
-  R0 = hej // address
-  R1 = 32  // length
+  R0 = message // address of string
+  R1 = 12      // length of string
   R0 = write R0 R1 STDOUT
-  ret
 }

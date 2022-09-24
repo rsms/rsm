@@ -129,63 +129,63 @@ typedef uint32_t rin_t;
 //   nil   No result, or implicit register result (i.e. calls)
 //
 #define RSM_FOREACH_OP(_) /* _(name, arguments, result, asmname, semantics) */ \
-_( COPY   , ABu  , reg , "copy"    /* RA = Bu -- aka "move" */)\
-_( COPYV  , ABv  , reg , "copyv"   /* RA = instr[...]; PC+=Bu */)\
-_( LOAD   , ABCs , reg , "load"    /* RA = mem[RB + Cs : 8]                           */)\
-_( LOAD4U , ABCs , reg , "load4u"  /* RA = mem[RB + Cs : 4] -- zero-extend i32 to i64 */)\
-_( LOAD4S , ABCs , reg , "load4s"  /* RA = mem[RB + Cs : 4] -- sign-extend i32 to i64 */)\
-_( LOAD2U , ABCs , reg , "load2u"  /* RA = mem[RB + Cs : 2] -- zero-extend i16 to i64 */)\
-_( LOAD2S , ABCs , reg , "load2s"  /* RA = mem[RB + Cs : 2] -- sign-extend i16 to i64 */)\
-_( LOAD1U , ABCs , reg , "load1u"  /* RA = mem[RB + Cs : 1] -- zero-extend i8 to i64  */)\
-_( LOAD1S , ABCs , reg , "load1s"  /* RA = mem[RB + Cs : 1] -- sign-extend i8 to i64  */)\
-_( STORE  , ABCs , mem , "store"   /* mem[RB + Cs : 8] = RA                           */)\
-_( STORE4 , ABCs , mem , "store4"  /* mem[RB + Cs : 4] = RA -- wrap i64 to i32        */)\
-_( STORE2 , ABCs , mem , "store2"  /* mem[RB + Cs : 2] = RA -- wrap i64 to i16        */)\
-_( STORE1 , ABCs , mem , "store1"  /* mem[RB + Cs : 1] = RA -- wrap i64 to i8         */)\
-_( PUSH   , Au   , mem , "push"    /* SP -= 8; mem[SP] = Au                           */)\
-_( POP    , A    , reg , "pop"     /* A = mem[SP]; SP += 8                            */)\
+_( COPY   , ABu  , reg , "copy"   , "RA = Bu -- aka \"move\"")\
+_( COPYV  , ABv  , reg , "copyv"  , "RA = instr[...]; PC+=Bu")\
+_( LOAD   , ABCs , reg , "load"   , "RA = mem[RB + Cs : 8]")\
+_( LOAD4U , ABCs , reg , "load4u" , "RA = mem[RB + Cs : 4] -- zero-extend i32 to i64")\
+_( LOAD4S , ABCs , reg , "load4s" , "RA = mem[RB + Cs : 4] -- sign-extend i32 to i64")\
+_( LOAD2U , ABCs , reg , "load2u" , "RA = mem[RB + Cs : 2] -- zero-extend i16 to i64")\
+_( LOAD2S , ABCs , reg , "load2s" , "RA = mem[RB + Cs : 2] -- sign-extend i16 to i64")\
+_( LOAD1U , ABCs , reg , "load1u" , "RA = mem[RB + Cs : 1] -- zero-extend i8 to i64")\
+_( LOAD1S , ABCs , reg , "load1s" , "RA = mem[RB + Cs : 1] -- sign-extend i8 to i64")\
+_( STORE  , ABCs , mem , "store"  , "mem[RB + Cs : 8] = RA")\
+_( STORE4 , ABCs , mem , "store4" , "mem[RB + Cs : 4] = RA -- wrap i64 to i32")\
+_( STORE2 , ABCs , mem , "store2" , "mem[RB + Cs : 2] = RA -- wrap i64 to i16")\
+_( STORE1 , ABCs , mem , "store1" , "mem[RB + Cs : 1] = RA -- wrap i64 to i8")\
+_( PUSH   , Au   , mem , "push"   , "SP -= 8; mem[SP] = Au")\
+_( POP    , A    , reg , "pop"    , "A = mem[SP]; SP += 8")\
 \
-_( ADD   , ABCu , reg , "add"   /* RA = RB + Cu -- wrap on overflow                 */)\
-_( SUB   , ABCu , reg , "sub"   /* RA = RB - Cu -- wrap on overflow                 */)\
-_( MUL   , ABCu , reg , "mul"   /* RA = RB * Cu -- wrap on overflow                 */)\
-_( ADDS  , ABCs , reg , "adds"  /* RA = RB + Cs -- panic on overflow                */)\
-_( SUBS  , ABCs , reg , "subs"  /* RA = RB - Cs -- panic on overflow                */)\
-_( MULS  , ABCs , reg , "muls"  /* RA = RB * Cs -- panic on overflow                */)\
-_( DIV   , ABCu , reg , "div"   /* RA = RB / Cu                                     */)\
-_( MOD   , ABCu , reg , "mod"   /* RA = RB % Cu                                     */)\
-_( AND   , ABCu , reg , "and"   /* RA = RB & Cu                                     */)\
-_( OR    , ABCu , reg , "or"    /* RA = RB | Cu                                     */)\
-_( XOR   , ABCu , reg , "xor"   /* RA = RB ^ Cu                                     */)\
-_( SHL   , ABCu , reg , "shl"   /* RA = RB << Cu                                    */)\
-_( SHRS  , ABCu , reg , "shrs"  /* RA = RB >> Cu -- sign-replicating (arithmetic)   */)\
-_( SHRU  , ABCu , reg , "shru"  /* RA = RB >> Cu -- zero-replicating (logical)      */)\
-_( BINV  , ABu  , reg , "binv"  /* RA = ~Bu      -- bitwise complement, invert bits */)\
-_( NOT   , ABu  , reg , "not"   /* RA = !Bu      -- boolean negation                */)\
+_( ADD   , ABCu , reg , "add"  , "RA = RB + Cu -- wrap on overflow")\
+_( SUB   , ABCu , reg , "sub"  , "RA = RB - Cu -- wrap on overflow")\
+_( MUL   , ABCu , reg , "mul"  , "RA = RB * Cu -- wrap on overflow")\
+_( ADDS  , ABCs , reg , "adds" , "RA = RB + Cs -- panic on overflow")\
+_( SUBS  , ABCs , reg , "subs" , "RA = RB - Cs -- panic on overflow")\
+_( MULS  , ABCs , reg , "muls" , "RA = RB * Cs -- panic on overflow")\
+_( DIV   , ABCu , reg , "div"  , "RA = RB / Cu")\
+_( MOD   , ABCu , reg , "mod"  , "RA = RB % Cu")\
+_( AND   , ABCu , reg , "and"  , "RA = RB & Cu")\
+_( OR    , ABCu , reg , "or"   , "RA = RB | Cu")\
+_( XOR   , ABCu , reg , "xor"  , "RA = RB ^ Cu")\
+_( SHL   , ABCu , reg , "shl"  , "RA = RB << Cu")\
+_( SHRS  , ABCu , reg , "shrs" , "RA = RB >> Cu -- sign-replicating (arithmetic)")\
+_( SHRU  , ABCu , reg , "shru" , "RA = RB >> Cu -- zero-replicating (logical)")\
+_( BINV  , ABu  , reg , "binv" , "RA = ~Bu      -- bitwise complement, invert bits")\
+_( NOT   , ABu  , reg , "not"  , "RA = !Bu      -- boolean negation")\
 \
-_( EQ    , ABCu , reg , "eq"   /* RA = RB == Cu */)\
-_( NEQ   , ABCu , reg , "neq"  /* RA = RB != Cu */)\
-_( LTU   , ABCu , reg , "ltu"  /* RA = RB <  Cu */)\
-_( LTS   , ABCs , reg , "lts"  /* RA = RB <  Cs */)\
-_( LTEU  , ABCu , reg , "lteu" /* RA = RB <= Cu */)\
-_( LTES  , ABCs , reg , "ltes" /* RA = RB <= Cs */)\
-_( GTU   , ABCu , reg , "gtu"  /* RA = RB >  Cu */)\
-_( GTS   , ABCs , reg , "gts"  /* RA = RB >  Cs */)\
-_( GTEU  , ABCu , reg , "gteu" /* RA = RB >= Cu */)\
-_( GTES  , ABCs , reg , "gtes" /* RA = RB >= Cs */)\
+_( EQ    , ABCu , reg , "eq"   , "RA = RB == Cu")\
+_( NEQ   , ABCu , reg , "neq"  , "RA = RB != Cu")\
+_( LTU   , ABCu , reg , "ltu"  , "RA = RB <  Cu")\
+_( LTS   , ABCs , reg , "lts"  , "RA = RB <  Cs")\
+_( LTEU  , ABCu , reg , "lteu" , "RA = RB <= Cu")\
+_( LTES  , ABCs , reg , "ltes" , "RA = RB <= Cs")\
+_( GTU   , ABCu , reg , "gtu"  , "RA = RB >  Cu")\
+_( GTS   , ABCs , reg , "gts"  , "RA = RB >  Cs")\
+_( GTEU  , ABCu , reg , "gteu" , "RA = RB >= Cu")\
+_( GTES  , ABCs , reg , "gtes" , "RA = RB >= Cs")\
 \
-_( IF    , ABs  , nil , "if"    /* if RA!=0 PC += Bs         */)\
-_( IFZ   , ABs  , nil , "ifz"   /* if RA==0 PC += Bs         */)\
-_( CALL  , Au   , nil , "call"  /* R0...R7 = push(PC); PC=Au */)\
-_( JUMP  , Au   , nil , "jump"  /* PC = Au                   */)\
-_( RET   , _    , nil , "ret"   /* PC = pop()                */)\
+_( IF    , ABs  , nil , "if"   , "if RA!=0 PC += Bs")\
+_( IFZ   , ABs  , nil , "ifz"  , "if RA==0 PC += Bs")\
+_( CALL  , Au   , nil , "call" , "R0...R7 = push(PC); PC=Au")\
+_( JUMP  , Au   , nil , "jump" , "PC = Au")\
+_( RET   , _    , nil , "ret"  , "PC = pop()")\
 \
-_( TSPAWN  , Au    , nil , "tspawn"  /* R0 = spawn_task(pc=Au, args=R0...R7) */)\
-_( SYSCALL , Au    , nil , "syscall" /* R0...R7 = syscall(code=Au, args=R0...R18) */)\
-_( WRITE   , ABCDu , reg , "write"   /* RA = write dstaddr=RB size=RC fd=Du */)\
-_( READ    , ABCDu , reg , "read"    /* RA = read  srcaddr=RB size=RC fd=Du */)\
-_( MCOPY   , ABCu  , mem , "mcopy"   /* mem[RA:Cu] = mem[RB:Cu] */)\
-_( MCMP    , ABCDu , reg , "mcmp"    /* RA = mem[RB:Du] <> mem[RC:Du] */)\
-_( STKMEM  , As    , nil , "stkmem"  /* SP = maybe_split_or_join_stack(); SP += As */)\
+_( TSPAWN  , Au    , nil , "tspawn"  , "R0 = spawn_task(pc=Au, args=R0...R7)")\
+_( SYSCALL , Au    , nil , "syscall" , "R0...R7 = syscall(code=Au, args=R0...R18)")\
+_( WRITE   , ABCDu , reg , "write"   , "RA = write dstaddr=RB size=RC fd=Du")\
+_( READ    , ABCDu , reg , "read"    , "RA = read  srcaddr=RB size=RC fd=Du")\
+_( MCOPY   , ABCu  , mem , "mcopy"   , "mem[RA:Cu] = mem[RB:Cu]")\
+_( MCMP    , ABCDu , reg , "mcmp"    , "RA = mem[RB:Du] <> mem[RC:Du]")\
+_( STKMEM  , As    , nil , "stkmem"  , "SP = maybe_split_or_join_stack(); SP += As")\
 \
 // end RSM_FOREACH_OP
 

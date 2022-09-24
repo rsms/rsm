@@ -198,6 +198,11 @@ static u64 copyv(EXEC_PARAMS, u64 n) {
   if (n == 1) return (u64)inv[pc];
   assert(n == 2);
   return (((u64)inv[pc]) << 32) | (u64)inv[pc+1];
+
+  // TODO: I think we can avoid a branch if copyv changed
+  // so that when n==1 the one and only value is at pc (not pc<<32.)
+  // i.e.
+  //return (u64)inv[pc] | (((u64)inv[pc+(n == 1)]) << 32);
 }
 
 // —————————— stack operations

@@ -7,6 +7,7 @@
 //
 #include "rsmimpl.h"
 #include "abuf.h"
+#include "vm.h" // for VM_ADDR_MIN
 
 //#define DEBUG_VM_LOG_LOADSTORE // define to dlog LOAD and STORE operations
 
@@ -187,7 +188,7 @@ static void _vmerr(VMPARAMS, vmerror err, u64 a1, u64 a2) {
 
 #define check_loadstore(addr, align, ealign, eoob) { \
   check(IS_ALIGN2(addr, align), ealign, addr, align); \
-  check(addr <= endaddr(VMARGS, addr), eoob, addr, align); \
+  check(addr >= VM_ADDR_MIN && addr <= endaddr(VMARGS, addr), eoob, addr, align); \
 }
 
 #define check_shift(exponent) check((exponent) < 64, VM_E_SHIFT_EXP, exponent)
@@ -209,20 +210,17 @@ inline static usize mbase_index(VMPARAMS, u64 addr) {
 }
 
 // hostaddr translates a vm address to a host address
-inline static void* hostaddr(VMPARAMS, u64 addr) {
+inline static void* hostaddr(VMPARAMS, u64 align, u64 addr, vmerror ooberr) {
+  check_loadstore(addr, align, VM_E_UNALIGNED_ACCESS, ooberr);
+  addr -= VM_ADDR_MIN;
   usize index = mbase_index(VMARGS, addr);
   addr -= index * M_SEG_SIZE;
   return vs->mbase[index] + addr;
 }
 
-inline static void* hostaddr_check_access(VMPARAMS, u64 align, u64 addr) {
-  check_loadstore(addr, align, VM_E_UNALIGNED_ACCESS, VM_E_OOB_LOAD);
-  return hostaddr(VMARGS, addr);
-}
-
 // inline u64 LOAD(TYPE, u64 addr)
 #define LOAD(TYPE, addr) ({ u64 a__=(addr); \
-  u64 v__ = *(TYPE*)hostaddr_check_access(VMARGS, sizeof(TYPE), a__); \
+  u64 v__ = *(TYPE*)hostaddr(VMARGS, sizeof(TYPE), a__, VM_E_OOB_LOAD); \
   log_loadstore("LOAD  %s mem[0x%llx] => 0x%llx", #TYPE, a__, v__); \
   v__; \
 })
@@ -230,17 +228,8 @@ inline static void* hostaddr_check_access(VMPARAMS, u64 align, u64 addr) {
 // inline void STORE(TYPE, u64 addr, u64 value)
 #define STORE(TYPE, addr, value) { u64 a__=(addr), v__=(value); \
   log_loadstore("STORE %s mem[0x%llx] <= 0x%llx", #TYPE, a__, v__); \
-  check_loadstore(a__, sizeof(TYPE), VM_E_UNALIGNED_STORE, VM_E_OOB_STORE); \
-  usize index = mbase_index(VMARGS, a__); \
-  *(TYPE*)(vs->mbase[index] + a__ - index*M_SEG_SIZE) = v__; \
-}
-
-// inline void STORE_RAM(TYPE, u64 addr, u64 value)
-#define STORE_RAM(TYPE, addr, value) { u64 a__=(addr), v__=(value);  \
-  log_loadstore("STORE %s mem[0x%llx] <= 0x%llx", #TYPE, a__, v__); \
-  assert(a__ < M_SEG_SIZE); \
-  check_loadstore(a__, sizeof(TYPE), VM_E_UNALIGNED_STORE, VM_E_OOB_STORE); \
-  *(u64*)(vs->mbase[0] + (uintptr)a__) = v__; \
+  TYPE* p__ = (TYPE*)hostaddr(VMARGS, sizeof(TYPE), a__, VM_E_OOB_STORE); \
+  *p__ = v__; \
 }
 
 // libc
@@ -249,13 +238,13 @@ isize read(int fd, void* buf, usize nbyte);
 
 static u64 _write(VMPARAMS, u64 fd, u64 addr, u64 size) {
   // RA = write srcaddr=RB size=R(C) fd=Du
-  void* src = hostaddr_check_access(VMARGS, 1, addr);
+  void* src = hostaddr(VMARGS, 1, addr, VM_E_OOB_LOAD);
   return (u64)write((int)fd, src, (usize)size);
 }
 
 static u64 _read(VMPARAMS, u64 fd, u64 addr, u64 size) {
   // RA = read dstaddr=RB size=R(C) fd=Du
-  void* dst = hostaddr_check_access(VMARGS, 1, addr);
+  void* dst = hostaddr(VMARGS, 1, addr, VM_E_OOB_STORE);
   return (u64)read((int)fd, dst, (usize)size);
 }
 
@@ -268,7 +257,7 @@ inline static void push(VMPARAMS, u64 size, u64 val) {
   check(addr >= size && addr - size >= vs->stacktop, VM_E_STACK_OVERFLOW, addr);
   addr -= size;
   SP = addr;
-  STORE_RAM(u64, addr, val);
+  STORE(u64, addr, val);
 }
 
 inline static u64 pop(VMPARAMS, usize size) {
@@ -293,14 +282,14 @@ static u64 copyv(VMPARAMS, u64 n) {
 }
 
 static void mcopy(VMPARAMS, u64 dstaddr, u64 srcaddr, u64 size) {
-  void* dst = hostaddr_check_access(VMARGS, 1, dstaddr);
-  void* src = hostaddr_check_access(VMARGS, 1, srcaddr);
+  void* dst = hostaddr(VMARGS, 1, dstaddr, VM_E_OOB_STORE);
+  void* src = hostaddr(VMARGS, 1, srcaddr, VM_E_OOB_LOAD);
   memcpy(dst, src, (usize)size);
 }
 
 static i64 mcmp(VMPARAMS, u64 xaddr, u64 yaddr, u64 size) {
-  void* x = hostaddr_check_access(VMARGS, 1, xaddr);
-  void* y = hostaddr_check_access(VMARGS, 1, yaddr);
+  void* x = hostaddr(VMARGS, 1, xaddr, VM_E_OOB_LOAD);
+  void* y = hostaddr(VMARGS, 1, yaddr, VM_E_OOB_LOAD);
   return (i64)memcmp(x, y, (usize)size);
 }
 

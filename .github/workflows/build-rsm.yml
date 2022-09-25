@@ -37,6 +37,9 @@ jobs:
 
       - name: Check for changes
         run: |
+          ls -l
+          git status
+          git log -n1
           git diff --name-only HEAD^..HEAD
 
       - name: Install host utils

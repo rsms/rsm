@@ -28,6 +28,7 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
+      max-parallel: 1  # because ncipollo/release-action is racy
       matrix:
         target:
           - x86_64-linux-musl

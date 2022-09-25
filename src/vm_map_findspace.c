@@ -5,7 +5,7 @@
 #include "vm.h"
 
 // VM_MAP_FINDSPACE_TRACE: define to enable logging a lot of info via dlog
-#define VM_MAP_FINDSPACE_TRACE
+//#define VM_MAP_FINDSPACE_TRACE
 
 
 #if (defined(VM_MAP_FINDSPACE_TRACE) || defined(VM_MAP_TRACE) || defined(VM_TRACE)) && \

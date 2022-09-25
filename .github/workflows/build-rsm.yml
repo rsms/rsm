@@ -54,11 +54,18 @@ jobs:
           CC="$PWD/zig-linux-x86_64-0.9.1/zig cc" \
           bash build.sh -static -out=out-${{ matrix.target }} "$@"
 
-      - name: Archive rsm-${{ matrix.target }}.tar.gz
+      - name: Define version
+        #if: startsWith(github.ref, 'refs/tags/')
+        # run: echo "rsm_version=$(date '+%Y%m%d%H%M%S')" >> $GITHUB_ENV
         run: |
-          mkdir rsm-${{ matrix.target }}
-          mv out-${{ matrix.target }}/rsm rsm-${{ matrix.target }}/
-          tar -czvf rsm-${{ matrix.target }}.tar.gz rsm-${{ matrix.target }}
+          echo "github.ref_type=${{ github.ref_type }}"
+          echo "rsm_version=${{ github.sha }}" >> $GITHUB_ENV
+
+      - name: Create archive
+        run: |
+          mkdir rsm-${rsm_version}-${{ matrix.target }}
+          mv out-${{ matrix.target }}/rsm rsm-${rsm_version}-${{ matrix.target }}/
+          tar -czvf rsm-${rsm_version}-${{ matrix.target }}.tar.gz rsm-${rsm_version}-${{ matrix.target }}
 
       - name: Upload archive (unless tag)
         if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
@@ -67,10 +74,6 @@ jobs:
           name: rsm-${{ matrix.target }}.tar.gz
           path: rsm-${{ matrix.target }}.tar.gz
           retention-days: 1
-
-      - name: Define version (if tag)
-        #if: startsWith(github.ref, 'refs/tags/')
-        run: echo "rsm_version=$(date '+%Y%m%d%H%M%S')" >> $GITHUB_ENV
 
       - name: Publish release (if tag)
         #if: startsWith(github.ref, 'refs/tags/')

@@ -213,7 +213,6 @@ else
           ) ENABLE_LTO=true ;;
         esac
       fi
-      echo "ENABLE_LTO=$ENABLE_LTO"
       if $ENABLE_LTO; then
         CFLAGS+=( -flto )
         LDFLAGS_HOST+=( -flto )

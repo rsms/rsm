@@ -296,7 +296,7 @@ uintptr m_spawn_osthread(M* m, rerr_t(*mainf)(M*));
 
 // m_vm_cache accesses the vm cache for perm on M
 inline static vm_cache_t* m_vm_cache(M* m, vm_perm_t perm) {
-  assertf(perm > 0 && (perm-1) < countof(m->vmcache), "%u", (u32)perm);
+  assertf(perm > 0 && (perm-1) < (vm_perm_t)countof(m->vmcache), "%u", perm);
   return &m->vmcache[perm-1];
 }
 

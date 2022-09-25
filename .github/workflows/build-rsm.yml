@@ -37,10 +37,18 @@ jobs:
 
       - name: Check for changes
         run: |
-          ls -l
-          git status
-          git log -n1
-          git diff --name-only HEAD^..HEAD
+          echo "::set-output name=run_job::false"
+          git log -n1 --format= --name-only | while IFS= read -r fn; do
+            echo "$fn"
+            case "$fn" in
+              build*|src/*)
+                echo "will run"
+                echo "::set-output name=run_job::true"
+                break
+                ;;
+            esac
+          done
+          exit 1
 
       - name: Install host utils
         run: sudo apt-get install -y ninja-build

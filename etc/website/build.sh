@@ -101,9 +101,9 @@ _file_is_newer() {
 }
 
 # npm info rsms-mkweb
-MKWEB_VERSION=0.2.3
+MKWEB_VERSION=0.2.4
 MKWEB_URL=https://registry.npmjs.org/rsms-mkweb/-/rsms-mkweb-${MKWEB_VERSION}.tgz
-MKWEB_SHA1=701078863a37b08af79117e011d4be8a01873d20
+MKWEB_SHA1=2c27a6cb96b5d81f04f92680b06e8c0bd8019572
 MKWEB_ARCHIVE=mkweb-${MKWEB_VERSION}.tgz
 MKWEB_EXE=$BUILD_DIR/mkweb/mkweb-${MKWEB_VERSION}
 

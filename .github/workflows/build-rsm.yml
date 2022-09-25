@@ -15,7 +15,7 @@ defaults:
     shell: bash
 
 jobs:
-  build-linux:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -25,9 +25,12 @@ jobs:
         target:
           - x86_64-linux-musl
           - i386-linux-musl
-          # - aarch64-linux-musl
-          # - riscv64-linux-musl
-          # #- x86_64-windows-gnu
+          - aarch64-linux-musl
+          - riscv64-linux-musl
+          - riscv64-linux-musl
+          - x86_64-macos-gnu
+          - aarch64-macos-gnu
+          #- x86_64-windows-gnu
 
     name: ${{ matrix.target }}
 

@@ -24,7 +24,9 @@ title: rsm virtual computer
 }
 </style>
 
-# rsm
+> This is a copy of the original RSM website, as it was Feb 14–Sep 20, 2022
+
+# RSM
 
 `rsm` is a virtual computer, a fun hobby project with an accompanying video diary.
 
@@ -58,6 +60,7 @@ Feb 14, 2022: Kicking things off. Motivations, goals, initial take on ISA design
 ## Episode 2
 
 <div class="video"><div><iframe src="https://www.youtube-nocookie.com/embed/ZOd1f7wc4jE?modestbranding=1&color=white&rel=0&cc_load_policy=1" width="720" height="396" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div></div>
+
 Feb 15, 2022: Part two in which I mostly struggle with getting the sign bit "to stick" on instruction arguments. Also covers a simple code formatter.
 [MP4](https://d.rsms.me/rsm/rsm-hack-project-part-2-220215-1920.mp4)
 [transcript](ep2.html)
@@ -67,6 +70,7 @@ Feb 15, 2022: Part two in which I mostly struggle with getting the sign bit "to 
 ## Episode 3
 
 <div class="video"><div><iframe src="https://www.youtube-nocookie.com/embed/0dZ5T7ZRLWw?modestbranding=1&color=white&rel=0&cc_load_policy=1" width="720" height="396" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div></div>
+
 Feb 15, 2022: Signed integer hurdles from part 2 solved. Review changes, talk about and do some code organization.
 [MP4](https://d.rsms.me/rsm/rsm-hack-project-part-3-220215-1920.mp4)
 [transcript](ep3.html)
@@ -76,6 +80,7 @@ Feb 15, 2022: Signed integer hurdles from part 2 solved. Review changes, talk ab
 ## Episode 4
 
 <div class="video"><div><iframe src="https://www.youtube-nocookie.com/embed/9uPNoxshJfw?modestbranding=1&color=white&rel=0&cc_load_policy=1" width="720" height="396" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div></div>
+
 Feb 16, 2022: Building the beginning of the VM evaluator and looking at three different strategies for instruction handler dispatch.
 [MP4](https://d.rsms.me/rsm/rsm-hack-project-part-4-220216-1920.mp4)
 [transcript](ep4.html)
@@ -87,6 +92,7 @@ _This was a live stream where I had some technical difficulties with crashing st
 ## Episode 5
 
 <div class="video"><div><iframe src="https://www.youtube-nocookie.com/embed/dAdaLyBlPMA?modestbranding=1&color=white&rel=0&cc_load_policy=1" width="720" height="396" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div></div>
+
 Feb 17, 2022: VM is alive! We look at how the factorial function is evaluated by the vm and talk about the future challenge of constant data addressing.
 [MP4](https://d.rsms.me/rsm/rsm-hack-project-part-5-220217-1920.mp4)
 [transcript](ep5.html)
@@ -96,6 +102,7 @@ Feb 17, 2022: VM is alive! We look at how the factorial function is evaluated by
 ## Episode 6
 
 <div class="video"><div><iframe src="https://www.youtube-nocookie.com/embed/6IHnZXtoQ-Q?modestbranding=1&color=white&rel=0&cc_load_policy=1" width="720" height="396" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div></div>
+
 Feb 18, 2022: Getting started with the assembler: parsing RSM assembly source text.
 [MP4](https://d.rsms.me/rsm/rsm-part-6-220218-1920.mp4)
 [transcript](ep6.html)
@@ -105,6 +112,7 @@ Feb 18, 2022: Getting started with the assembler: parsing RSM assembly source te
 ## Episode 7
 
 <div class="video"><div><iframe src="https://www.youtube-nocookie.com/embed/A9KtyRzk40Q?modestbranding=1&color=white&rel=0&cc_load_policy=1" width="720" height="396" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div></div>
+
 Feb 18, 2022: Summarizing the implementation of the assembly parser.
 [MP4](https://d.rsms.me/rsm/rsm-part-7-220218.mp4)
 [transcript](ep7.html)
@@ -117,6 +125,7 @@ I did a long live stream when writing the parser:
 ## Episode 8
 
 <div class="video"><div><iframe src="https://www.youtube-nocookie.com/embed/1jqsUCyRzT8?modestbranding=1&color=white&rel=0&cc_load_policy=1" width="720" height="396" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div></div>
+
 Feb 19, 2022: The assembly parser now fully parses the factorial example function! I discuss the latest syntax and how function bodies are now strictly block-based.
 [MP4](https://d.rsms.me/rsm/rsm-part-8-220219.mp4)
 [transcript](ep8.html)
@@ -125,6 +134,7 @@ Feb 19, 2022: The assembly parser now fully parses the factorial example functio
 ## Episode 9
 
 <div class="video"><div><iframe src="https://www.youtube-nocookie.com/embed/4RgK0CSri2I?modestbranding=1&color=white&rel=0&cc_load_policy=1" width="720" height="396" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div></div>
+
 Feb 20, 2022: Wrap up the hack week and check out the now complete virtual machine! We can compile and run arbitrary programs, within the constraints of the current features of course.
 [MP4](https://d.rsms.me/rsm/rsm-ep9-220220.mp4)
 [transcript](ep9.html)

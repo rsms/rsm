@@ -38,7 +38,7 @@ jobs:
       - name: Check for changes
         run: |
           echo "::set-output name=run_job::false"
-          git log -n1 --format= --name-only | while IFS= read -r fn; do
+          git log -n1 --format= --name-only HEAD | while IFS= read -r fn; do
             echo "$fn"
             case "$fn" in
               build*|src/*)

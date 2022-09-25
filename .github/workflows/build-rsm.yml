@@ -6,6 +6,8 @@ on:
     paths:
       - "src/**"
       - build.sh
+    tags:
+      - "v*"
   workflow_dispatch:
 
 defaults:
@@ -61,7 +63,15 @@ jobs:
       - name: Define version
         run: echo "rsm_version=$(date '+%Y%m%d%H%M%S')" >> $GITHUB_ENV
 
-      - name: Publish release
+      - name: Save archive (unless tag)
+        if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: built-exe
+          path: rsm-${{ matrix.target }}.tar.gz
+          retention-days: 1
+
+      - name: Publish release (if tag)
         if: startsWith(github.ref, 'refs/tags/')
         uses: ncipollo/release-action@v1.8.10
         with:

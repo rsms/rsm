@@ -1,7 +1,10 @@
 # Builds rsm either when a version tag is created or source is changed.
-# When a version tag is created, a release is automatically created.
-# Otherwise the build artifacts are uploaded to github and saved for 1 day
-# and can be found at https://github.com/rsms/rsm/actions/runs/RUNID
+#
+# When a version tag is created, a release is automatically created in draft mode.
+#
+# Otherwise, when source changes without a tag being created,
+# the build artifacts are uploaded to github and saved for 1 day.
+# They can be found at https://github.com/rsms/rsm/actions/runs/RUNID
 name: Build rsm
 
 on:
@@ -70,13 +73,16 @@ jobs:
 
       - name: Define version (branch)
         if: ${{ ! startsWith(github.ref, 'refs/tags/v') }}
-        run: echo "rsm_version=${{ github.sha }}" >> $GITHUB_ENV
+        run: |
+          VERSION=${{ github.sha }}
+          echo "rsm_version=${VERSION:0:10}" >> $GITHUB_ENV
 
       - name: Create archive
         run: |
-          VARIANT=$(echo "${{ matrix.target }}" | cut -d- -f1)
-          VARIANT=$VARIANT-$(echo "${{ matrix.target }}" | cut -d- -f2)
-          NAME=rsm-${{ env.rsm_version }}-$VARIANT
+          # TARGET = os-arch
+          TARGET=$(echo "${{ matrix.target }}" | cut -d- -f2)
+          TARGET=$TARGET-$(echo "${{ matrix.target }}" | cut -d- -f1)
+          NAME=rsm-$TARGET-${{ env.rsm_version }}
           ARCHIVE=$NAME.tar.gz
           echo "rsm_archive=$ARCHIVE" >> $GITHUB_ENV
           mkdir $NAME
@@ -96,6 +102,7 @@ jobs:
         uses: ncipollo/release-action@v1.8.10
         with:
           prerelease: false
+          draft: true
           artifacts: "${{ env.rsm_archive }}"
           replacesArtifacts: true
           tag: "v${{ env.rsm_version }}"

@@ -124,7 +124,18 @@ fi
 
 CC_IS_CLANG=false
 CC_IS_GCC=false
-if [ -z "$CC" ]; then
+if [ -n "$CC" ]; then
+  CC_BASENAME=$(basename "$CC")
+  case "$CC_BASENAME" in
+    *" "*)
+      CC_FILE=$(dirname "$CC")/$(echo "$CC_BASENAME" | cut -d' ' -f1)
+      [ -f "$CC_FILE" ] || CC_FILE=$(command -v "$CC_FILE" || echo "$CC_FILE")
+      ;;
+    *)
+      CC_FILE=$(command -v "$CC" || echo "$CC")
+      ;;
+  esac
+else
   # use clang from known preferred location, if available
   if [ -x /usr/local/opt/llvm/bin/clang ]; then
     export PATH=/usr/local/opt/llvm/bin:$PATH
@@ -140,16 +151,16 @@ if [ -z "$CC" ]; then
   else
     export CC=cc
   fi
+  CC_FILE=$(command -v "$CC" || true)
+  [ -f "$CC_FILE" ] || _err "no suitable compiler found (CC=\"$CC\")"
 fi
-CC_PATH=$(command -v "$CC" || true)
-[ -f "$CC_PATH" ] || _err "no suitable compiler found (CC=\"$CC\")"
 if ! $CC_IS_CLANG && ! $CC_IS_GCC; then
   case "$($CC --version 2>/dev/null)" in
     *clang*) CC_IS_CLANG=true ;;
     *"Free Software Foundation"*) CC_IS_GCC=true ;;
   esac
 fi
-[ -z "$_WATCHED" ] && echo "using compiler $CC_PATH"
+[ -z "$_WATCHED" ] && echo "using compiler $CC ($CC_FILE)"
 
 DEBUG=false; [ "$BUILD_MODE" = "debug" ] && DEBUG=true
 
@@ -158,7 +169,7 @@ DEBUG=false; [ "$BUILD_MODE" = "debug" ] && DEBUG=true
 
 # check compiler and clear $OUTDIR if compiler changed
 CCONFIG_FILE=$OUTDIR/cconfig.txt
-CCONFIG="$CC_PATH: $(sha256sum "$CC_PATH" | cut -d' ' -f1)"
+CCONFIG="$CC_FILE: $(sha256sum "$CC_FILE" | cut -d' ' -f1)"
 if [ "$(cat "$CCONFIG_FILE" 2>/dev/null)" != "$CCONFIG" ]; then
   [ -f "$CCONFIG_FILE" ] && echo "compiler config changed"
   rm -rf "$OUTDIR"
@@ -167,29 +178,47 @@ if [ "$(cat "$CCONFIG_FILE" 2>/dev/null)" != "$CCONFIG" ]; then
 fi
 
 # flags for all targets (in addition to unconditional flags in ninja template)
-CFLAGS=( $CFLAGS $EXTRA_CFLAGS )
+CFLAGS=( $CFLAGS $EXTRA_CFLAGS )  # from env
 [ "$BUILD_MODE" = "safe" ] && CFLAGS+=( -DRSM_SAFE )
 [ -n "$TESTING_ENABLED" ]  && CFLAGS+=( -DRSM_TESTING_ENABLED )
 
 # target-specific flags (in addition to unconditional flags in ninja template)
 CFLAGS_WASM=( -DRSM_NO_LIBC )
-CFLAGS_HOST=()
-LDFLAGS_HOST=( $LDFLAGS )      # LDFLAGS from env
-LDFLAGS_WASM=( $LDFLAGS_WASM ) # LDFLAGS_WASM from env (note: liker is wasm-ld, not cc)
+CFLAGS_HOST=( $CFLAGS_HOST )            # from env
+LDFLAGS_HOST=( $LDFLAGS $LDFLAGS_HOST ) # from env
+LDFLAGS_WASM=( $LDFLAGS_WASM )          # from env (note: liker is wasm-ld, not cc)
 
 if $DEBUG; then
   CFLAGS+=( -O0 -DDEBUG )
 else
   CFLAGS+=( -DNDEBUG )
   # LDFLAGS_WASM+=( -z stack-size=$[128 * 1024] ) # larger stack, smaller heap
-  CFLAGS_HOST+=( -O2 -mtune=native )
+  CFLAGS_HOST+=( -O2 )
   CFLAGS_WASM+=( -Oz )
   if ! $DEBUGGABLE; then
     CFLAGS_HOST+=( -fomit-frame-pointer )
     LDFLAGS_HOST+=( -dead_strip )
     LDFLAGS_WASM+=( -O2 --lto-O3 --no-lto-legacy-pass-manager )
-    $CC_IS_CLANG && CFLAGS+=( -flto )
-    $CC_IS_CLANG && LDFLAGS_HOST+=( -flto )
+    # Link Time Optimization
+    if $CC_IS_CLANG; then
+      ENABLE_LTO=true
+      # LTO can't be used in certain cases when cross compiling
+      if [[ "${LDFLAGS_HOST[@]}" == *"-target "* ]]; then
+        ENABLE_LTO=false
+        # LTO whitelist
+        case "${LDFLAGS_HOST[@]}" in
+            *"-target x86_64-linux-musl"* \
+          | *"-target aarch64-linux-musl"* \
+          | *"-target i386-linux-musl"* \
+          ) ENABLE_LTO=true ;;
+        esac
+      fi
+      echo "ENABLE_LTO=$ENABLE_LTO"
+      if $ENABLE_LTO; then
+        CFLAGS+=( -flto )
+        LDFLAGS_HOST+=( -flto )
+      fi
+    fi
   fi
 fi
 

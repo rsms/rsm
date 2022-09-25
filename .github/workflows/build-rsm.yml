@@ -17,10 +17,10 @@ jobs:
       matrix:
         target:
           - x86_64-linux-musl
-          # - i386-linux-musl
-          # - aarch64-linux-musl
-          # - riscv64-linux-musl
-          # #- x86_64-windows-gnu
+          - i386-linux-musl
+          - aarch64-linux-musl
+          - riscv64-linux-musl
+          #- x86_64-windows-gnu
 
     name: ${{ matrix.target }}
 
@@ -34,7 +34,7 @@ jobs:
           submodules: recursive
 
       - name: Install host utils
-        run: sudo apt-get install -y ninja-build curl
+        run: sudo apt-get install -y ninja-build
 
       - name: Fetch zig
         run: |
@@ -58,7 +58,7 @@ jobs:
           artifacts: "rsm-${{ matrix.target }}.tar.gz"
           replacesArtifacts: true
           tag: "v${{ env.rsm_version }}"
-          name: "btop ${{ env.rsm_version }} "
-          body: "btop ${{ env.rsm_version }} built from ${{ github.sha }}"
+          name: "rsm ${{ env.rsm_version }} "
+          body: "rsm ${{ env.rsm_version }} built from ${{ github.sha }}"
           allowUpdates: true
           token: ${{ secrets.GITHUB_TOKEN }}

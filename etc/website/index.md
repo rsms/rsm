@@ -12,6 +12,8 @@ see [RSM on GitHub](https://github.com/rsms/rsm)
 
 - [Instruction Set Architecture](isa/)
 - [Assembler](assembler/)
+- [Virtual Memory](virtual-memory/)
+- [ROM image layout](rom/)
 
 
 ## History

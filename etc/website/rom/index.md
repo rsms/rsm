@@ -1,0 +1,134 @@
+---
+title: ROM image layout
+---
+
+# {{title}}
+
+> This documentation is work in progress
+
+## Example
+
+Source code:
+
+```rsm
+import console.putch
+data c = 0x63
+fun _helper() i32
+  R0 = c
+  ret
+fun upcase(i32) i32
+  R0 = R0 - 0x20
+  ret
+fun main()
+  call _helper
+  call upcase
+  call console.putch
+  ret
+```
+
+
+ROM image:
+
+```
+         0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+       ┌─────────────────────────────────────────────────
+  0000 │ 52 53 4d 00 00                                     "RSM\0" version 0
+     … │                00 01                               types section, 10 bytes
+     … │                      02                            2 types
+     … │                         00 00                      type 0  ()->()
+     … │                               01 03 01 03          type 1  (i32)->(i32)
+     … │                                           01 03    type 2  (i32)->() …
+  0010 │ 00                                                 …
+     … │    03 10                                           import section, 16 bytes
+     … │          01                                        1 import
+     … │             07 63 6f 6e 73 6f 6c 65 01             "console", 1 function
+     … │                                        05 70 75    5 "pu …
+  0020 │ 74 63 02                                           … tc" (i32)->()
+     … │          04 11                                     export section, 17 bytes
+     … │                02                                  2 exports
+     … │                   06 75 70 63 61 73 65 01 02       "upcase" (i32)->(i32) code[2]
+     … │                                              04    4 …
+  0030 │ 6d 61 69 6e 00 04                                  … "main" ()->() code[4]
+     … │                   02 05                            data section, 5 bytes
+     … │                         02                         4B alignment of data
+     … │                            00 00 00 63             data i32 0x63
+     … │                                        01 22       code section, 34 bytes
+     … │                                              00    padding
+  0040 │ ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff    vmcode …
+  0050 │ ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff    … vmcode
+  0060 │ 05 1c                                              name section, 28 bytes
+     … │       03                                           3 entries
+     … │          01 07 5f 68 65 6c 70 65 72 00             kind=func 7 "_helper" code[0]
+     … │                                        00 06 75    kind=func 6 "u …
+  0070 │ 70 63 61 73 65 00 02                               … pcase" code[2]
+     … │                      00 04 6d 61 69 6e 04          kind=func 4 "main" code[4]
+     … │                                           00 00    padding for constant data
+  0080 │ 00 00 d2 04 00 00 2e 16 00 00                      constant data rest of file …
+```
+
+## Structure
+
+```
+module:
+  ┌────────────┬────────────┬──────────┬──────┐
+  │ R  S  M 00 │ version u8 │ flags u8 │ body │
+  └────────────┴────────────┴──────────┴──────┘
+body:
+  if LZ4 in flags then compressed body:
+    ┌───────────────────────────┬─────────────────────────┐
+    │ uncompressed_size varuint │ compressed_data u8[...] │
+    └───────────────────────────┴─────────────────────────┘
+  else uncompressed body:
+    ┌─────────┐
+    │ section │*
+    └─────────┘
+section:
+  ┌─────────┬──────────────┬───────────────────┐
+  │ kind u8 │ size varuint │ contents u8[size] │
+  └─────────┴──────────────┴───────────────────┘
+  0x00 types section:
+    ┌───────────────┬────────────────┐
+    │ count varuint │ funtype[count] │
+    └───────────────┴───────╥────────┘
+      ╒════════════════╤════╩═════════╤═════════════════╤═══════════════╕
+      │ paramc varuint │ type[paramc] │ resultc varuint │ type[resultc] │
+      └────────────────┴──────────────┴─────────────────┴───────────────┘
+  0x01 code section:
+    ┌─────────────────┐
+    │ instr u32[...]  │
+    └─────────────────┘
+  0x02 data section:
+    ┌──────────┬──────┐
+    │ align u8 │ data │
+    └──────────┴──────┘
+  0x03 import section:
+    ┌────────────────┬─────────────────┐
+    │ mcount varuint │ mimport[mcount] │
+    └────────────────┴───────╥─────────┘
+      ╒═════════════════╤════╩════════════════╤════════════════╤═════════════════╕
+      │ namelen varuint │ namestr u8[namelen] │ fcount varuint │ fimport[fcount] │
+      └─────────────────┴─────────────────────┴────────────────┴─╥───────────────┘
+          ╒═════════════════╤═════════════════════╤══════════════╩╕
+          │ namelen varuint │ namestr u8[namelen] │ typei varuint │
+          └─────────────────┴─────────────────────┴───────────────┘
+  0x04 export section:
+    ┌───────────────┬───────────────┐
+    │ count varuint │ export[count] │
+    └───────────────┴───────╥───────┘
+      ╒═════════════════╤═══╩═════════════════╤═══════════════╤═══════════════╕
+      │ namelen varuint │ namestr u8[namelen] │ typei varuint │ codei varuint │
+      └─────────────────┴─────────────────────┴───────────────┴───────────────┘
+  0x05 name section:
+    ┌───────────────┬─────────────┐
+    │ count varuint │ name[count] │
+    └───────────────┴──────╥──────┘
+      ╒═════════╤══════════╩══════╤══════════════════╤═══════════════╕
+      │ kind u8 │ namelen varuint │ name u8[namelen] │ codei varuint │
+      └─────────┴─────────────────┴──────────────────┴───────────────┘
+        kind: 00 module, 01 func, 02 label
+type:
+  ┌────┐   0x00 i1   0x03 i32   0x08 f32
+  │ u8 │   0x01 i8   0x04 i64   0x09 f64
+  └────┘   0x02 i16
+
+```

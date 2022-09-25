@@ -3,12 +3,6 @@ name: Build rsm
 on:
   - workflow_dispatch
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
-permissions:
-  contents: read
-  pages:    write
-  id-token: write
-
 defaults:
   run:
     shell: bash
@@ -16,6 +10,8 @@ defaults:
 jobs:
   build-linux:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:

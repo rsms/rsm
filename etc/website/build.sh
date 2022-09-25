@@ -101,9 +101,9 @@ _file_is_newer() {
 }
 
 # npm info rsms-mkweb
-MKWEB_VERSION=0.2.2
+MKWEB_VERSION=0.2.3
 MKWEB_URL=https://registry.npmjs.org/rsms-mkweb/-/rsms-mkweb-${MKWEB_VERSION}.tgz
-MKWEB_SHA1=3c9e2843d42acba3525beef648655933af67301c
+MKWEB_SHA1=701078863a37b08af79117e011d4be8a01873d20
 MKWEB_ARCHIVE=mkweb-${MKWEB_VERSION}.tgz
 MKWEB_EXE=$BUILD_DIR/mkweb/mkweb-${MKWEB_VERSION}
 
@@ -136,5 +136,7 @@ MKWEB_ARGS=( -opt )
 # if [ -z "$1" -o "$1" != "-w" ]; then
 #   MKWEB_ARGS+=( -opt )
 # fi
+
+#MKWEB_EXE=$HOME/src/mkweb/mkweb.js
 
 exec "$MKWEB_EXE" "${MKWEB_ARGS[@]}" "$@"

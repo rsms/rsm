@@ -20,4 +20,3 @@ see [RSM on GitHub](https://github.com/rsms/rsm)
   and [related tweets](https://twitter.com/search?q=from%3Arsms%20%22rsm%22&f=live)
 - [Video diary of the inception of RSM](v1/)
 - [Web browser playground](play/) (old outdated version)
-

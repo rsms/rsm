@@ -3,6 +3,9 @@ name: Build rsm
 on:
   push:
     branches: ["main"]
+    paths:
+      - "src/**"
+      - build.sh
   workflow_dispatch:
 
 defaults:
@@ -34,22 +37,6 @@ jobs:
         uses: actions/checkout@v3
         with:
           submodules: recursive
-
-      - name: Check for changes
-        run: |
-          echo "::set-output name=run_job::false"
-          git diff --name-only HEAD^ HEAD --
-          git log -n1 --format= --name-only HEAD | while IFS= read -r fn; do
-            echo "$fn"
-            case "$fn" in
-              build*|src/*)
-                echo "will run"
-                echo "::set-output name=run_job::true"
-                break
-                ;;
-            esac
-          done
-          exit 1
 
       - name: Install host utils
         run: sudo apt-get install -y ninja-build

@@ -1041,7 +1041,7 @@ static bool rmem_expand(rmemalloc_t* a, usize minsize) {
 
   // request twice as much memory as we need
   usize req_size; // req_size = try { minsize * 2 } on_overflow { minsize }
-  if (check_mul_overflow(minsize, 2lu, &req_size))
+  if (check_mul_overflow(minsize, (usize)2, &req_size))
     req_size = minsize;
 
   // Ideally we'd like to allocate memory in SLABHEAP_BLOCK_SIZE granules for

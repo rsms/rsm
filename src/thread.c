@@ -3,7 +3,7 @@
 #include "hash.h"
 
 #ifndef RSM_SEMAPHORE_POSIX
-  #if defined(_WIN32)
+  #if defined(WIN32)
     #include <windows.h>
   #elif defined(__MACH__)
     #undef panic // mach/mach.h defines a function called panic()
@@ -212,7 +212,7 @@ void sema_signal(sema_t* sp, u32 count) {
 }
 
 //———————————————————————————————————————————————————————————————————————————————————
-#elif defined(_WIN32)
+#elif defined(WIN32)
 #warning "This was dry coded based on MSDN. Needs testing"
 
 rerr_t sema_init(sema_t* sp, u32 initcount) {

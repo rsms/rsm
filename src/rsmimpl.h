@@ -84,6 +84,10 @@ typedef double f64;
   #define USIZE_MAX (__LONG_MAX__ *2UL+1UL)
 #endif
 
+#if !defined(WIN32) && defined(_WIN32)
+  #define WIN32
+#endif
+
 #ifndef __cplusplus
   #define noreturn      _Noreturn
   #define auto          __auto_type

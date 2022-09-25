@@ -58,7 +58,7 @@ usize rsm_fmtprog(
     if (i)
       abuf_c(s, '\n');
     rin_t in = ip[i];
-    abuf_fmt(s, "%4lx  ", i);
+    abuf_fmt(s, "%4zx  ", i);
     u32 pcadd = fmtinstr(s, in, fl);
 
     // variable imm

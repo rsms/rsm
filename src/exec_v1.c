@@ -144,7 +144,7 @@ static void _vmerr(VMPARAMS, vmerror err, u64 a1, u64 a2) {
   #undef S
   abuf_c(s, '\n');
 
-  abuf_fmt(s, "  %08lx  ", PC);
+  abuf_fmt(s, "  %08zx  ", PC);
   fmtinstr(s, inv[pc], RSM_FMT_COLOR);
   abuf_c(s, '\n');
 
@@ -163,10 +163,10 @@ static void _vmerr(VMPARAMS, vmerror err, u64 a1, u64 a2) {
   abuf_fmt(s, "\n  SP     %8llx", SP);
 
   usize heapsize = vs->msize[0] - vs->heapbase;
-  abuf_fmt(s, "\nMemory: (%lu B)", vs->msize[0]);
-  abuf_fmt(s, "\n  data         0...%-8lx %10lu B", vs->datasize, vs->datasize);
-  abuf_fmt(s, "\n  stack %8lx...%-8lx %10lu B", stacktop, vs->heapbase, stacksize);
-  abuf_fmt(s, "\n  heap  %8lx...%-8lx %10lu B", vs->heapbase, vs->msize[0], heapsize);
+  abuf_fmt(s, "\nMemory: (%zu B)", vs->msize[0]);
+  abuf_fmt(s, "\n  data         0...%-8zx %10zu B", vs->datasize, vs->datasize);
+  abuf_fmt(s, "\n  stack %8zx...%-8zx %10zu B", stacktop, vs->heapbase, stacksize);
+  abuf_fmt(s, "\n  heap  %8zx...%-8zx %10zu B", vs->heapbase, vs->msize[0], heapsize);
 
   abuf_terminate(s);
   log("%s", buf);

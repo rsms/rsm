@@ -367,7 +367,7 @@ usize smap_cfmt(char* buf, usize bufcap, const smap* m, const char* name) {
       if (e->key == NULL || e->key == ((const char*)1)) {
         abuf_str(&s, "{0},");
       } else {
-        abuf_fmt(&s, "{\"%s\",%zu,%lu},", e->key, e->keylen, e->value);
+        abuf_fmt(&s, "{\"%s\",%zu,%zu},", e->key, e->keylen, e->value);
       }
       if ((uintptr)(s.p - lnstart) <= 80)
         break;

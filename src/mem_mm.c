@@ -52,7 +52,11 @@
 // if the value is large, there will be many freelists with a few entries each.
 // The ideal value is large enough for the most commonly managed memory size.
 // The largest possible value is log2(max_address/PAGE_SIZE).
-#define MAX_ORDER  20 /* 17=512M 18=1G 19=2G 20=4G ... (assuming PAGE_SIZE=4096) */
+#if UINTPTR_MAX >= 0xffffffffffffffff
+  #define MAX_ORDER  20 /* 17=512M 18=1G 19=2G 20=4G ... (assuming PAGE_SIZE=4096) */
+#else
+  #define MAX_ORDER  19
+#endif
 
 // MAX_ORDER_NPAGES: number of pages that can fit into the largest order
 #define MAX_ORDER_NPAGES  (1lu << MAX_ORDER)

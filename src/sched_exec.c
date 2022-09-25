@@ -93,7 +93,7 @@ enum execerr_t {
     #undef _
     abuf_c(b, '\n');
 
-    abuf_fmt(b, "  %08lx  ", pc);
+    abuf_fmt(b, "  %08zx  ", pc);
     fmtinstr(b, inv[pc], RSM_FMT_COLOR);
     abuf_c(b, '\n');
 

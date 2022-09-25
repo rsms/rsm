@@ -3,7 +3,9 @@
 #pragma once
 
 // select thread API
-#if defined(__STDC_NO_THREADS__) && __STDC_NO_THREADS__
+#if defined(WIN32)
+  #warning TODO
+#elif __STDC_NO_THREADS__
   #if defined(RSM_NO_LIBC)
     #warning TODO
   #else
@@ -16,7 +18,7 @@
 #endif
 
 // select semaphore API
-#if defined(_WIN32) || defined(__MACH__)
+#if defined(WIN32) || defined(__MACH__)
   typedef uintptr sema_t;
   #define RSM_SEMAPHORE_PTR
 #elif defined(__unix__)
@@ -94,7 +96,7 @@
     //   targeting pre-r2, we must encode the instruction manually.
     #define cpu_yield() __asm__ __volatile__(".word 0x00000140")
   #endif
-#elif (defined(WIN32) || defined(_WIN32))
+#elif defined(WIN32)
   #include <immintrin.h>
   #define cpu_yield() _mm_pause()
 #elif defined(RSM_NO_LIBC)
@@ -106,7 +108,7 @@
 
 
 // thread_yield() yields for other threads to be scheduled on the current CPU by the OS
-#if (defined(WIN32) || defined(_WIN32))
+#if defined(WIN32)
   #define thread_yield() cpu_yield()
 #elif defined(RSM_NO_LIBC)
   #define thread_yield() ((void)0)

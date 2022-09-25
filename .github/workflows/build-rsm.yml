@@ -28,8 +28,6 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
-      # 1 because ncipollo/release-action is racy
-      max-parallel: ${{ startsWith(github.ref, 'refs/tags/v') }}
       matrix:
         target:
           - x86_64-linux-musl
@@ -101,13 +99,8 @@ jobs:
 
       - name: Publish release (if tag)
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: ncipollo/release-action@v1.8.10
+        uses: softprops/action-gh-release@v1
         with:
-          prerelease: false
-          artifacts: "${{ env.rsm_archive }}"
-          replacesArtifacts: true
-          tag: "v${{ env.rsm_version }}"
-          name: "rsm ${{ env.rsm_version }} "
+          name: "rsm ${{ env.rsm_version }}"
           body: "rsm ${{ env.rsm_version }} built from ${{ github.sha }}"
-          allowUpdates: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+          files: "${{ env.rsm_archive }}"

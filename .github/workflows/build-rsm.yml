@@ -1,3 +1,7 @@
+# Builds rsm either when a version tag is created or source is changed.
+# When a version tag is created, a release is automatically created.
+# Otherwise the build artifacts are uploaded to github and saved for 1 day
+# and can be found at https://github.com/rsms/rsm/actions/runs/RUNID
 name: Build rsm
 
 on:

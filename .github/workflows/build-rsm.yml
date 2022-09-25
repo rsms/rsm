@@ -40,10 +40,10 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install host utils
+      - name: Install ninja
         run: sudo apt-get install -y ninja-build
 
-      - name: Fetch zig
+      - name: Install zig
         run: |
           curl -L https://ziglang.org/download/0.9.1/zig-linux-x86_64-0.9.1.tar.xz | tar -xJ
 
@@ -54,33 +54,41 @@ jobs:
           CC="$PWD/zig-linux-x86_64-0.9.1/zig cc" \
           bash build.sh -static -out=out-${{ matrix.target }} "$@"
 
-      - name: Define version
-        #if: startsWith(github.ref, 'refs/tags/')
-        # run: echo "rsm_version=$(date '+%Y%m%d%H%M%S')" >> $GITHUB_ENV
+      - name: Define version (tag)
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          echo "github.ref_type=${{ github.ref_type }}"
-          echo "rsm_version=${{ github.sha }}" >> $GITHUB_ENV
+          VERSION=${{ github.ref }}
+          VERSION=${VERSION:11}  # refs/tags/v1.2.3 => 1.2.3
+          echo "rsm_version=$VERSION" >> $GITHUB_ENV
+
+      - name: Define version (branch)
+        if: ${{ ! startsWith(github.ref, 'refs/tags/v') }}
+        run: echo "rsm_version=${{ github.sha }}" >> $GITHUB_ENV
 
       - name: Create archive
         run: |
-          mkdir rsm-${rsm_version}-${{ matrix.target }}
-          mv out-${{ matrix.target }}/rsm rsm-${rsm_version}-${{ matrix.target }}/
-          tar -czvf rsm-${rsm_version}-${{ matrix.target }}.tar.gz rsm-${rsm_version}-${{ matrix.target }}
+          VARIANT=$(echo "${{ matrix.target }}" | cut -d- -f1 -f2)
+          NAME=rsm-${{ env.rsm_version }}-$VARIANT
+          ARCHIVE=$NAME.tar.gz
+          echo "rsm_archive=$ARCHIVE" >> $GITHUB_ENV
+          mkdir $NAME
+          mv out-${{ matrix.target }}/rsm $NAME/
+          tar -czvf "$ARCHIVE" "$NAME"
 
       - name: Upload archive (unless tag)
-        if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ ! startsWith(github.ref, 'refs/tags/v') }}
         uses: actions/upload-artifact@v3
         with:
-          name: rsm-${{ matrix.target }}.tar.gz
-          path: rsm-${{ matrix.target }}.tar.gz
+          name: "${{ env.rsm_archive }}"
+          path: "${{ env.rsm_archive }}"
           retention-days: 1
 
       - name: Publish release (if tag)
-        #if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: ncipollo/release-action@v1.8.10
         with:
           prerelease: false
-          artifacts: "rsm-${{ matrix.target }}.tar.gz"
+          artifacts: "${{ env.rsm_archive }}"
           replacesArtifacts: true
           tag: "v${{ env.rsm_version }}"
           name: "rsm ${{ env.rsm_version }} "

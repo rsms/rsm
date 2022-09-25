@@ -28,7 +28,8 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
-      max-parallel: 1  # because ncipollo/release-action is racy
+      # 1 because ncipollo/release-action is racy
+      max-parallel: ${{ startsWith(github.ref, 'refs/tags/v') }}
       matrix:
         target:
           - x86_64-linux-musl

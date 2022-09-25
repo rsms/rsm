@@ -1,7 +1,9 @@
 name: Build rsm
 
 on:
-  - workflow_dispatch
+  push:
+    branches: ["main"]
+  workflow_dispatch:
 
 defaults:
   run:
@@ -36,22 +38,34 @@ jobs:
       - name: Install host utils
         run: sudo apt-get install -y ninja-build
 
+      - name: Check for changes
+        run: |
+          git diff --name-only HEAD^ HEAD | while IFS= read -r fn; do
+            echo "changed file $fn"
+          done
+
       - name: Fetch zig
         run: |
           curl -L https://ziglang.org/download/0.9.1/zig-linux-x86_64-0.9.1.tar.xz | tar -xJ
 
       - name: Build rsm-${{ matrix.target }}
         run: |
-          CFLAGS_HOST="-target ${{ matrix.target }}" LDFLAGS_HOST="-target ${{ matrix.target }}" CC="$PWD/zig-linux-x86_64-0.9.1/zig cc" bash build.sh -static -out=out-${{ matrix.target }} "$@"
+          CFLAGS_HOST="-target ${{ matrix.target }}" \
+          LDFLAGS_HOST="-target ${{ matrix.target }}" \
+          CC="$PWD/zig-linux-x86_64-0.9.1/zig cc" \
+          bash build.sh -static -out=out-${{ matrix.target }} "$@"
 
       - name: Archive rsm-${{ matrix.target }}.tar.gz
         run: |
-          mkdir ${{ matrix.target }} && mv out-${{ matrix.target }}/rsm ${{ matrix.target }}/ && tar -czvf rsm-${{ matrix.target }}.tar.gz ${{ matrix.target }}
+          mkdir ${{ matrix.target }} &&
+          mv out-${{ matrix.target }}/rsm ${{ matrix.target }}/ &&
+          tar -czvf rsm-${{ matrix.target }}.tar.gz ${{ matrix.target }}
 
       - name: Define version
         run: echo "rsm_version=$(date '+%Y%m%d%H%M%S')" >> $GITHUB_ENV
 
       - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: ncipollo/release-action@v1.8.10
         with:
           prerelease: false

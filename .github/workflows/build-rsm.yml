@@ -1,0 +1,65 @@
+name: Build rsm
+
+on:
+  - workflow_dispatch
+
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages:    write
+  id-token: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-linux-musl
+          # - i386-linux-musl
+          # - aarch64-linux-musl
+          # - riscv64-linux-musl
+          # #- x86_64-windows-gnu
+
+    name: ${{ matrix.target }}
+
+    env:
+      prerelease: false
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Fetch zig
+        run: |
+          curl -L https://ziglang.org/download/0.9.1/zig-linux-x86_64-0.9.1.tar.xz | tar -xJ
+
+      - name: Build rsm-${{ matrix.target }}
+        run: |
+          CFLAGS_HOST="-target ${{ matrix.target }}" LDFLAGS_HOST="-target ${{ matrix.target }}" CC="$PWD/zig-linux-x86_64-0.9.1/zig cc" bash build.sh -static -out=out-${{ matrix.target }} "$@"
+
+      - name: Archive rsm-${{ matrix.target }}.tar.gz
+        run: |
+          mkdir ${{ matrix.target }} && mv out-${{ matrix.target }}/rsm ${{ matrix.target }}/ && tar -czvf rsm-${{ matrix.target }}.tar.gz ${{ matrix.target }}
+
+      - name: Define version
+        run: echo "rsm_version=$(date '+%Y%m%d%H%M%S')" >> $GITHUB_ENV
+
+      - name: Publish release
+        uses: ncipollo/release-action@v1.8.10
+        with:
+          prerelease: false
+          artifacts: "rsm-${{ matrix.target }}.tar.gz"
+          replacesArtifacts: true
+          tag: "v${{ env.rsm_version }}"
+          name: "btop ${{ env.rsm_version }} "
+          body: "btop ${{ env.rsm_version }} built from ${{ github.sha }}"
+          allowUpdates: true
+          token: ${{ secrets.GITHUB_TOKEN }}

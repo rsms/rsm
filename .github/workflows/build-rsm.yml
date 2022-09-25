@@ -37,7 +37,7 @@ jobs:
 
       - name: Check for changes
         run: |
-          git diff --name-only origin/HEAD^ origin/HEAD
+          git diff --name-only HEAD^..HEAD
 
       - name: Install host utils
         run: sudo apt-get install -y ninja-build

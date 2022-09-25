@@ -30,8 +30,10 @@ So, summarizing the reason RSM exists:
 
 ## Installing
 
-For source code and instructions on how to install & use RSM,
-see [github.com/rsms/rsm](https://github.com/rsms/rsm)
+[Download the latest release](https://github.com/rsms/rsm/releases/latest)
+
+Source code and build instructions can be found at
+[github.com/rsms/rsm](https://github.com/rsms/rsm)
 
 > **Status of this project:** This is a passion project and thus is not "production grade" stuff. The instruction set and semantics are changing. I'd be thrilled and happy if you play with RSM and build stuff on it, but please do keep in mind that stuff will change. Contributions are welcome, especially contributions of the intellectual kind; conversations and ideas.
 

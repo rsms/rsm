@@ -118,11 +118,6 @@ usize rromimg_loadsize(const rromimg_t* img, usize imgsize) {
     //   └───────────────────────────┴───────────────────────┘
     const char* src = (const char*)rom->img->data;
     const char* srcend = (const char*)rom->img + rom->imgsize;
-    log("rom->img        %p", rom->img);
-    log("rom->img->data  %p", rom->img->data);
-    log("src             %p", src);
-    log("srcend          %p", srcend);
-    log("rom->imgsize    %zu", rom->imgsize);
 
     // read uncompressed size LEB128, which advances src pointer
     u64 uncompressed_size;
@@ -131,13 +126,10 @@ usize rromimg_loadsize(const rromimg_t* img, usize imgsize) {
       return rerr_invalid;
     src += n;
 
-    log("src             %p", src);
-
     if ((u64)dstmem.size < uncompressed_size)
       return rerr_overflow;
 
     usize compressed_size = (usize)(uintptr)(srcend - src);
-    log("compressed_size %d", (int)compressed_size);
 
     // TODO: consider in-place decompression: usize inplace_dstsize =
     //   LZ4_DECOMPRESS_INPLACE_BUFFER_SIZE((usize)uncompressed_size);
@@ -153,7 +145,7 @@ usize rromimg_loadsize(const rromimg_t* img, usize imgsize) {
 
     int z = LZ4_decompress_safe(src, dstmem.p, (int)compressed_size, (int)dstmem.size);
     if UNLIKELY(z < 0 || (u64)z != uncompressed_size) {
-      log("LZ4_decompress_safe => %d (expected %llu)", z, uncompressed_size);
+      dlog("LZ4_decompress_safe => %d (expected %llu)", z, uncompressed_size);
       log("%scorrupt compressed image", errprefix);
       return rerr_invalid;
     }

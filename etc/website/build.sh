@@ -101,17 +101,17 @@ _file_is_newer() {
 }
 
 # npm info rsms-mkweb
-MKWEB_AR_VERSION=0.2.0
-MKWEB_AR_URL=https://registry.npmjs.org/rsms-mkweb/-/rsms-mkweb-${MKWEB_AR_VERSION}.tgz
-MKWEB_AR_URL_SHA1=9408b1b87c57e63321dd71f34e0e002d3acefd5d
-MKWEB_AR_NAME=mkweb-${MKWEB_AR_VERSION}.tgz
-MKWEB_EXE=$BUILD_DIR/mkweb/mkweb-${MKWEB_AR_VERSION}
+MKWEB_VERSION=0.2.2
+MKWEB_URL=https://registry.npmjs.org/rsms-mkweb/-/rsms-mkweb-${MKWEB_VERSION}.tgz
+MKWEB_SHA1=3c9e2843d42acba3525beef648655933af67301c
+MKWEB_ARCHIVE=mkweb-${MKWEB_VERSION}.tgz
+MKWEB_EXE=$BUILD_DIR/mkweb/mkweb-${MKWEB_VERSION}
 
 if ! [ -f "$MKWEB_EXE" ]; then
-  _download "$MKWEB_AR_URL" $MKWEB_AR_URL_SHA1 "$MKWEB_AR_NAME"
+  _download "$MKWEB_URL" $MKWEB_SHA1 "$MKWEB_ARCHIVE"
   MKWEB_DIR=$(dirname "$MKWEB_EXE")
   rm -rf "$MKWEB_DIR"
-  _extract_tar "$(_downloaded_file "$MKWEB_AR_NAME")" "$MKWEB_DIR"
+  _extract_tar "$(_downloaded_file "$MKWEB_ARCHIVE")" "$MKWEB_DIR"
   (cd "$MKWEB_DIR" &&
     npm i --omit dev --no-audit --no-bin-links --no-fund --no-package-lock)
   cp "$MKWEB_DIR/dist/mkweb" "$MKWEB_EXE"

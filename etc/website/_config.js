@@ -10,6 +10,7 @@ module.exports = ({
   hljs,     // HighlightJS module (NPM: highlight.js)
   markdown, // Markdown module (NPM: markdown-wasm)
   glob,     // glob function (NPM: miniglob)
+  cli_opts,
   mtime,
   build_site,
   read_file,  // "node:fs/promises".readFile
@@ -17,7 +18,7 @@ module.exports = ({
 }) => {
   // called when program starts
   //site.outdir = ".."
-  // console.log(site)
+  //console.log(site)
 
   // configure highlight.js
   hljs.registerLanguage("rsm",    require("./_hl/rsm"))
@@ -66,10 +67,10 @@ module.exports = ({
 
 
 async function gen_rsm_ops(mtime, read_file, write_file) {
-  console.log(`generate ${ops_json_file} from ${rsm_h_file}`)
-
   if (!fs.existsSync(rsm_h_file) || mtime(rsm_h_file) <= mtime(ops_json_file))
     return JSON.parse(fs.readFileSync(ops_json_file, {encoding:"utf8"}))
+
+  console.log(`generate ${ops_json_file} from ${rsm_h_file}`)
 
   let rsm_h = fs.readFileSync(rsm_h_file, {encoding:"utf8"})
   let ops = []

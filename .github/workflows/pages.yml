@@ -44,7 +44,7 @@ jobs:
         id: pages
         uses: actions/configure-pages@v2
       - name: Build website
-        run: bash etc/website/build.sh -opt -verbose
+        run: bash etc/website/build.sh -baseurl /rsm/ -opt -verbose
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v1
         with:

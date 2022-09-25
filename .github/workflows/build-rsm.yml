@@ -1,6 +1,6 @@
 # Builds rsm either when a version tag is created or source is changed.
 #
-# When a version tag is created, a release is automatically created in draft mode.
+# When a version tag is created, a release is automatically created.
 #
 # Otherwise, when source changes without a tag being created,
 # the build artifacts are uploaded to github and saved for 1 day.
@@ -102,7 +102,6 @@ jobs:
         uses: ncipollo/release-action@v1.8.10
         with:
           prerelease: false
-          draft: true
           artifacts: "${{ env.rsm_archive }}"
           replacesArtifacts: true
           tag: "v${{ env.rsm_version }}"

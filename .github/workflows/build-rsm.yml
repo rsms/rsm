@@ -40,9 +40,7 @@ jobs:
 
       - name: Check for changes
         run: |
-          git diff --name-only HEAD^ HEAD | while IFS= read -r fn; do
-            echo "changed file $fn"
-          done
+          git diff --name-only ${{ github.sha }} HEAD
 
       - name: Fetch zig
         run: |

@@ -57,27 +57,24 @@ UNUSED static const char* rrom_skind_name(rrom_skind kind) {
 static const char* errprefix = "error while loading rom: ";
 
 
-static rerr_t leb_u64_read(u64* resultp, u32 nbit, const u8** input, const void* inend) {
-  rerr_t err = rerr_invalid;
+// returns number of bytes read from input, or rerr (negative value)
+static int leb_u64_read(u64* resultp, u32 nbit, const u8* input, const void* inend) {
   u64 v = 0;
   u32 shift = 0;
-  const u8* p = *input;
+  if (input == inend)
+    return rerr_invalid;
+  const u8* p = input;
   while (p != inend) {
     u64 b = *p++;
     v |= ((b & 0x7f) << shift);
     shift += 7;
-    if ((b & 0x80) == 0) {
-      err = 0;
+    if ((b & 0x80) == 0)
       break;
-    }
-    if (shift >= nbit) {
-      err = rerr_overflow;
-      break;
-    }
+    if (shift >= nbit)
+      return rerr_overflow;
   }
   *resultp = v;
-  *input = p;
-  return err;
+  return (int)(uintptr)(p - input);
 }
 
 // rrom_clear_pointers clears computed pointers into a ROMs data
@@ -102,9 +99,9 @@ usize rromimg_loadsize(const rromimg_t* img, usize imgsize) {
   const u8* p = img->data;
   const u8* pend = (const u8*)img + imgsize;
   u64 uncompressed_size;
-  rerr_t err = leb_u64_read(&uncompressed_size, 64, &p, pend);
-  if UNLIKELY( err || (U64_MAX > USIZE_MAX && uncompressed_size > (u64)USIZE_MAX) )
-    return USIZE_MAX;
+  int n = leb_u64_read(&uncompressed_size, 64, p, pend);
+  if UNLIKELY( n < 1 || (U64_MAX > USIZE_MAX && uncompressed_size > (u64)USIZE_MAX) )
+    uncompressed_size = USIZE_MAX;
   return (usize)uncompressed_size;
 }
 
@@ -121,16 +118,26 @@ usize rromimg_loadsize(const rromimg_t* img, usize imgsize) {
     //   └───────────────────────────┴───────────────────────┘
     const char* src = (const char*)rom->img->data;
     const char* srcend = (const char*)rom->img + rom->imgsize;
+    log("rom->img        %p", rom->img);
+    log("rom->img->data  %p", rom->img->data);
+    log("src             %p", src);
+    log("srcend          %p", srcend);
+    log("rom->imgsize    %zu", rom->imgsize);
 
+    // read uncompressed size LEB128, which advances src pointer
     u64 uncompressed_size;
-    rerr_t err = leb_u64_read(&uncompressed_size, 64, (const u8**)&src, srcend);
-    if (err)
+    int n = leb_u64_read(&uncompressed_size, 64, (const u8*)src, srcend);
+    if (n < 1)
       return rerr_invalid;
+    src += n;
+
+    log("src             %p", src);
 
     if ((u64)dstmem.size < uncompressed_size)
       return rerr_overflow;
 
     usize compressed_size = (usize)(uintptr)(srcend - src);
+    log("compressed_size %d", (int)compressed_size);
 
     // TODO: consider in-place decompression: usize inplace_dstsize =
     //   LZ4_DECOMPRESS_INPLACE_BUFFER_SIZE((usize)uncompressed_size);
@@ -146,7 +153,7 @@ usize rromimg_loadsize(const rromimg_t* img, usize imgsize) {
 
     int z = LZ4_decompress_safe(src, dstmem.p, (int)compressed_size, (int)dstmem.size);
     if UNLIKELY(z < 0 || (u64)z != uncompressed_size) {
-      dlog("LZ4_decompress_safe => %d (expected %llu)", z, uncompressed_size);
+      log("LZ4_decompress_safe => %d (expected %llu)", z, uncompressed_size);
       log("%scorrupt compressed image", errprefix);
       return rerr_invalid;
     }
@@ -212,9 +219,10 @@ static rerr_t load_section(LPARAMS) {
   #endif
 
   u8 kind = *p++;
-  rerr_t err = leb_u64_read(&size, 64, &p, end);
-  if UNLIKELY(err)
-    return perr("invalid section 0x%02x header size: %s", kind, rerr_str(err));
+  int n = leb_u64_read(&size, 64, p, end);
+  if UNLIKELY(n < 1)
+    return perr("invalid section 0x%02x header size: %s", kind, rerr_str((rerr_t)n));
+  p += n;
 
   if UNLIKELY(size > (usize)(end - p))
     return perr("corrupt section 0x%02x", kind);

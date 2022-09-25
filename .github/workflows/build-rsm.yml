@@ -67,7 +67,8 @@ jobs:
 
       - name: Create archive
         run: |
-          VARIANT=$(echo "${{ matrix.target }}" | cut -d- -f1 -f2)
+          VARIANT=$(echo "${{ matrix.target }}" | cut -d- -f1)
+          VARIANT=$VARIANT-$(echo "${{ matrix.target }}" | cut -d- -f2)
           NAME=rsm-${{ env.rsm_version }}-$VARIANT
           ARCHIVE=$NAME.tar.gz
           echo "rsm_archive=$ARCHIVE" >> $GITHUB_ENV

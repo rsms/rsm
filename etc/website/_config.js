@@ -2,7 +2,7 @@ const fs = require("fs")
 const os = require("os")
 const assert = require("assert")
 
-const rsm_h_file = os.homedir() + "/src/rsm/src/rsm.h"
+const rsm_h_file = "../../src/rsm.h"
 const ops_json_file = "ops.json"
 
 module.exports = ({
@@ -52,7 +52,7 @@ module.exports = ({
   // }
 
   // rebuild when rsm_h_file changes
-  if (fs.existsSync(rsm_h_file)) {
+  if (fs.existsSync(rsm_h_file) && cli_opts.watch) {
     let rebuild_timer = null
     fs.watch(rsm_h_file, {persistent:false}, (event, filename) => {
       clearTimeout(rebuild_timer)
@@ -67,7 +67,7 @@ module.exports = ({
 
 
 async function gen_rsm_ops(mtime, read_file, write_file) {
-  if (!fs.existsSync(rsm_h_file) || mtime(rsm_h_file) <= mtime(ops_json_file))
+  if (!fs.existsSync(rsm_h_file) || mtime(rsm_h_file) < mtime(ops_json_file))
     return JSON.parse(fs.readFileSync(ops_json_file, {encoding:"utf8"}))
 
   console.log(`generate ${ops_json_file} from ${rsm_h_file}`)

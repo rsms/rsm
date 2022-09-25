@@ -18,6 +18,9 @@ module.exports = ({
 }) => {
   // called when program starts
   //site.outdir = ".."
+
+  // og image comes from curl -L --silent https://github.com/rsms/rsm | grep og:image
+  site.og_image = "https://repository-images.githubusercontent.com/459341066/b1653976-4237-49d3-b15b-a1c4dc8c3b35"
   //console.log(site)
 
   // configure highlight.js

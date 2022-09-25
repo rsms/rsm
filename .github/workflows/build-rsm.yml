@@ -56,20 +56,21 @@ jobs:
 
       - name: Archive rsm-${{ matrix.target }}.tar.gz
         run: |
-          mkdir ${{ matrix.target }} &&
-          mv out-${{ matrix.target }}/rsm ${{ matrix.target }}/ &&
-          tar -czvf rsm-${{ matrix.target }}.tar.gz ${{ matrix.target }}
+          mkdir rsm-${{ matrix.target }}
+          mv out-${{ matrix.target }}/rsm rsm-${{ matrix.target }}/
+          tar -czvf rsm-${{ matrix.target }}.tar.gz rsm-${{ matrix.target }}
 
-      - name: Define version
-        run: echo "rsm_version=$(date '+%Y%m%d%H%M%S')" >> $GITHUB_ENV
-
-      - name: Save archive (unless tag)
+      - name: Upload archive (unless tag)
         if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v3
         with:
-          name: built-exe
+          name: rsm-${{ matrix.target }}.tar.gz
           path: rsm-${{ matrix.target }}.tar.gz
           retention-days: 1
+
+      - name: Define version (if tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: echo "rsm_version=$(date '+%Y%m%d%H%M%S')" >> $GITHUB_ENV
 
       - name: Publish release (if tag)
         if: startsWith(github.ref, 'refs/tags/')

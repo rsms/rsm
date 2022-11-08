@@ -181,7 +181,7 @@ _( RET   , _    , nil , "ret"  , "PC = pop()")\
 \
 _( TSPAWN  , Au    , nil , "tspawn"  , "R0 = spawn_task(pc=Au, args=R0...R7)")\
 _( SYSCALL , Au    , nil , "syscall" , "R0...R7 = syscall(code=Au, args=R0...R18)")\
-_( WRITE   , ABCDu , reg , "write"   , "RA = write dstaddr=RB size=RC fd=Du")\
+_( WRITE   , ABCDs , reg , "write"   , "RA = write dstaddr=RB size=RC fd=Ds")\
 _( READ    , ABCDu , reg , "read"    , "RA = read  srcaddr=RB size=RC fd=Du")\
 _( MCOPY   , ABCu  , mem , "mcopy"   , "mem[RA:Cu] = mem[RB:Cu]")\
 _( MCMP    , ABCDu , reg , "mcmp"    , "RA = mem[RB:Du] <> mem[RC:Du]")\

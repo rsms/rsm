@@ -6,7 +6,7 @@
 #include "sched.h"
 #include "syscall.h"
 
-#define TRACE_MEMORY // define to dlog LOAD and STORE operations
+//#define TRACE_MEMORY // define to dlog LOAD and STORE operations
 
 // MAIN_RET_PC: special PC value representing the main return address
 #define MAIN_RET_PC  USIZE_MAX
@@ -28,7 +28,7 @@
     flockfile(stderr);
     fprintf(stderr, "\e[2m");
     for (int i = 0; i < 6; i++)
-      fprintf(stderr, "      " REG_FMTNAME_PAT, REG_FMTNAME(i));
+      fprintf(stderr, "          " REG_FMTNAME_PAT, REG_FMTNAME(i));
     fprintf(stderr, "           \e[9%cmSP\e[39m  │  PC  INSTRUCTION\e[22m\n",
       REG_FMTCOLORC(RSM_MAX_REG));
     funlockfile(stderr);
@@ -36,7 +36,7 @@
   static void exec_logstate(EXEC_PARAMS) {
     flockfile(stderr);
     for (int i = 0; i < 6; i++)
-      fprintf(stderr, REG_FMTVAL_PAT("%8llx"), REG_FMTVAL(i, iregs[i]));
+      fprintf(stderr, REG_FMTVAL_PAT("%12llx"), REG_FMTVAL(i, iregs[i]));
     char buf[128];
     rsm_fmtinstr(buf, sizeof(buf), inv[pc], NULL, RSM_FMT_COLOR);
     fprintf(stderr, REG_FMTVAL_PAT("%13llx") "  │ %3ld  %s\n",
@@ -169,7 +169,7 @@ enum execerr_t {
   u64 vaddr__ = (vaddr); \
   u64 value__ = VM_LOAD( \
     TYPE, m_vm_cache((t)->m, VM_PERM_RW), &(t)->m->s->vm_map, vaddr__); \
-  tracemem("LOAD %s 0x%llx (align %lu) => 0x%llx", \
+  tracemem("load %s 0x%llx (align %lu) => 0x%llx", \
     #TYPE, vaddr__, _Alignof(TYPE), value__); \
   value__; \
 })
@@ -178,7 +178,7 @@ enum execerr_t {
 #define MSTORE(TYPE, vaddr, value) { \
   u64 vaddr__ = (vaddr); \
   u64 value__ = (value); \
-  tracemem("STORE %s 0x%llx (align %lu) => 0x%llx", \
+  tracemem("store %s 0x%llx (align %lu) => 0x%llx", \
     #TYPE, value__, _Alignof(TYPE), vaddr__); \
   VM_STORE( \
     TYPE, m_vm_cache((t)->m, VM_PERM_RW), &(t)->m->s->vm_map, vaddr__, value__); \
@@ -220,7 +220,7 @@ static void mcopy(EXEC_PARAMS, u64 dstaddr, u64 srcaddr, u64 size) {
   vm_map_t* map = &(t)->m->s->vm_map;
   vm_cache_t* cache = m_vm_cache((t)->m, VM_PERM_RW);
 
-  tracemem("%012llx <- %012llx (%llu B)", dstaddr, srcaddr, size);
+  tracemem("mcopy %012llx <- %012llx (%llu B)", dstaddr, srcaddr, size);
 
   // check for overlapping address ranges
   #if RSM_SAFE
@@ -245,7 +245,8 @@ static void mcopy(EXEC_PARAMS, u64 dstaddr, u64 srcaddr, u64 size) {
     if ((u64)nbyte > size)
       nbyte = (usize)size;
 
-    dlog("copy %4zu B %p-%p -> %p-%p", nbyte, src, src+nbyte, dst, dst+nbyte);
+    // tracemem("copy host %4zu B %p-%p -> %p-%p",
+    //   nbyte, src, src+nbyte, dst, dst+nbyte);
     memcpy(dst, src, nbyte);
 
     if (size == (u64)nbyte)
@@ -433,10 +434,37 @@ static i64 stkmem(EXEC_PARAMS, i64 delta) {
 isize write(int fd, const void* buf, usize nbyte);
 isize read(int fd, void* buf, usize nbyte);
 
-static u64 _write(EXEC_PARAMS, u64 fd, u64 addr, u64 size) {
+static i64 _write(EXEC_PARAMS, i64 fd, u64 srcaddr, u64 size) {
   // RA = write srcaddr=RB size=R(C) fd=Du
-  panic("NOT IMPLEMENTED"); // TODO virtual memory
-  // return (u64)write((int)fd, src, (usize)size);
+  if (fd < 0 || fd > (i64)__INT_MAX__ || size > I64_MAX)
+    return -1;
+  if (size == 0)
+    return 0;
+
+  vm_map_t* map = &(t)->m->s->vm_map;
+  vm_cache_t* cache = m_vm_cache((t)->m, VM_PERM_RW);
+  void* src = (void*)vm_translate(cache, map, srcaddr, 1, VM_OP_LOAD_1);
+  u64 remaining = size;
+
+  for (;;) {
+    uintptr page = ((uintptr)src + PAGE_SIZE) & HADDR_PAGE_MASK;
+
+    usize nbyte = (usize)(page - (uintptr)src);
+    if ((u64)nbyte > remaining)
+      nbyte = (usize)remaining;
+
+    //dlog("write [fd %lld] %4zu B %p-%p", fd, nbyte, src, src+nbyte);
+    int w = write((int)fd, src, nbyte);
+    if (w < 0)
+      return -1;
+    remaining -= (u64)w;
+    if (w == 0 || remaining == 0)
+      break;
+    srcaddr += (u64)nbyte;
+    src = (void*)vm_translate(cache, map, srcaddr, 1, VM_OP_LOAD_1);
+  }
+
+  return (i64)(size - remaining); // bytes written
 }
 
 static u64 _read(EXEC_PARAMS, u64 fd, u64 addr, u64 size) {

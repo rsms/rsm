@@ -181,7 +181,7 @@ RSM_ASSUME_NONNULL_BEGIN
   (~0llu ^ ((1llu << ((VM_PTAB_BITS*(VM_PTAB_LEVELS-1))-((level)*VM_PTAB_BITS)))-1))
 
 // u64 VM_PAGE_ADDR(u64 vaddr) calculates the page address of a virtual address
-// e.g. 0xdeadbeef 11011110101011011011111011101111 & (PAGE_SIZE(4096) - 1)
+// e.g. 0xdeadbeef 11011110101011011011111011101111 & VM_ADDR_PAGE_MASK
 //    = 0xdeadb000 11011110101011011011000000000000
 #define VM_PAGE_ADDR(vaddr)  ((u64)(vaddr) & VM_ADDR_PAGE_MASK)
 
@@ -207,6 +207,11 @@ RSM_ASSUME_NONNULL_BEGIN
 // permissions of wantperm.
 #define VM_PERM_CHECK(hasperm, wantperm) \
   ( ( ((hasperm) & (wantperm)) ^ (wantperm) ) == 0 )
+
+// vm_ranges_overlap returns true if two address ranges overlaps
+inline static bool vm_ranges_overlap(u64 a1start, u64 a1size, u64 a2start, u64 a2size) {
+  return a1start < (a2start + a2size) && a2start < (a1start + a1size);
+}
 
 
 // vm_perm_t: page permissions

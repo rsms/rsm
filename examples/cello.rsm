@@ -1,0 +1,20 @@
+//!exe2-only
+
+// Demonstrates editing a string and writing to stdout
+
+fun main(i32) {
+  const STDOUT = 1
+  data message = "Hello\n"
+  stkmem 8       // 8 bytes of stack memory
+
+  R2 = 6         // length of string
+  R0 = SP - R2   // destination address
+  R1 = message   // source address
+  mcopy R0 R1 R2 // copy string to stack
+
+  R1 = 0x43      // character 'C'
+  store1 R1 R0 0 // str[0] = 'C'
+
+  R0 = write R0 R2 STDOUT
+  stkmem -8
+}

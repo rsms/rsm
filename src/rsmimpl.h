@@ -633,18 +633,29 @@ typedef __builtin_va_list va_list;
     #define assert_no_add_overflow(a, b) \
       assertf(!__builtin_add_overflow_p((a), (b), (__typeof__((a) + (b)))0), \
         "0x%llx + 0x%llx overflows", (u64)(a), (u64)(b))
+    #define assert_no_sub_overflow(a, b) \
+      assertf(!__builtin_sub_overflow_p((a), (b), (__typeof__((a) + (b)))0), \
+        "0x%llx - 0x%llx overflows", (u64)(a), (u64)(b))
   #elif __has_builtin(__builtin_add_overflow)
     #define assert_no_add_overflow(a, b) ({ \
       __typeof__((a) + (b)) tmp__; \
       assertf(!__builtin_add_overflow((a), (b), &tmp__), \
         "0x%llx + 0x%llx overflows", (u64)(a), (u64)(b)); \
     })
+    #define assert_no_sub_overflow(a, b) ({ \
+      __typeof__((a) + (b)) tmp__; \
+      assertf(!__builtin_sub_overflow((a), (b), &tmp__), \
+        "0x%llx - 0x%llx overflows", (u64)(a), (u64)(b)); \
+    })
   #else
     // best effort; triggers ubsan
     #define assert_no_add_overflow(a, b) ({ \
       __typeof__((a) + (b)) tmp__ = (i64)(a) + (i64)(b); \
-      assertf((u64)tmp__ >= (u64)(a), \
-        "0x%llx + 0x%llx overflows", (u64)(a), (u64)(b)); \
+      assertf((u64)tmp__ >= (u64)(a), "0x%llx + 0x%llx overflows", (u64)(a), (u64)(b));\
+    })
+    #define assert_no_sub_overflow(a, b) ({ \
+      __typeof__((a) + (b)) tmp__ = (i64)(a) - (i64)(b); \
+      assertf((u64)tmp__ <= (u64)(a), "0x%llx - 0x%llx overflows", (u64)(a), (u64)(b));\
     })
   #endif
 
@@ -658,6 +669,7 @@ typedef __builtin_va_list va_list;
   #define assertnull(a)                ((void)0)
   #define assertnotnull(a)             ({ a; }) /* note: (a) causes "unused" warnings */
   #define assert_no_add_overflow(a, b) ((void)0)
+  #define assert_no_sub_overflow(a, b) ((void)0)
 #endif /* !defined(NDEBUG) */
 
 // RSM_SAFE -- checks enabled in "debug" and "safe" builds (but not in "fast" builds.)

@@ -1,0 +1,32 @@
+// This demonstrates and tests copying of memory with mcopy
+
+fun main() {
+  // allocate stack memory (SP since exe1 doesn't support stkmem)
+  const STKSIZE = 0x3000
+  SP = SP - STKSIZE
+
+  // addresses with different page offsets
+  R3 = 0x1200   // size
+  R1 = SP - R3  // dst
+  R2 = R1 - R3  // src
+  mcopy R1 R2 R3
+
+  // addresses with matching page offsets (page aligned)
+  // R5 is a mask that filters the page address of an address
+  R5 = 0xfffffffffffff000  // (~0 ^ (PAGE_SIZE - 1))
+  R3 = 0x1500     // size
+  R1 = SP - R3    // dst
+  R1 = R1 & R5    // align_floor(dst, PAGE_SIZE)
+  R4 = R3 * 2     // size *= 2 for align_floor(src, PAGE_SIZE)
+  R2 = R1 - R4    // src
+  R2 = R2 & R5    // align_floor(src, PAGE_SIZE)
+  mcopy R1 R2 R3
+
+  // addresses with matching page offsets (not page aligned)
+  R1 = R1 + 3
+  R2 = R2 + 3
+  R3 = R3 - 3
+  mcopy R1 R2 R3
+
+  SP = SP + STKSIZE
+}

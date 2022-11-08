@@ -184,8 +184,82 @@ enum execerr_t {
     TYPE, m_vm_cache((t)->m, VM_PERM_RW), &(t)->m->s->vm_map, vaddr__, value__); \
 }
 
+#define HADDR_OFFS_MASK  ((uintptr)( (uintptr)PAGE_SIZE - (uintptr)1 ))
+#define HADDR_PAGE_MASK  ((uintptr)( ~(uintptr)0 ^ ((uintptr)PAGE_SIZE - (uintptr)1) ))
+
 static void mcopy(EXEC_PARAMS, u64 dstaddr, u64 srcaddr, u64 size) {
-  panic("NOT IMPLEMENTED"); // TODO virtual memory
+  // mcopy copies at page boundaries to reduce vm_translate operations.
+  //
+  // Example: addresses at different page offsets: (worst case scenario)
+  //   mcopy(0x5d00, 0x1200, 9000)
+  //
+  //   0x1200 ─────src───── 0x3528              0x5d00 ─────dst───── 0x8028
+  //   ┌─┴──────┬────────┬────┴───┬────────┬──────┴─┬────────┬────────┬─┴──────┐
+  //   │ 0x1000 │ 0x2000 │ 0x3000 │ 0x4000 │ 0x5000 │ 0x6000 │ 0x7000 │ 0x8000 │
+  //   └────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┘
+  //
+  //   copy  768 B  0x1200-0x1500 ⟶ 0x5d00-0x6000  (nearest page boundary: 0x6000)
+  //   copy 2816 B  0x1500-0x2000 ⟶ 0x6000-0x6b00  (nearest page boundary: 0x2000)
+  //   copy 1280 B  0x2000-0x2500 ⟶ 0x6b00-0x7000  (nearest page boundary: 0x7000)
+  //   copy 2816 B  0x2500-0x3000 ⟶ 0x7000-0x7b00  (nearest page boundary: 0x3000)
+  //   copy 1280 B  0x3000-0x3500 ⟶ 0x7b00-0x8000  (nearest page boundary: 0x8000)
+  //   copy   40 B  0x3500-0x3528 ⟶ 0x8000-0x8028  (tail)
+  //
+  // Example: addresses at matching page offsets:
+  //   mcopy(0x5200, 0x1200, 9000)
+  //
+  //   0x1200 ─────src───── 0x3528         0x5200 ─────dst───── 0x7528
+  //   ┌─┴──────┬────────┬────┴───┬────────┬─┴──────┬────────┬────┴───┐
+  //   │ 0x1000 │ 0x2000 │ 0x3000 │ 0x4000 │ 0x5000 │ 0x6000 │ 0x7000 │
+  //   └────────┴────────┴────────┴────────┴────────┴────────┴────────┘
+  //
+  //   copy 3584 B  0x1200-0x2000 ⟶ 0x5200-0x6000
+  //   copy 4096 B  0x2000-0x3000 ⟶ 0x6000-0x7000
+  //   copy 1320 B  0x3000-0x3528 ⟶ 0x7000-0x7528
+  //
+  vm_map_t* map = &(t)->m->s->vm_map;
+  vm_cache_t* cache = m_vm_cache((t)->m, VM_PERM_RW);
+
+  tracemem("%012llx <- %012llx (%llu B)", dstaddr, srcaddr, size);
+
+  // check for overlapping address ranges
+  #if RSM_SAFE
+  if (vm_ranges_overlap(dstaddr, size, srcaddr, size)) {
+    panic(
+      "overlapping address ranges:\n  dst %012llx…%012llx\n  src %012llx…%012llx",
+      dstaddr, dstaddr+size, srcaddr, srcaddr+size);
+  }
+  #endif
+
+  void* src = (void*)vm_translate(cache, map, srcaddr, 1, VM_OP_LOAD_1);
+  void* dst = (void*)vm_translate(cache, map, dstaddr, 1, VM_OP_STORE_1);
+  //tracemem("[haddr] dst %p, src %p, size %llu", dst, src, size);
+
+  for (;;) {
+    uintptr src_nextpage = ((uintptr)src + PAGE_SIZE) & HADDR_PAGE_MASK;
+    uintptr dst_nextpage = ((uintptr)dst + PAGE_SIZE) & HADDR_PAGE_MASK;
+
+    usize src_nbyte = (usize)(src_nextpage - (uintptr)src);
+    usize dst_nbyte = (usize)(dst_nextpage - (uintptr)dst);
+    usize nbyte = MIN(src_nbyte, dst_nbyte);
+    if ((u64)nbyte > size)
+      nbyte = (usize)size;
+
+    dlog("copy %4zu B %p-%p -> %p-%p", nbyte, src, src+nbyte, dst, dst+nbyte);
+    memcpy(dst, src, nbyte);
+
+    if (size == (u64)nbyte)
+      break;
+
+    assert_no_sub_overflow(size, (u64)nbyte);
+    size -= (u64)nbyte;
+
+    srcaddr += (u64)nbyte;
+    dstaddr += (u64)nbyte;
+
+    src = (void*)vm_translate(cache, map, srcaddr, 1, VM_OP_LOAD_1);
+    dst = (void*)vm_translate(cache, map, dstaddr, 1, VM_OP_STORE_1);
+  }
 }
 
 static i64 mcmp(EXEC_PARAMS, u64 xaddr, u64 yaddr, u64 size) {

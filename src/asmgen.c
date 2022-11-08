@@ -63,7 +63,7 @@ struct gdata { // base: gnamed
 struct gbhead { // base: gnamed
   #define BLOCK_HEAD \
     NAMED_HEAD        \
-    usize i; /* first instruction = iv[starti] */
+    usize i; /* first instruction = iv[i] */
   BLOCK_HEAD
 };
 
@@ -337,6 +337,52 @@ static bool make_bigv(gstate* g, rop_t op, rin_t* inp, u32 dstreg, u64 value) {
   return true;
 }
 
+static bool rin_uses_ireg(rin_t in, u32 reg) {
+  #define fr(N) ( RSM_GET_##N(in) == reg )
+  #define fw(N) ( (RSM_GET_i(in) == 0) && (RSM_GET_##N(in) == reg) )
+
+  #define fi__     return false;
+  #define fi_A     return fr(A);
+  #define fi_Au    return fw(A);
+  #define fi_As    return fw(A);
+  #define fi_AB    return fr(A) | fr(B);
+  #define fi_ABv   return fr(A) | fr(B);
+  #define fi_ABu   return fr(A) | fw(B);
+  #define fi_ABs   return fr(A) | fw(B);
+  #define fi_ABC   return fr(A) | fr(B) | fr(C);
+  #define fi_ABCu  return fr(A) | fr(B) | fw(C);
+  #define fi_ABCs  return fr(A) | fr(B) | fw(C);
+  #define fi_ABCD  return fr(A) | fr(B) | fr(C) | fr(D);
+  #define fi_ABCDu return fr(A) | fr(B) | fr(C) | fw(D);
+  #define fi_ABCDs return fr(A) | fr(B) | fr(C) | fw(D);
+
+  switch (RSM_GET_OP(in)) {
+    #define _(OP, ENC, ...) case rop_##OP: fi_##ENC
+    RSM_FOREACH_OP(_)
+    #undef _
+  }
+
+  return false;
+}
+
+// select_scratchreg attempts to find an unused register
+static u32 find_unused_reg(gstate* g, u32 before_iv_index) {
+  u32 r = RSM_NTMPREGS - 1;
+  assert(before_iv_index <= g->iv.len);
+try_next:
+  for (u32 i = before_iv_index; i > 0; ) {
+    rin_t* in = rarray_at(rin_t, &g->iv, --i);
+    if (rin_uses_ireg(*in, r)) {
+      if (r == 0)
+        return RSM_NREGS;
+      r--;
+      goto try_next;
+    }
+  }
+  // r is unused
+  return r;
+}
+
 // select_scratchreg is used to check for interference with dstreg in arguments.
 // If dstreg is used for any of the arguments, RSM_NREGS is returned instead of dstreg.
 inline static u32 select_scratchreg(rin_t in, u32 dstreg, u32 nregargs) {
@@ -417,11 +463,29 @@ largeval:
   trace("op %s; large value 0x%llx", rop_name(RSM_GET_OP(*in)), value);
 
   if (scratchreg >= RSM_NREGS) {
-    // >RSM_NREGS: no scratch register; instruction does not produce a register result.
-    // =RSM_NREGS: register interference
-    if (scratchreg == RSM_NREGS)
-      errf(g->a, nposrange(patcher), "TODO %s: scratch reg interference", __FUNCTION__);
-    return false;
+    // We were unable to use the destination register for the instruction requiring
+    // the imm. Either one of its inputs uses the same register or the instruction
+    // does not produce a register result. Either way, we need to find a register to
+    // use for our intermediate value.
+
+    // TODO: this implementation is terrible. Replace it with something better.
+    //
+    // One idea is to find live ranges, kind of what a linear-scan register allocator
+    // would need to do.
+    //
+    // We could also improve scanning by looking only in the current function.
+    // gfun.i contains the iv index of a function's first instruction.
+    // Since we might be patching instructions anywhere in the program, we would have
+    // to find the function of the patchee (not the current function being generated.)
+    // Currently the only way to do that is linear search over gstate.funs, finding
+    // the gfun.i closest to inindex.
+
+    scratchreg = find_unused_reg(g, inindex);
+    if (scratchreg == RSM_NREGS) {
+      errf(g->a, nposrange(patcher), "could not find a free scratch register");
+      return false;
+    }
+    trace("using R%u as scratchreg", scratchreg);
   }
 
   // result in register scratchreg
@@ -680,7 +744,7 @@ static bool getiargs(
   rop_t op = (rop_t)n->ival;
 
   trace("[%s] wantargc %u, minval %lld, maxval 0x%llx",
-    rop_name(op), wantargc, (ill_t)minval, maxval);
+    rop_name(op), wantargc, minval, maxval);
 
   // first argc-1 args are registers
   rnode_t* arg = n->children.head;

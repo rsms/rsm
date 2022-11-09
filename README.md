@@ -32,11 +32,31 @@ Work in progress, TODO:
 - Lots of little small pieces here and there [marked with "TODO" in the code](https://github.com/rsms/rsm/search?l=C&o=desc&q=TODO&s=indexed&type=code)
 
 
+## Try it
+
+[Download a binary for your platform](https://github.com/rsms/rsm/releases/latest) and try this:
+
+```shell
+$ cat > hello.rsm <<END
+fun main(i32) {
+  const STDOUT = 1
+  data message = "Hello world\n"
+  R0 = message // address of string
+  R1 = 12      // length of string
+  R0 = write R0 R1 STDOUT
+}
+END
+$ rsm hello.rsm
+Hello world
+$
+```
+
+
 ## Building & running
 
-```sh
-./build.sh -debug
-./out/debug/rsm -d -R0=15 examples/factorial.rsm
+```shell
+$ ./build.sh -debug
+$ ./out/debug/rsm -d -R0=15 examples/factorial.rsm
 # R0 will contain the result 1307674368000
 ```
 

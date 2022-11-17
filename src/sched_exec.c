@@ -679,9 +679,6 @@ usize rsched_eval(EXEC_PARAMS) {
     #define do_STORE2(C) MSTORE(u16, (u64)((i64)RB+(i64)C), RA) // wrap i64 to i16
     #define do_STORE1(C) MSTORE(u8 , (u64)((i64)RB+(i64)C), RA) // wrap i64 to i8
 
-    #define do_PUSH(A)  push(EXEC_ARGS, 8, A)
-    #define do_POP(A)   A = pop(EXEC_ARGS, 8)
-
     #define do_ADD(C)  RA = RB + C
     #define do_SUB(C)  RA = RB - C
     #define do_MUL(C)  RA = RB * C

@@ -142,8 +142,6 @@ _( STORE  , ABCs , mem , "store"  , "mem[RB + Cs : 8] = RA")\
 _( STORE4 , ABCs , mem , "store4" , "mem[RB + Cs : 4] = RA -- wrap i64 to i32")\
 _( STORE2 , ABCs , mem , "store2" , "mem[RB + Cs : 2] = RA -- wrap i64 to i16")\
 _( STORE1 , ABCs , mem , "store1" , "mem[RB + Cs : 1] = RA -- wrap i64 to i8")\
-_( PUSH   , Au   , mem , "push"   , "SP -= 8; mem[SP] = Au")\
-_( POP    , A    , reg , "pop"    , "A = mem[SP]; SP += 8")\
 \
 _( ADD   , ABCu , reg , "add"  , "RA = RB + Cu -- wrap on overflow")\
 _( SUB   , ABCu , reg , "sub"  , "RA = RB - Cu -- wrap on overflow")\

@@ -91,20 +91,6 @@
 		"semantics": "mem[RB + Cs : 1] = RA -- wrap i64 to i8"
 	},
 	{
-		"id": "PUSH",
-		"args": "Au",
-		"result": "mem",
-		"name": "push",
-		"semantics": "SP -= 8; mem[SP] = Au"
-	},
-	{
-		"id": "POP",
-		"args": "A",
-		"result": "reg",
-		"name": "pop",
-		"semantics": "A = mem[SP]; SP += 8"
-	},
-	{
 		"id": "ADD",
 		"args": "ABCu",
 		"result": "reg",
@@ -337,10 +323,10 @@
 	},
 	{
 		"id": "WRITE",
-		"args": "ABCDu",
+		"args": "ABCDs",
 		"result": "reg",
 		"name": "write",
-		"semantics": "RA = write dstaddr=RB size=RC fd=Du"
+		"semantics": "RA = write dstaddr=RB size=RC fd=Ds"
 	},
 	{
 		"id": "READ",

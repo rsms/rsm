@@ -7,6 +7,7 @@
 #include "syscall.h"
 
 //#define TRACE_MEMORY // define to dlog LOAD and STORE operations
+//#define TRACE_EXEC   // define to dlog execution state (regs & instructions)
 
 // MAIN_RET_PC: special PC value representing the main return address
 #define MAIN_RET_PC  USIZE_MAX
@@ -22,7 +23,7 @@
 //———————————————————————————————————————————————————————————————————————————————————
 // exec_logstate
 
-#if defined(DEBUG) && !defined(RSM_NO_LIBC)
+#if defined(TRACE_EXEC) && defined(DEBUG) && !defined(RSM_NO_LIBC)
   #include <stdio.h>
   static void exec_logstate_header() {
     flockfile(stderr);
@@ -43,19 +44,19 @@
       REG_FMTVAL(RSM_MAX_REG, iregs[RSM_MAX_REG]), pc, buf);
     funlockfile(stderr);
   }
-  #ifdef TRACE_MEMORY
-    #if defined(SCHED_TRACE)
-      #define tracemem(fmt, args...) _schedtrace(2, __FUNCTION__, fmt, ##args)
-    #else
-      #define tracemem(fmt, args...) dlog("[mem] " fmt, ##args)
-    #endif
-  #else
-    #define tracemem(...) ((void)0)
-  #endif
 #else
   #define exec_logstate(...)        ((void)0)
   #define exec_logstate_header(...) ((void)0)
-  #define tracemem(...)        ((void)0)
+#endif
+
+#if defined(TRACE_MEMORY) && defined(DEBUG)
+  #if defined(SCHED_TRACE)
+    #define tracemem(fmt, args...) _schedtrace(2, __FUNCTION__, fmt, ##args)
+  #else
+    #define tracemem(fmt, args...) dlog("[mem] " fmt, ##args)
+  #endif
+#else
+  #define tracemem(...) ((void)0)
 #endif
 
 

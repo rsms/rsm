@@ -164,7 +164,10 @@ struct cstate {
   smapent* entries;
 };
 
-static int cs_sort(const smapent* e1, const smapent* e2, cstate* cs) {
+static int cs_sort(const void* a, const void* b, void* ctx) {
+  const smapent* e1 = a;
+  const smapent* e2 = b;
+  cstate* cs = ctx;
   smap* m = cs->m;
   bool null1 = e1->key == NULL || e1->key == DELMARK;
   bool null2 = e2->key == NULL || e2->key == DELMARK;
@@ -220,8 +223,7 @@ static bool smap_compact(smap* m, rmemalloc_t* ma) {
   }
 
   // sort collision entries on index
-  rsm_qsort(m->entries, m->cap, sizeof(smapent),
-    (int(*)(const void*,const void*,void*))&cs_sort, &cs);
+  rsm_qsort(m->entries, m->cap, sizeof(smapent), cs_sort, &cs);
   // now, collisions only contains collision entries and looks like this:
   //   0 somekey collision on index 1
   //   1 somekey collision on index 3

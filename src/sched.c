@@ -265,7 +265,7 @@ static void t_casstatus(T* t, tstatus_t oldval, tstatus_t newval) {
   // const u64 yieldDelay = 5 * 1000;
   // u64 nextYield = 0;
 
-  for (int i = 0; !AtomicCASRelaxed(&t->status, &oldvaltmp, newval); i++) {
+  for (/*int i = 0*/; !AtomicCASRelaxed(&t->status, &oldvaltmp, newval); /*i++*/) {
     // Note: on failure, when we get here, oldval has been updated.
     oldvaltmp = oldval; // restore oldvaltmp for next attempt
 
@@ -973,7 +973,7 @@ static void p_freet_add(P* p, T* t) {
   static_assert(P_FREET_WATERMARK_LOW <= P_FREET_WATERMARK_HIGH, "");
 
   while (p->freet.len >= P_FREET_WATERMARK_LOW) {
-    T* t = tlist_pop(&p->freet);
+    (void)tlist_pop(&p->freet);
   }
 }
 

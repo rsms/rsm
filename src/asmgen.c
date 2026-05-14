@@ -1247,8 +1247,8 @@ static void dlog_gdata(gdata* nullable d) {
   #endif
 }
 
-static int gdata_sort(const gdata** x, const gdata** y, void* ctx) {
-  return (int)(*y)->align - (int)(*x)->align;
+static int gdata_sort(const void* x, const void* y, void* ctx) {
+  return (int)(*(const gdata**)y)->align - (int)(*(const gdata**)x)->align;
 }
 
 static void layout_data(gstate* g) {
@@ -1280,8 +1280,7 @@ static void layout_data(gstate* g) {
     return;
 
   // sort data chunks by alignment
-  rsm_qsort(g->dataorder.v, g->dataorder.len, sizeof(void*),
-    (rsm_qsort_cmp)&gdata_sort, NULL);
+  rsm_qsort(g->dataorder.v, g->dataorder.len, sizeof(void*), gdata_sort, NULL);
 
   // align is what we will use for the "align" field in the ROMs "data" table header
   // (note: largest alignment is g->data.v[0] after sorting)

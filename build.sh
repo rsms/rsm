@@ -17,6 +17,7 @@ TESTING_ENABLED=1
 STRIP=false
 STATIC=false
 DEBUGGABLE=true
+ANALYZE=true
 J=
 
 while [[ $# -gt 0 ]]; do
@@ -37,6 +38,7 @@ while [[ $# -gt 0 ]]; do
   -j*)      NINJA_ARGS+=( ${1} ); shift; continue ;;
   -j)       NINJA_ARGS+=( -j${2} ); shift; shift; continue ;;
   -g)       DEBUGGABLE=true; shift ;;
+  -analyze) ANALYZE=true; shift ;;
   -v)       NINJA_ARGS+=(-v); shift ;;
   -D*)      [ ${#1} -gt 2 ] || _err "Missing NAME after -D";EXTRA_CFLAGS+=( "$1" ); shift ;;
   -h|-help|--help) cat << _END
@@ -48,6 +50,7 @@ options:
   -strip         Do not include debug data
   -g             Make the build debuggable (default for -debug and -release)
   -w             Rebuild as sources change
+  -analyze       Run clang analyzer on source code and exit
   -wf=<file>     Watch <file> for changes (can be provided multiple times)
   -run=<cmd>     Run <cmd> after successful build
   -out=<dir>     Build in <dir> instead of "$OUTDIR_DEFAULT/<mode>".
@@ -181,15 +184,37 @@ if [ "$(cat "$CCONFIG_FILE" 2>/dev/null)" != "$CCONFIG" ]; then
 fi
 
 # flags for all targets (in addition to unconditional flags in ninja template)
-CFLAGS=( $CFLAGS $EXTRA_CFLAGS )  # from env
+CFLAGS=(
+  -std=c11 \
+  -fvisibility=hidden \
+  -Wall -Wextra -Wvla \
+  -Wimplicit-fallthrough \
+  -Wno-missing-field-initializers \
+  -Wno-unused-parameter \
+  $CFLAGS \
+  $EXTRA_CFLAGS \
+)
 [ "$BUILD_MODE" = "release" ] && CFLAGS+=( -DRSM_SAFE )
 [ -n "$TESTING_ENABLED" ]     && CFLAGS+=( -DRSM_TESTING_ENABLED )
 
 # target-specific flags (in addition to unconditional flags in ninja template)
-CFLAGS_WASM=( -DRSM_NO_LIBC )
+CFLAGS_WASM=(
+  --target=wasm32 \
+  --no-standard-libraries \
+  -fvisibility=hidden \
+  -DRSM_NO_LIBC \
+)
 CFLAGS_HOST=( $CFLAGS_HOST )            # from env
 LDFLAGS_HOST=( $LDFLAGS $LDFLAGS_HOST ) # from env
-LDFLAGS_WASM=( $LDFLAGS_WASM )          # from env (note: liker is wasm-ld, not cc)
+LDFLAGS_WASM=( \
+  -allow-undefined-file etc/wasm.syms \
+  --no-entry \
+  --gc-sections \
+  --export-dynamic \
+  --import-memory \
+  $LDFLAGS_WASM \
+)
+# note: liker is wasm-ld, not cc
 
 if $DEBUG; then
   CFLAGS+=( -O0 -DDEBUG )
@@ -281,38 +306,80 @@ if $DEBUG && $CC_IS_CLANG; then
   )
 fi
 
+if [ -n "$TESTING_ENABLED" ]; then
+  SOURCES=( $(find src -name '*.c') )
+else
+  SOURCES=( $(find src -name '*.c' -not -name '*_test.c' -not -name 'test.c') )
+fi
+
+####################################################################################################
+# analyze
+
+if $ANALYZE; then
+    # See `clang --help | grep -A1 analyzer-output`
+    rm -rf "$OUTDIR/analyze"
+    mkdir -p "$OUTDIR/analyze"
+    a_flags=( "${CFLAGS[@]}" "${CFLAGS_HOST[@]}" )
+    a_flags=( "${a_flags[@]/-fsani*/}" )
+    a_flags=( "${a_flags[@]/-fcolor-diagnostics*/}" )
+    # a_flags+=( -isystem lib )
+    a_flags+=( --analyze -Xanalyzer -analyzer-output=sarif )
+    a_files=( "${SOURCES[@]}" )
+    echo "Analyzing ${#a_files[@]} files"
+    for srcfile in "${a_files[@]}"; do
+        report=$OUTDIR/analyze/$srcfile.json
+        mkdir -p "$(dirname "$report")"
+        clang "${a_flags[@]}" -o "$report" $srcfile > /dev/null 2>&1 &
+    done
+    wait
+    total_issues=0
+    lines=()
+    while IFS= read -r -d '' f; do
+        n=$(jq '[.runs[].results[]?] | length' "$f")
+        if [ "$n" -gt 0 ]; then
+            total_issues=$((total_issues + n))
+            rel=${f#$OUTDIR/analyze/}
+            src=${rel%.json}
+            if [ "$n" -eq 1 ]; then
+                lines+=("$(printf '%s: %d issue: %s' "$src" "$n" "$f")")
+            else
+                lines+=("$(printf '%s: %d issues: %s' "$src" "$n" "$f")")
+            fi
+        fi
+    done < <(find $OUTDIR/analyze -type f -name '*.json' -print0)
+    if [ ${#lines[@]} -gt 0 ]; then
+        printf '%s\n' "${lines[@]}" | sort
+    fi
+    if [ "$total_issues" -eq 1 ]; then
+        echo "Total: $total_issues issue"
+    else
+        echo "Total: $total_issues issues"
+    fi
+    if [ $total_issues -gt 0 ]; then
+        echo "Tip: Run the following to analyze a specific file:"
+        echo "    clang ${a_flags[*]} -o - <srcfile> 2>/dev/null"
+        exit 1
+    else
+        exit 0
+    fi
+fi
+
+####################################################################################################
+# Generate ninja build file
+
 NINJAFILE=$OUTDIR/build.ninja
 
 mkdir -p "$(dirname "$OUTDIR")"
 cat << _END > "$NINJAFILE"
 ninja_required_version = 1.3
-builddir = $OUTDIR
-objdir = \$builddir/obj
 
-cflags = $
-  -std=c11 $
-  -fvisibility=hidden $
-  -Wall -Wextra -Wvla $
-  -Wimplicit-fallthrough $
-  -Wno-missing-field-initializers $
-  -Wno-unused-parameter $
-  ${CFLAGS[@]}
-
-cflags_host = ${CFLAGS_HOST[@]}
-
-cflags_wasm = $
-  --target=wasm32 $
-  --no-standard-libraries $
-  -fvisibility=hidden ${CFLAGS_WASM[@]}
-
+builddir     = $OUTDIR
+objdir       = \$builddir/obj
+cflags       = ${CFLAGS[@]}
+cflags_host  = ${CFLAGS_HOST[@]}
+cflags_wasm  = ${CFLAGS_WASM[@]}
 ldflags_host = ${LDFLAGS_HOST[@]}
-
-ldflags_wasm = $
-  -allow-undefined-file etc/wasm.syms $
-  --no-entry $
-  --gc-sections $
-  --export-dynamic $
-  --import-memory ${LDFLAGS_WASM[@]}
+ldflags_wasm = ${LDFLAGS_WASM[@]}
 
 rule link
   command = $CC \$ldflags_host -o \$out \$in
@@ -356,12 +423,6 @@ _gen_obj_build_rules() {
     echo "$OBJECT"
   done
 }
-
-if [ -n "$TESTING_ENABLED" ]; then
-  SOURCES=( $(find src -name '*.c') )
-else
-  SOURCES=( $(find src -name '*.c' -not -name '*_test.c' -not -name 'test.c') )
-fi
 
 HOST_OBJECTS=( $(_gen_obj_build_rules "host" "" "${SOURCES[@]}") )
 WASM_OBJECTS=( $(_gen_obj_build_rules "wasm" "" "${SOURCES[@]}") )

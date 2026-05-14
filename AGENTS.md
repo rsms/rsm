@@ -58,6 +58,7 @@ Required:
 - `./build.sh -- rsm.wasm` builds wasm products in debug mode
 - `./build.sh -- rms rsm.wasm` builds native and wasm products in debug mode
 - `./build.sh -j1 -- rsm.wasm` builds wasm products in debug mode, without parallelism (useful for debugging build errors)
+- `./build.sh -analyze` run clang static analyzer on source code
 - `./build.sh -help` shows options
 
 ## 5) Documentation

@@ -1664,7 +1664,8 @@ int LZ4_compress_fast_continue (LZ4_stream_t* LZ4_stream,
     }
 
     /* Check overlapping input/dictionary space */
-    {   const char* const sourceEnd = source + inputSize;
+    if (source != NULL && inputSize > 0 && dictEnd != NULL) {
+        const char* const sourceEnd = source + inputSize;
         if ((sourceEnd > (const char*)streamPtr->dictionary) && (sourceEnd < dictEnd)) {
             streamPtr->dictSize = (U32)(dictEnd - sourceEnd);
             if (streamPtr->dictSize > 64 KB) streamPtr->dictSize = 64 KB;
@@ -1751,7 +1752,12 @@ int LZ4_saveDict (LZ4_stream_t* LZ4_dict, char* safeBuffer, int dictSize)
     if ((U32)dictSize > 64 KB) { dictSize = 64 KB; } /* useless to define a dictionary > 64 KB */
     if ((U32)dictSize > dict->dictSize) { dictSize = (int)dict->dictSize; }
 
-    if (safeBuffer == NULL) assert(dictSize == 0);
+    if (safeBuffer == NULL) {
+        assert(dictSize == 0);
+        dict->dictionary = NULL;
+        dict->dictSize = 0;
+        return 0;
+    }
     if (dictSize > 0) {
         const BYTE* const previousDictEnd = dict->dictionary + dict->dictSize;
         assert(dict->dictionary);
@@ -1862,6 +1868,7 @@ LZ4_decompress_unsafe_generic(
                 /* check special case : extDict */
                 if (offset > (size_t)(op - prefixStart)) {
                     /* extDict scenario */
+                    if (dictStart == NULL) return -1;
                     const BYTE* const dictEnd = dictStart + dictSize;
                     const BYTE* extMatch = dictEnd - (offset - (size_t)(op-prefixStart));
                     size_t const extml = (size_t)(dictEnd - extMatch);
@@ -2072,6 +2079,7 @@ LZ4_decompress_generic(
             /* match starting within external dictionary */
             if ((dict==usingExtDict) && (match < lowPrefix)) {
                 assert(dictEnd != NULL);
+                if (unlikely(dictEnd == NULL)) { goto _output_error; }
                 if (unlikely(op+length > oend-LASTLITERALS)) {
                     if (partialDecoding) {
                         DEBUGLOG(7, "partialDecoding: dictionary match, close to dstEnd");
@@ -2257,6 +2265,7 @@ LZ4_decompress_generic(
             /* match starting within external dictionary */
             if ((dict==usingExtDict) && (match < lowPrefix)) {
                 assert(dictEnd != NULL);
+                if (unlikely(dictEnd == NULL)) goto _output_error;
                 if (unlikely(op+length > oend-LASTLITERALS)) {
                     if (partialDecoding) length = MIN(length, (size_t)(oend-op));
                     else goto _output_error;   /* doesn't respect parsing restriction */

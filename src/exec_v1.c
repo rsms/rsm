@@ -125,7 +125,7 @@ enum vmerror {
   VM_E_SHIFT_EXP,
 } RSM_END_ENUM(vmerror)
 
-static void _vmerr(VMPARAMS, vmerror err, u64 a1, u64 a2) {
+static noreturn void _vmerr(VMPARAMS, vmerror err, u64 a1, u64 a2) {
   char buf[2048];
   abuf_t s1 = abuf_make(buf, sizeof(buf)); abuf_t* s = &s1;
   pc--; // undo the increment to make pc point to the violating instruction

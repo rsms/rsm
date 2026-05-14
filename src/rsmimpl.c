@@ -658,7 +658,7 @@ rerr_t init_asmparse();
 bool rsm_init() {
   static bool y = false; if (y) return true; y = true;
   rerr_t err;
-  const char* err_what = "?";
+  const char* err_what;
   #define CHECK_ERR(expr, what) err = (expr); if (err) { err_what = (what); goto error; }
 
   // time
@@ -688,4 +688,3 @@ error:
   log("rsm_init error: %s (%s)", rerr_str(err), err_what);
   return false;
 }
-

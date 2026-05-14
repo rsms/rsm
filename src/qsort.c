@@ -85,14 +85,15 @@ static void cycle(size_t width, unsigned char* ar[], int n)
     return;
   }
 
-  ar[n] = tmp;
   while(width) {
     l = sizeof(tmp) < width ? sizeof(tmp) : width;
-    memcpy(ar[n], ar[0], l);
-    for(i = 0; i < n; i++) {
+    memcpy(tmp, ar[0], l);
+    for(i = 0; i < n - 1; i++) {
       memcpy(ar[i], ar[i + 1], l);
       ar[i] += l;
     }
+    memcpy(ar[n - 1], tmp, l);
+    ar[n - 1] += l;
     width -= l;
   }
 }
@@ -105,6 +106,9 @@ static inline void shl(size_t p[2], int n)
     p[1] = p[0];
     p[0] = 0;
   }
+  if(n == 0) {
+    return;
+  }
   p[1] <<= n;
   p[1] |= p[0] >> (sizeof(size_t) * 8 - n);
   p[0] <<= n;
@@ -116,6 +120,9 @@ static inline void shr(size_t p[2], int n)
     n -= (int)(8 * sizeof(size_t));
     p[0] = p[1];
     p[1] = 0;
+  }
+  if(n == 0) {
+    return;
   }
   p[0] >>= n;
   p[0] |= p[1] << (sizeof(size_t) * 8 - n);
@@ -189,7 +196,7 @@ static void trinkle(unsigned char *head, size_t width, cmpfun cmp, void *arg, si
 }
 
 void rsm_qsort(void *base, size_t nel, size_t width, cmpfun cmp, void* nullable arg) {
-  size_t lp[12*sizeof(size_t)];
+  size_t lp[12*sizeof(size_t)] = {0};
   size_t i, size = width * nel;
   unsigned char *head, *high;
   size_t p[2] = {1, 0};

@@ -17,7 +17,7 @@ TESTING_ENABLED=1
 STRIP=false
 STATIC=false
 DEBUGGABLE=true
-ANALYZE=true
+ANALYZE=false
 J=
 
 while [[ $# -gt 0 ]]; do

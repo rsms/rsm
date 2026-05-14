@@ -719,6 +719,11 @@ static void* nullable slabheap_alloc(rmemalloc_t* a, slabheap_t* sh) {
 
 
 static void slabheap_free(rmemalloc_t* a, slabheap_t* sh, void* ptr) {
+  if UNLIKELY(ptr == NULL) {
+    safecheckf(0, "slabheap_free: invalid NULL pointer");
+    return;
+  }
+
   assertf( !((uintptr)ptr % sh->size), "invalid address %p (slab %zu)", ptr, sh->size);
 
   // fill freed memory with scrub bytes, if enabled
@@ -985,8 +990,9 @@ bool rmem_resize(rmemalloc_t* a, rmem_t* region, usize newsize) {
   trace("resizing %p  %zu -> %zu", region->p, oldsize, newsize);
 
   // FIXME replace this daft "allocate new, copy, free old" code
-  usize alignment =
-    MIN(CEIL_POW2(MIN(newsize, HEAP_ALIGN)), (usize)CEIL_POW2((uintptr)region->p));
+  uintptr oldaddr = (uintptr)region->p;
+  usize oldalign = (usize)(oldaddr & (0 - oldaddr));
+  usize alignment = MIN(CEIL_POW2(MIN(newsize, HEAP_ALIGN)), oldalign);
   rmem_t new_region = rmem_alloc_aligned(a, newsize, alignment);
   if (!new_region.p)
     return false;
@@ -1471,7 +1477,7 @@ static void test_rmem_alloc() {
     memset(expected_data, 0xab, sizeof(expected_data));
 
     // initial allocation
-    m = rmem_alloc(a, SLABHEAP_MIN_SIZE * 2); // 2nd order slab
+    m = rmem_must_alloc(a, SLABHEAP_MIN_SIZE * 2); // 2nd order slab
     memcpy(m.p, expected_data, sizeof(expected_data));
 
     // shrink by 2B: noop (will update size)
@@ -1504,7 +1510,7 @@ static void test_rmem_alloc() {
     memset(expected_data, 0xab, sizeof(expected_data));
 
     // initial allocation (force subheap use, instead of slabs)
-    m = rmem_alloc(a, MAX(SLABHEAP_MAX_SIZE + 1, CHUNK_SIZE*2));
+    m = rmem_must_alloc(a, MAX(SLABHEAP_MAX_SIZE + 1, CHUNK_SIZE*2));
     memcpy(m.p, expected_data, sizeof(expected_data));
 
     // shrink (noop)
@@ -1558,7 +1564,7 @@ static void test_rmem_alloc() {
   tlog("rmem_alloc(800) => " RMEM_FMT, RMEM_FMT_ARGS(p3));
   rmem_free(a, p3);
 
-  p1 = rmem_alloc(a, CHUNK_SIZE*(BEST_FIT_THRESHOLD-2));
+  UNUSED rmem_t p0 = rmem_alloc(a, CHUNK_SIZE*(BEST_FIT_THRESHOLD-2));
   p1 = rmem_alloc(a, CHUNK_SIZE);   // 0-2
   p2 = rmem_alloc(a, CHUNK_SIZE*3); // 2-6
   p3 = rmem_alloc(a, CHUNK_SIZE);   // 6-8

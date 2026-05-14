@@ -1380,7 +1380,6 @@ top:
   p = assertnotnull(m->p);
 
   // check for expired timers
-  u64 now = 0;
   u64 poll_until = 0;
   // TODO: now = p_check_timers(p, &poll_until)
 
@@ -1423,7 +1422,6 @@ top:
     stealresult_t r = m_steal_work(m, inherit_time);
     if (r.t)
       return r.t;
-    now = r.now;
     // Running a timer may have made some task ready, so try again
     if (r.new_work)
       goto top; // retry while loop
@@ -1482,7 +1480,7 @@ top:
     // transitioning from spinning to non-spinning.
     //
     // Note that we cannot use p_check_timers here because it requires an active P.
-    poll_until = s_check_timers(s, nprocs, poll_until);
+    (void)s_check_timers(s, nprocs, poll_until);
   }
 
   // TODO ...

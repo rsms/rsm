@@ -875,7 +875,7 @@ gen_call:
   // generate CALL instruction
   rin_t* in = GARRAY_PUSH_OR_RET(rin_t, &g->iv);
   *in = RSM_MAKE__(rop_CALL); // needed for refnamed to set flags correctly
-  i32 genarg;
+  i32 genarg = 0;
   if (getiargs(g, n, &genarg, 1, 0, RSM_MAX_Au, &in)) {
     *in = RSM_MAKE_Au(rop_CALL, genarg);
   } else {

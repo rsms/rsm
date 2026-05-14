@@ -5,7 +5,7 @@ _err() { echo -e "$0:" "$@" >&2 ; exit 1; }
 
 OUTDIR=
 OUTDIR_DEFAULT=out
-BUILD_MODE=debug  # debug | safe | fast
+BUILD_MODE=debug  # debug | release | yolo
 WATCH=
 WATCH_ADDL_FILES=()
 _WATCHED=
@@ -28,25 +28,25 @@ while [[ $# -gt 0 ]]; do
   esac
   NON_WATCH_ARGS+=( "$1" )
   case "$1" in
-  -safe)   BUILD_MODE=safe; TESTING_ENABLED=; shift ;;
-  -fast)   BUILD_MODE=fast; TESTING_ENABLED=; shift ;;
-  -debug)  BUILD_MODE=debug; TESTING_ENABLED=1; DEBUGGABLE=true; shift ;;
-  -strip)  STRIP=true; DEBUGGABLE=false; shift ;;
-  -static) STATIC=true; shift ;;
-  -out=*)  OUTDIR=${1:5}; shift; continue ;;
-  -j*)     NINJA_ARGS+=( ${1} ); shift; continue ;;
-  -j)      NINJA_ARGS+=( -j${2} ); shift; shift; continue ;;
-  -g)      DEBUGGABLE=true; shift ;;
-  -v)      NINJA_ARGS+=(-v); shift ;;
-  -D*)     [ ${#1} -gt 2 ] || _err "Missing NAME after -D";EXTRA_CFLAGS+=( "$1" ); shift ;;
+  -debug)   BUILD_MODE=debug; TESTING_ENABLED=1; DEBUGGABLE=true; shift ;;
+  -release) BUILD_MODE=release; TESTING_ENABLED=; shift ;;
+  -yolo)    BUILD_MODE=yolo; TESTING_ENABLED=; DEBUGGABLE=false; shift ;;
+  -strip)   STRIP=true; DEBUGGABLE=false; shift ;;
+  -static)  STATIC=true; shift ;;
+  -out=*)   OUTDIR=${1:5}; shift; continue ;;
+  -j*)      NINJA_ARGS+=( ${1} ); shift; continue ;;
+  -j)       NINJA_ARGS+=( -j${2} ); shift; shift; continue ;;
+  -g)       DEBUGGABLE=true; shift ;;
+  -v)       NINJA_ARGS+=(-v); shift ;;
+  -D*)      [ ${#1} -gt 2 ] || _err "Missing NAME after -D";EXTRA_CFLAGS+=( "$1" ); shift ;;
   -h|-help|--help) cat << _END
 usage: $0 [options] [--] [<target> ...]
 options:
-  -safe          Build optimized product with some assertions enabled (default)
-  -fast          Build optimized product without any assertions
-  -debug         Build debug product
+  -debug         Build debug product (default)
+  -release       Build optimized product with some assertions enabled (safechecks)
+  -yolo          Build optimized product that's as fast as possible (no assertions)
   -strip         Do not include debug data
-  -g             Make the build debuggable (debug symbols + basic opt only)
+  -g             Make the build debuggable (default for -debug and -release)
   -w             Rebuild as sources change
   -wf=<file>     Watch <file> for changes (can be provided multiple times)
   -run=<cmd>     Run <cmd> after successful build
@@ -182,8 +182,8 @@ fi
 
 # flags for all targets (in addition to unconditional flags in ninja template)
 CFLAGS=( $CFLAGS $EXTRA_CFLAGS )  # from env
-[ "$BUILD_MODE" = "safe" ] && CFLAGS+=( -DRSM_SAFE )
-[ -n "$TESTING_ENABLED" ]  && CFLAGS+=( -DRSM_TESTING_ENABLED )
+[ "$BUILD_MODE" = "release" ] && CFLAGS+=( -DRSM_SAFE )
+[ -n "$TESTING_ENABLED" ]     && CFLAGS+=( -DRSM_TESTING_ENABLED )
 
 # target-specific flags (in addition to unconditional flags in ninja template)
 CFLAGS_WASM=( -DRSM_NO_LIBC )
@@ -200,7 +200,7 @@ else
   CFLAGS_WASM+=( -Oz )
   if ! $DEBUGGABLE; then
     CFLAGS_HOST+=( -fomit-frame-pointer )
-    LDFLAGS_HOST+=( -dead_strip )
+    # LDFLAGS_HOST+=( -dead_strip )
     LDFLAGS_WASM+=( -O2 --lto-O3 --no-lto-legacy-pass-manager )
     # Link Time Optimization
     if $CC_IS_CLANG; then

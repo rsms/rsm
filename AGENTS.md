@@ -51,7 +51,11 @@ Required:
 
 ## 4) Building and testing
 
+- `./test.sh` build in debug mode and run all tests
+- `./test.sh -release` build in release mode (with safechecks) and run all tests
 - `./build.sh` builds rsm native in debug mode
-- `./build.sh -- rsm.wasm` builds rsm wasm in debug mode
-- `./build.sh -j1 -- rsm.wasm` builds rsm wasm in debug mode, without parallelism (useful for debugging build errors)
+- `./build.sh -release` builds rsm native in release mode (with safechecks)
+- `./build.sh -- rsm.wasm` builds wasm products in debug mode
+- `./build.sh -- rms rsm.wasm` builds native and wasm products in debug mode
+- `./build.sh -j1 -- rsm.wasm` builds wasm products in debug mode, without parallelism (useful for debugging build errors)
 - `./build.sh -help` shows options

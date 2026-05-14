@@ -1,11 +1,14 @@
 #!/bin/sh
-set -e
+set -euo pipefail
 cd "$(dirname "$0")"
 
-OUTDIR=out/test-$(uname -s)-$(uname -m)
+OUTDIR=out/test
 RSM=$OUTDIR/rsm
 
-./build.sh -out="$OUTDIR" "$@"
+_x() { echo "$@"; "$@"; }
+
+rm -rf "$OUTDIR"
+_x ./build.sh -out="$OUTDIR" "$@" -- rsm rsm.wasm
 
 for srcfile in examples/*.rsm; do
   echo "——————————————————————————————————————————————————————————————————————————"
@@ -21,10 +24,11 @@ for srcfile in examples/*.rsm; do
 
   ROM=$OUTDIR/test_${FILENAME%*.rsm}.rom
 
-  echo "rsm -o '$ROM' '$srcfile'"
-  $RSM -o "$ROM" "$srcfile"
+  _x $RSM -o "$ROM" "$srcfile"
 
   # Note: null stdin to avoid read on stdin blocking the test script
-  echo "rsm -R0=3 '$ROM'"
-  $RSM -R0=3 "$ROM" </dev/null
+  _x $RSM -R0=3 "$ROM" </dev/null
 done
+
+echo "——————————————————————————————————————————————————————————————————————————"
+_x node test-wasm.mjs

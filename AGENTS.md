@@ -59,3 +59,12 @@ Required:
 - `./build.sh -- rms rsm.wasm` builds native and wasm products in debug mode
 - `./build.sh -j1 -- rsm.wasm` builds wasm products in debug mode, without parallelism (useful for debugging build errors)
 - `./build.sh -help` shows options
+
+## 5) Documentation
+
+- `etc/website/isa/index.md` describes the virtual instruction set architecture
+- `etc/website/isa/op.*.md` describes an ISA operation
+- `etc/website/ops.json` lists all ISA operations (generated from `src/rsm.h`)
+- `etc/website/assembler/index.md` describes the assembly language
+- `etc/website/virtual-memory/index.md` describes virtual memory
+- Some data in the website is generated from `src/rsm.h` by `etc/website/_config.js` which is run by `etc/website/build.sh`

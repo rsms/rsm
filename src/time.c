@@ -46,7 +46,7 @@ WASM_IMPORT rerr_t unixtime(i64* sec, u64* nsec);
   WASM_IMPORT double wasm_nanotime(void);
 #endif
 
-#if !defined(CLOCK_MONOTONIC)
+#if !defined(CLOCK_MONOTONIC) && !defined(RSM_NO_LIBC)
   #error CLOCK_MONOTONIC not defined
 #endif
 
@@ -75,8 +75,9 @@ u64 nanotime(void) {
 
 // U64_MAX = 584.9 years (18446744073709551615/1000000000/60/60/24/365)
 u64 rsm_nanosleep(u64 nsec) {
-  #ifdef CO_NO_LIBC
-    #warning TODO non-libc microsleep
+  #ifdef RSM_NO_LIBC
+    u64 start = nanotime();
+    while (nanotime() - start < nsec) {}
   #else
     struct timespec ts = {
       .tv_sec = nsec / 1000000000llu,

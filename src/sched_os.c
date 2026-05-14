@@ -11,12 +11,15 @@
   #include <errno.h>
 // #elif !__STDC_NO_THREADS__
 //   #include <threads.h>
-#else
-  #error TODO
 #endif
 
 
 uintptr m_spawn_osthread(M* m, rerr_t(*mainf)(M*)) {
+#if defined(RSM_NO_LIBC)
+  (void)m;
+  (void)mainf;
+  return 0;
+#else
   pthread_attr_t attr;
   int err = pthread_attr_init(&attr);
   if (err != 0) {
@@ -68,4 +71,5 @@ uintptr m_spawn_osthread(M* m, rerr_t(*mainf)(M*)) {
 error:
   pthread_attr_destroy(&attr);
   return 0;
+#endif
 }

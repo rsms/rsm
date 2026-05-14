@@ -8,10 +8,11 @@ const txt_enc = new TextEncoder("utf-8")
 const txt_dec = new TextDecoder("utf-8")
 
 class ROM {
-  constructor(rsm, filename, imgptr, imgsize) {
+  constructor(rsm, filename, imgptr, imgsize, imgmemsize) {
     this.rsm = rsm // :RSMInstance
     this.imgptr = imgptr
     this.imgsize = imgsize
+    this.imgmemsize = imgmemsize || imgsize
     this.filename = filename
   }
 
@@ -19,9 +20,10 @@ class ROM {
     if (this.imgptr == 0)
       return
     //console.log(`ROM@${this.imgptr.toString(16)}.dispose`)
-    this.rsm.memfree(this.imgptr, this.imgsize)
+    this.rsm.memfree(this.imgptr, this.imgmemsize)
     this.imgptr = 0
     this.imgsize = 0
+    this.imgmemsize = 0
     this.rsm = null
   }
 
@@ -146,7 +148,7 @@ class RSMInstance {
     let imgsize = buf.length
     let imgptr = this.memalloc(imgsize)
     this.mem_u8.set(buf, imgptr)
-    return new ROM(this, filename, imgptr, imgsize)
+    return new ROM(this, filename, imgptr, imgsize, imgsize)
   }
 
   // assemble(source :string|Uint8Array, filename? :string) :ROM
@@ -162,15 +164,21 @@ class RSMInstance {
     let [tmpbufp, tmpbufcap] = this.tmpbuf(srcbuf.length)
     let tmpbuflen = this.copyToWasm(tmpbufp, tmpbufcap, srcbuf)
 
-    // struct cresult { rromimg* imgptr; usize imgsize; const char* errmsg; }
+    // struct cresult {
+    //   rromimg_t* rom_img;
+    //   usize      rom_imgsize;
+    //   usize      rom_imgmemsize;
+    //   const char* nullable errmsg;
+    // }
     let p = this.api.wcompile(this.srcnamep, tmpbufp, tmpbuflen)
     const imgptr = this.uintptr(p) ; p += PTRSIZE
     const imgsize = this.usize(p) ; p += ISIZE
+    const imgmemsize = this.usize(p) ; p += ISIZE
     const errmsgptr = this.uintptr(p)
     if (errmsgptr)
       throw new Error(this.cstr(errmsgptr))
 
-    return new ROM(this, filename, imgptr, imgsize)
+    return new ROM(this, filename, imgptr, imgsize, imgmemsize)
   }
 
   // fmtprog(rom :ROM) :string

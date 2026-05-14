@@ -113,19 +113,21 @@ class RSMInstance {
     let [tmpbufp, tmpbufcap] = this.tmpbuf(srcbuf.length)
     let tmpbuflen = this.copyToWasm(tmpbufp, tmpbufcap, srcbuf)
 
-    // rptr : struct compile_result {
-    //   usize   c;
-    //   rinstr* v;
+    // rptr : struct cresult {
+    //   rromimg_t* rom_img;
+    //   usize      rom_imgsize;
+    //   usize      rom_imgmemsize;
     //   const char* nullable errmsg;
     // }
     const rptr = this.instance.exports.wcompile(this.srcnamep, tmpbufp, tmpbuflen)
-    const ilen = this.u32(rptr)
-    const iptr = this.u32(rptr + ISIZE)
-    const errmsgp = this.u32(rptr + ISIZE*2)
+    const imgptr = this.u32(rptr)
+    const imgsize = this.u32(rptr + ISIZE)
+    const imgmemsize = this.u32(rptr + ISIZE*2)
+    const errmsgp = this.u32(rptr + ISIZE*3)
     if (errmsgp)
       throw new Error(this.cstr(errmsgp))
 
-    return { filename, length: ilen, [PTR]: iptr }
+    return { filename, length: imgsize, imgmemsize, [PTR]: imgptr }
   }
 
   vmfmt(vmcode) {
@@ -155,8 +157,9 @@ class RSMInstance {
   vmfree(vmcode) {
     if (vmcode[PTR] == 0)
       return
-    this.memfree(vmcode[PTR], vmcode.length * 4)
+    this.memfree(vmcode[PTR], vmcode.imgmemsize)
     vmcode.length = 0
+    vmcode.imgmemsize = 0
     vmcode[PTR] = 0
   }
 }

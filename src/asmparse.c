@@ -752,8 +752,11 @@ static bool nsigned(rnode_t* n) {
 }
 
 void rasm_free_rnode(rasm_t* a, rnode_t* n) {
-  for (rnode_t* cn = n->children.head; cn; cn = cn->next)
+  for (rnode_t* cn = n->children.head; cn;) {
+    rnode_t* next = cn->next;
     rasm_free_rnode(a, cn);
+    cn = next;
+  }
   rmem_free(a->memalloc, RMEM(n, sizeof(rnode_t)));
 }
 

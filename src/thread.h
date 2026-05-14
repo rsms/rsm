@@ -5,20 +5,28 @@
 // select thread API
 #if defined(WIN32)
   #warning TODO
+#elif defined(RSM_NO_LIBC)
+  #define RSM_THREAD_NOLIBC
 #elif __STDC_NO_THREADS__
-  #if defined(RSM_NO_LIBC)
-    #warning TODO
-  #else
-    #define RSM_THREAD_PTHREAD
-    #include <pthread.h>
-  #endif
+  #define RSM_THREAD_PTHREAD
+  #include <pthread.h>
 #else
   #define RSM_THREAD_C11
   #include <threads.h>
 #endif
 
+// atomics
+#if !defined(__STDC_NO_ATOMICS__)
+  #include <stdatomic.h>
+#else
+  #error "TODO: STDC_NO_ATOMICS"
+#endif
+
 // select semaphore API
-#if defined(WIN32) || defined(__MACH__)
+#if defined(RSM_NO_LIBC)
+  typedef _Atomic(u32) sema_t;
+  #define RSM_SEMAPHORE_NOLIBC
+#elif defined(WIN32) || defined(__MACH__)
   typedef uintptr sema_t;
   #define RSM_SEMAPHORE_PTR
 #elif defined(__unix__)
@@ -28,57 +36,50 @@
   #warning TODO
 #endif
 
-#if !defined(__STDC_NO_ATOMICS__)
-  #include <stdatomic.h>
+#define AtomicLoad(x, order) atomic_load_explicit((x), (order))
+#define AtomicLoadAcq(x)     atomic_load_explicit((x), memory_order_acquire)
 
-  #define AtomicLoad(x, order) atomic_load_explicit((x), (order))
-  #define AtomicLoadAcq(x)     atomic_load_explicit((x), memory_order_acquire)
+#define AtomicStore(x, v, order) atomic_store_explicit((x), (v), (order))
+#define AtomicStoreRel(x, v)     atomic_store_explicit((x), (v), memory_order_release)
 
-  #define AtomicStore(x, v, order) atomic_store_explicit((x), (v), (order))
-  #define AtomicStoreRel(x, v)     atomic_store_explicit((x), (v), memory_order_release)
+// note: these operations return the previous value; _before_ applying the operation
+#define AtomicAdd(x, n, order) atomic_fetch_add_explicit((x), (n), (order))
+#define AtomicSub(x, n, order) atomic_fetch_sub_explicit((x), (n), (order))
+#define AtomicOr(x, n, order)  atomic_fetch_or_explicit((x), (n), (order))
+#define AtomicAnd(x, n, order) atomic_fetch_and_explicit((x), (n), (order))
+#define AtomicXor(x, n, order) atomic_fetch_xor_explicit((x), (n), (order))
 
-  // note: these operations return the previous value; _before_ applying the operation
-  #define AtomicAdd(x, n, order) atomic_fetch_add_explicit((x), (n), (order))
-  #define AtomicSub(x, n, order) atomic_fetch_sub_explicit((x), (n), (order))
-  #define AtomicOr(x, n, order)  atomic_fetch_or_explicit((x), (n), (order))
-  #define AtomicAnd(x, n, order) atomic_fetch_and_explicit((x), (n), (order))
-  #define AtomicXor(x, n, order) atomic_fetch_xor_explicit((x), (n), (order))
+// Compare And Swap
+#define AtomicCAS(p, oldval, newval, order_succ, order_fail) \
+  atomic_compare_exchange_strong_explicit( \
+    (p), (oldval), (newval), (order_succ), (order_fail))
 
-  // Compare And Swap
-  #define AtomicCAS(p, oldval, newval, order_succ, order_fail) \
-    atomic_compare_exchange_strong_explicit( \
-      (p), (oldval), (newval), (order_succ), (order_fail))
+#define AtomicCASRel(p, oldval, newval) \
+  AtomicCAS((p), (oldval), (newval), memory_order_release, memory_order_relaxed)
 
-  #define AtomicCASRel(p, oldval, newval) \
-    AtomicCAS((p), (oldval), (newval), memory_order_release, memory_order_relaxed)
+#define AtomicCASAcqRel(p, oldval, newval) \
+  AtomicCAS((p), (oldval), (newval), memory_order_acq_rel, memory_order_relaxed)
 
-  #define AtomicCASAcqRel(p, oldval, newval) \
-    AtomicCAS((p), (oldval), (newval), memory_order_acq_rel, memory_order_relaxed)
+// The weak forms of AtomicCAS is allowed to fail spuriously, that is,
+// act as if *obj != *expected even if they are equal. When a compare-and-exchange
+// is in a loop, the weak version will yield better performance on some platforms.
+#define AtomicCASWeak(p, oldval, newval, order_succ, order_fail) \
+  atomic_compare_exchange_weak_explicit( \
+    (p), (oldval), (newval), (order_succ), (order_fail))
 
-  // The weak forms of AtomicCAS is allowed to fail spuriously, that is,
-  // act as if *obj != *expected even if they are equal. When a compare-and-exchange
-  // is in a loop, the weak version will yield better performance on some platforms.
-  #define AtomicCASWeak(p, oldval, newval, order_succ, order_fail) \
-    atomic_compare_exchange_weak_explicit( \
-      (p), (oldval), (newval), (order_succ), (order_fail))
+#define AtomicCASRelaxed(p, oldval, newval) \
+  AtomicCASWeak((p), (oldval), (newval), memory_order_relaxed, memory_order_relaxed)
 
-  #define AtomicCASRelaxed(p, oldval, newval) \
-    AtomicCASWeak((p), (oldval), (newval), memory_order_relaxed, memory_order_relaxed)
+#define AtomicCASWeakAcq(p, oldval, newval) \
+  AtomicCASWeak((p), (oldval), (newval), memory_order_acquire, memory_order_relaxed)
 
-  #define AtomicCASWeakAcq(p, oldval, newval) \
-    AtomicCASWeak((p), (oldval), (newval), memory_order_acquire, memory_order_relaxed)
+#define AtomicCASWeakRelAcq(p, oldval, newval) \
+  AtomicCASWeak((p), (oldval), (newval), memory_order_release, memory_order_acquire)
 
-  #define AtomicCASWeakRelAcq(p, oldval, newval) \
-    AtomicCASWeak((p), (oldval), (newval), memory_order_release, memory_order_acquire)
-
-  // T AtomicExchange(volatile T* p, T desired, memory_order)
-  // Returns the previous value
-  #define AtomicExchange(p, desired_next_value, order) \
-    atomic_exchange_explicit((p), (desired_next_value), (order))
-
-#else
-  #error "TODO: STDC_NO_ATOMICS"
-#endif
+// T AtomicExchange(volatile T* p, T desired, memory_order)
+// Returns the previous value
+#define AtomicExchange(p, desired_next_value, order) \
+  atomic_exchange_explicit((p), (desired_next_value), (order))
 
 
 // cpu_yield() yields for other work on a CPU core
@@ -159,7 +160,7 @@ static bool rwmutex_isrlocked(rwmutex_t*); // test if locked for reading (not wr
 // sema_t is a (thin layer over the OS's) semaphore implementation
 #ifdef RSM_SEMAPHORE_POSIX
   typedef sem_t sema_t;
-#else
+#elif !defined(RSM_SEMAPHORE_NOLIBC)
   typedef uintptr sema_t;
 #endif
 rerr_t sema_init(sema_t*, u32 initcount);
@@ -183,6 +184,31 @@ bool sema_wait(sema_t*, i64 timeout_nsec);
   #define _mutex_unlock(mu)  (pthread_mutex_unlock(&(mu)->m) == 0)
 #endif
 
+inline static bool mutex_islocked(mutex_t* mu) {
+  return AtomicLoadAcq(&mu->w) > 0;
+}
+
+#ifdef RSM_THREAD_NOLIBC
+
+inline static void mutex_lock(mutex_t* mu) {
+  u32 w = 0;
+  while (!AtomicCASWeakAcq(&mu->w, &w, 1)) {
+    w = 0;
+    thread_yield();
+  }
+}
+
+inline static void mutex_unlock(mutex_t* mu) {
+  safecheckxf(AtomicExchange(&mu->w, 0, memory_order_release) == 1, "mutex_unlock");
+}
+
+inline static bool mutex_trylock(mutex_t* mu) {
+  u32 w = 0;
+  return AtomicCAS(&mu->w, &w, 1, memory_order_seq_cst, memory_order_relaxed);
+}
+
+#else
+
 inline static void mutex_lock(mutex_t* mu) {
   if UNLIKELY(AtomicAdd(&mu->w, 1, memory_order_seq_cst))
     safecheckxf(_mutex_lock(mu), "mutex_lock");
@@ -198,9 +224,7 @@ inline static bool mutex_trylock(mutex_t* mu) {
   return AtomicCAS(&mu->w, &w, 1, memory_order_seq_cst, memory_order_relaxed);
 }
 
-inline static bool mutex_islocked(mutex_t* mu) {
-  return AtomicLoadAcq(&mu->w) > 0;
-}
+#endif
 
 inline static bool rwmutex_isrlocked(rwmutex_t* mu) {
   return AtomicLoadAcq(&mu->m.r) > 0;

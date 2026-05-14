@@ -257,7 +257,7 @@ void rsm_unloadfile(rmem_t m) {
 }
 
 
-#if DEBUG
+#if DEBUG && !defined(RSM_NO_LIBC)
   UNUSED void _dlog_asm(rmemalloc_t* ma, const rin_t* iv, usize icount) {
     rmem_t m = rmem_must_alloc(ma, 4096);
     rfmtflag_t fl = isatty(1) ? RSM_FMT_COLOR : 0;

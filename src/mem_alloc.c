@@ -231,7 +231,7 @@ static_assert(sizeof(subheap_t) <= PAGE_SIZE, "");
 #endif
 
 
-#if DEBUG
+#if DEBUG && !defined(RSM_NO_LIBC)
   UNUSED static void heap_debug_dump_state(
     heap_t* h, void* nullable highlight_p, usize highlight_size)
   {
@@ -294,7 +294,7 @@ static_assert(sizeof(subheap_t) <= PAGE_SIZE, "");
       (uintptr)h->chunks + (h->chunk_cap * CHUNK_SIZE), // end address
       h->chunk_cap);
   }
-#endif // DEBUG
+#endif // DEBUG && !defined(RSM_NO_LIBC)
 
 
 // heap_init initializes heap h with memory at p of size bytes
@@ -555,7 +555,7 @@ static bool rmem_add_subheap(rmemalloc_t* a, void* storage, usize size) {
 }
 
 
-#if DEBUG
+#if DEBUG && !defined(RSM_NO_LIBC)
   UNUSED static void rmem_debug_dump_state(
     rmemalloc_t* a, void* nullable highlight_p, usize highlight_size)
   {
@@ -1594,4 +1594,3 @@ rerr_t init_rmem() {
   // currently nothing to initialize
   return 0;
 }
-

@@ -44,6 +44,9 @@ extern "C" {
   #include <stddef.h>   /* size_t */
 #else
   typedef unsigned long size_t;
+  #ifndef NULL
+    #define NULL ((void*)0)
+  #endif
 #endif
 
 //——————————————————————————————————————————————————————————————————————————————————

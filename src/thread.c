@@ -2,7 +2,7 @@
 #include "thread.h"
 #include "hash.h"
 
-#ifndef RSM_SEMAPHORE_POSIX
+#if !defined(RSM_SEMAPHORE_POSIX) && !defined(RSM_SEMAPHORE_NOLIBC)
   #if defined(WIN32)
     #include <windows.h>
   #elif defined(__MACH__)
@@ -58,8 +58,23 @@ void mutex_dispose(mutex_t* mu) {
 }
 
 //———————————————————————————————————————————————————————————————————————————————————
-#elif !defined(RSM_THREAD_C11)
-  #error TODO implementation
+#elif defined(RSM_THREAD_NOLIBC)
+
+rerr_t mutex_init(mutex_t* mu) {
+  mu->w = 0;
+  return 0;
+}
+
+void mutex_dispose(mutex_t* mu) {
+  #if DEBUG
+  if (mutex_islocked(mu))
+    dlog("warning: mutex_dispose called on locked mutex");
+  #endif
+}
+
+//———————————————————————————————————————————————————————————————————————————————————
+#else
+  #error Unsupported thread API
 #endif
 
 //———————————————————————————————————————————————————————————————————————————————————
@@ -168,7 +183,41 @@ void rwmutex_unlock(rwmutex_t* m) {
 //———————————————————————————————————————————————————————————————————————————————————
 // sema_t
 //———————————————————————————————————————————————————————————————————————————————————
-#if defined(RSM_SEMAPHORE_POSIX)
+#if defined(RSM_SEMAPHORE_NOLIBC)
+
+rerr_t sema_init(sema_t* sp, u32 initcount) {
+  *sp = initcount;
+  return 0;
+}
+
+void sema_dispose(sema_t* sp) {
+  (void)sp;
+}
+
+bool sema_wait(sema_t* sp, i64 timeout_nsec) {
+  u64 start = 0;
+  if (timeout_nsec > 0)
+    start = nanotime();
+
+  while (1) {
+    u32 count = AtomicLoadAcq(sp);
+    if (count > 0 && AtomicCASWeakAcq(sp, &count, count - 1))
+      return true;
+    if (timeout_nsec == 0)
+      return false;
+    if (timeout_nsec > 0 && nanotime() - start >= (u64)timeout_nsec)
+      return false;
+    thread_yield();
+  }
+}
+
+void sema_signal(sema_t* sp, u32 count) {
+  assert(count > 0);
+  AtomicAdd(sp, count, memory_order_release);
+}
+
+//———————————————————————————————————————————————————————————————————————————————————
+#elif defined(RSM_SEMAPHORE_POSIX)
 
 rerr_t sema_init(sema_t* sp, u32 initcount) {
   int err = sem_init((sem_t*)sp, 0, initcount);

@@ -12,7 +12,7 @@
 extern u8 __heap_base, __data_end; // symbols provided by wasm-ld
 
 // WASM instance state
-static rmem  mem;                    // the one memory allocator, owning the wasm heap
+static rmemalloc_t* mem;             // the one memory allocator, owning the wasm heap
 static u64   iregs[RSM_NREGS] = {0}; // register state
 static char* tmpbuf;                 // for temporary formatting etc
 static usize tmpbufcap;
@@ -43,15 +43,17 @@ isize read(int fd, void* buf, usize nbyte) {
 
 
 // memory allocator interface exported to WASM host
-WASM_EXPORT void* wmalloc(usize nbyte) { return rmem_alloc(mem, nbyte); }
+WASM_EXPORT void* wmalloc(usize nbyte) { return rmem_alloc(mem, nbyte).p; }
 WASM_EXPORT void* wmresize(void* p, usize newsize, usize oldsize) {
-  return rmem_resize(mem, p, newsize, oldsize); }
-WASM_EXPORT void wmfree(void* p, usize size) { return rmem_free(mem, p, size); }
+  rmem_t m = RMEM(p, oldsize);
+  return rmem_resize(mem, &m, newsize) ? m.p : NULL;
+}
+WASM_EXPORT void wmfree(void* p, usize size) { return rmem_free(mem, RMEM(p, size)); }
 
 
 // winit is called by rsm.js to initialize the WASM instance state
 WASM_EXPORT bool winit(usize memsize) {
-  void* heap = &__heap_base;
+  u8* heap = &__heap_base;
   usize heapsize = (memsize < (usize)heap) ? 0 : memsize - (usize)heap;
 
   #if DEBUG
@@ -59,19 +61,21 @@ WASM_EXPORT bool winit(usize memsize) {
   char tmpbufstk[512];
   tmpbufcap = sizeof(tmpbufstk);
   tmpbuf = tmpbufstk;
-  void* stackbase = &__data_end;
+  u8* stackbase = &__data_end;
   log("data: %zu B, stack: %p-%p (%zu B), heap %p (%zu B)",
     (usize)stackbase, stackbase, heap, (usize)(heap - stackbase), heap, heapsize);
   #endif
 
   // first chunk of heap used for tmpbuf
   tmpbufcap = (heapsize > 4096*4) ? 4096 : 512;
-  tmpbuf = heap;
+  tmpbuf = (char*)heap;
   heap += tmpbufcap;
   heapsize -= tmpbufcap;
 
   // rest of heap is owned by our one allocator
-  mem = rmem_mkbufalloc(heap, heapsize);
+  mem = rmem_allocator_create_buf(NULL, heap, heapsize);
+  if (!mem)
+    return false;
 
   // initialize RSM library
   return rsm_init();
@@ -84,21 +88,22 @@ WASM_EXPORT bool winit(usize memsize) {
 
 struct { // compilation result
   // IF THIS CHANGES, UPDATE rsm.js
-  rromimg*             rom_img;
+  rromimg_t*           rom_img;
   usize                rom_imgsize;
+  usize                rom_imgmemsize;
   const char* nullable errmsg;
 } cresult;
 
 
-static bool wdiaghandler(const rdiag* d, void* _) {
+static bool wdiaghandler(const rdiag_t* d, void* _) {
   cresult.errmsg = d->msg;
   return d->code != 1; // stop on error
 }
 
 
 WASM_EXPORT void* wcompile(const char* srcname, const char* srcdata, usize srclen) {
-  rasm a = {
-    .mem = mem,
+  rasm_t a = {
+    .memalloc = mem,
     .diaghandler = wdiaghandler,
     .srcname = srcname,
     .srcdata = srcdata,
@@ -108,12 +113,13 @@ WASM_EXPORT void* wcompile(const char* srcname, const char* srcdata, usize srcle
   // reset result data
   cresult.errmsg = NULL;
   if (cresult.rom_img)
-    rmem_free(mem, cresult.rom_img, cresult.rom_imgsize);
+    rmem_free(mem, RMEM(cresult.rom_img, cresult.rom_imgmemsize));
   cresult.rom_img = NULL;
   cresult.rom_imgsize = 0;
+  cresult.rom_imgmemsize = 0;
 
   // parse assembly source
-  rnode* mod = rasm_parse(&a);
+  rnode_t* mod = rasm_parse(&a);
   if UNLIKELY(mod == NULL) {
     cresult.errmsg = "failed to allocate memory for parser";
     return &cresult;
@@ -122,8 +128,8 @@ WASM_EXPORT void* wcompile(const char* srcname, const char* srcdata, usize srcle
     goto end;
 
   // build ROM
-  rrom rom = {0};
-  rerr_t err = rasm_gen(&a, mod, mem, &rom);
+  rrom_t rom = {0};
+  rerr_t err = rasm_gen(&a, mod, &rom);
   if (err) {
     if (cresult.errmsg == NULL)
       cresult.errmsg = rerr_str(err);
@@ -132,6 +138,7 @@ WASM_EXPORT void* wcompile(const char* srcname, const char* srcdata, usize srcle
 
   cresult.rom_img = rom.img;
   cresult.rom_imgsize = rom.imgsize;
+  cresult.rom_imgmemsize = rom.imgmemsize;
 
 end:
   rasm_free_rnode(&a, mod);
@@ -143,35 +150,68 @@ end:
 //———————————————————————————————————————————————————————————————————————————————————
 
 
-WASM_EXPORT isize wfmtprog(char* buf, usize bufcap, rromimg* rom_img, usize rom_imgsize) {
-  // WASM_EXPORT usize wfmtprog(char* buf, usize bufcap, rinstr* nullable ip, u32 ilen)
-  if (!rom_img || rom_imgsize == 0)
-    return 0;
-  rrom rom = { .img=rom_img, .imgsize=rom_imgsize };
-  rerr_t err = rsm_loadrom(&rom);
-  if (err)
-    return -1;
-  return rsm_fmtprog(buf, bufcap, rom.code, rom.codelen, /*rfmtflag*/0);
+static rerr_t wloadrom(rrom_t* rom, rmem_t* loadmem) {
+  *loadmem = RMEM(NULL, 0);
+  if ((rom->img->flags & RROM_LZ4) != 0) {
+    usize dstsize = rromimg_loadsize(rom->img, rom->imgsize);
+    if (dstsize == USIZE_MAX)
+      return rerr_invalid;
+    *loadmem = rmem_alloc_aligned(mem, dstsize, RSM_ROM_ALIGN);
+    if (loadmem->p == NULL)
+      return rerr_nomem;
+  }
+  rerr_t err = rsm_loadrom(rom, *loadmem);
+  if (err && loadmem->p) {
+    rmem_free(mem, *loadmem);
+    *loadmem = RMEM(NULL, 0);
+  }
+  return err;
 }
 
 
-WASM_EXPORT rerr_t wvmexec(u64* iregs, rromimg* rom_img, usize rom_imgsize) {
+WASM_EXPORT isize wfmtprog(char* buf, usize bufcap, rromimg_t* rom_img, usize rom_imgsize) {
+  // WASM_EXPORT usize wfmtprog(char* buf, usize bufcap, rinstr* nullable ip, u32 ilen)
+  if (!rom_img || rom_imgsize == 0)
+    return 0;
+  rrom_t rom = { .img=rom_img, .imgsize=rom_imgsize };
+  rmem_t loadmem;
+  rerr_t err = wloadrom(&rom, &loadmem);
+  if (err)
+    return -1;
+  isize n = (isize)rsm_fmtprog(buf, bufcap, rom.code, rom.codelen, /*rfmtflag*/0);
+  if (loadmem.p)
+    rmem_free(mem, loadmem);
+  return n;
+}
+
+
+WASM_EXPORT rerr_t wvmexec(u64* iregs, rromimg_t* rom_img, usize rom_imgsize) {
   // allocate instance memory
   static usize memsize = 1024*1024;
-  void* membase = rmem_alloc(mem, memsize);
-  if (!membase)
+  rmem_t vmmem = rmem_alloc(mem, memsize);
+  if (!vmmem.p)
     return rerr_nomem;
 
   // load ROM
-  rrom rom = { .img=rom_img, .imgsize=rom_imgsize };
-  rerr_t err = rsm_loadrom(&rom);
+  rrom_t rom = { .img=rom_img, .imgsize=rom_imgsize };
+  rmem_t loadmem;
+  rerr_t err = wloadrom(&rom, &loadmem);
 
   // run
-  if (!err)
-    err = rsm_vmexec(&rom, iregs, membase, memsize);
+  if (!err) {
+    rvm_t vm = {
+      .rambase = vmmem.p,
+      .ramsize = vmmem.size,
+    };
+    memcpy(vm.iregs, iregs, sizeof(vm.iregs));
+    err = rsm_vmexec(&vm, &rom, mem);
+    memcpy(iregs, vm.iregs, sizeof(vm.iregs));
+  }
 
   // free instance memory
-  rmem_free(mem, membase, memsize);
+  if (loadmem.p)
+    rmem_free(mem, loadmem);
+  rmem_free(mem, vmmem);
   return err;
 }
 

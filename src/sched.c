@@ -1728,7 +1728,11 @@ rerr_t rsched_init(rsched_t* s, rmachine_t* machine) {
   TRACE_SET_CURRENT_M(&s->m0);
 
   // create processors
-  u32 nprocs = 2;
+  #ifdef RSM_NO_LIBC
+    u32 nprocs = 1;
+  #else
+    u32 nprocs = 2;
+  #endif
   assertf(nprocs > 0 && nprocs <= S_MAXPROCS, "%u", nprocs);
   s->nprocs = nprocs;
   trace3("s.nprocs=%u", nprocs);
@@ -2012,4 +2016,3 @@ end:
   rmm_freepages(s->machine->mm, basemem.p, basemem.size/PAGE_SIZE);
   return err;
 }
-

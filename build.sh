@@ -5,7 +5,7 @@ _err() { echo -e "$0:" "$@" >&2 ; exit 1; }
 
 OUTDIR=
 OUTDIR_DEFAULT=out
-BUILD_MODE=safe  # debug | safe | fast
+BUILD_MODE=debug  # debug | safe | fast
 WATCH=
 WATCH_ADDL_FILES=()
 _WATCHED=
@@ -13,10 +13,11 @@ RUN=
 NINJA_ARGS=()
 NON_WATCH_ARGS=()
 EXTRA_CFLAGS=()
-TESTING_ENABLED=
+TESTING_ENABLED=1
 STRIP=false
 STATIC=false
-DEBUGGABLE=false
+DEBUGGABLE=true
+J=
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -33,6 +34,8 @@ while [[ $# -gt 0 ]]; do
   -strip)  STRIP=true; DEBUGGABLE=false; shift ;;
   -static) STATIC=true; shift ;;
   -out=*)  OUTDIR=${1:5}; shift; continue ;;
+  -j*)     NINJA_ARGS+=( ${1} ); shift; continue ;;
+  -j)      NINJA_ARGS+=( -j${2} ); shift; shift; continue ;;
   -g)      DEBUGGABLE=true; shift ;;
   -v)      NINJA_ARGS+=(-v); shift ;;
   -D*)     [ ${#1} -gt 2 ] || _err "Missing NAME after -D";EXTRA_CFLAGS+=( "$1" ); shift ;;
@@ -239,6 +242,7 @@ if $CC_IS_CLANG; then
     -Werror=implicit-function-declaration \
     -Werror=incompatible-pointer-types \
     -Werror=format-insufficient-args \
+    -Wno-nullability-completeness \
   )
 elif $CC_IS_GCC; then
   CFLAGS+=(
